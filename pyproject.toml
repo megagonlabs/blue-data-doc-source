@@ -1,0 +1,9 @@
+[project]
+name = "blue-data-doc-source"
+version = "0.1.0"
+description = "Prototype document ingestion and retrieval source for Blue Data Intelligence"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools.packages.find]
+include = ["blue_doc_source*"]
