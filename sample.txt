@@ -1,0 +1,1 @@
+This is a sample document. It has several sentences for chunking.
