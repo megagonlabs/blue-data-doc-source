@@ -2,7 +2,7 @@ from typing import List
 
 
 class WindowChunker:
-    def __init__(self, chunk_size: int = 1000, overlap: int = 150):
+    def __init__(self, chunk_size: int = 200, overlap: int = 40):
         if chunk_size <= 0:
             raise ValueError("chunk_size must be positive")
 
@@ -19,12 +19,17 @@ class WindowChunker:
         if not text:
             return []
 
+        words = text.split()
+        if not words:
+            return []
+
         chunks = []
         start = 0
 
-        while start < len(text):
+        while start < len(words):
             end = start + self.chunk_size
-            chunk_text = text[start:end].strip()
+            chunk_words = words[start:end]
+            chunk_text = " ".join(chunk_words).strip()
 
             if chunk_text:
                 chunks.append(chunk_text)
