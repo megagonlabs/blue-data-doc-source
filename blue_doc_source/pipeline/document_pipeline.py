@@ -6,6 +6,7 @@ from blue_doc_source.chunkers import WindowChunker
 from blue_doc_source.embeddings import EmbeddingModel
 from blue_doc_source.models import ChunkRecord
 from blue_doc_source.parsers import TextParser
+from blue_doc_source.vector_stores import VectorStore
 
 
 class DocumentPipeline:
@@ -14,10 +15,14 @@ class DocumentPipeline:
         chunk_size: int = 1000,
         overlap: int = 150,
         embedding_model: Optional[EmbeddingModel] = None,
+        vector_store: Optional[VectorStore] = None,
+        collection: str = "documents",
     ):
         self.parser = TextParser()
         self.chunker = WindowChunker(chunk_size=chunk_size, overlap=overlap)
         self.embedding_model = embedding_model
+        self.vector_store = vector_store
+        self.collection = collection
         self.chunk_size = chunk_size
         self.overlap = overlap
 
@@ -55,6 +60,27 @@ class DocumentPipeline:
                 },
             )
 
-            records.append(record.to_dict())
+            record_dict = record.to_dict()
+            records.append(record_dict)
+
+            if self.vector_store is not None and embedding is not None:
+                self.vector_store.upsert(
+                    collection=self.collection,
+                    doc_id=chunk_id,
+                    document=record_dict,
+                )
 
         return records
+
+    def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+        if self.embedding_model is None:
+            raise ValueError("An embedding_model is required for search")
+        if self.vector_store is None:
+            raise ValueError("A vector_store is required for search")
+
+        query_vector = self.embedding_model.embed_text(query)
+        return self.vector_store.search(
+            index_name=self.collection,
+            query_vector=query_vector,
+            k=k,
+        )
