@@ -4,6 +4,13 @@ from typing import Any, Dict, List, Optional
 
 @dataclass
 class ChunkRecord:
+    """Canonical schema for a single document chunk with provenance metadata.
+
+    Shared across all document types. ``to_dict()`` is the serialisation
+    contract used by the pipeline — optional fields are omitted when ``None``
+    rather than serialised as null, so downstream consumers can safely check
+    field presence.
+    """
     document_id: str
     chunk_id: str
     text: str

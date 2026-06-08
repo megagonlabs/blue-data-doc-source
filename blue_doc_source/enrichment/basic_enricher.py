@@ -33,7 +33,19 @@ _PROPER_NOUN_PATTERN = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b")
 
 
 class BasicEnricher(Enricher):
+    """Regex-based enricher — no ML dependencies required.
+
+    Extracts named entities (DATE, EMAIL, PERCENT, MONEY, PROPER_NOUN) and
+    computes semantic hints (word count, sentence count, top keywords, boolean
+    flags) from chunk text.
+    """
+
     def __init__(self, top_k_keywords: int = 10):
+        """
+        Args:
+            top_k_keywords: Number of top non-stopword keywords to include in
+                ``semantic_hints["keywords"]``.
+        """
         self.top_k_keywords = top_k_keywords
 
     def enrich(self, text: str) -> Dict[str, Any]:

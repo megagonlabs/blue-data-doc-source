@@ -12,6 +12,17 @@ from blue_doc_source.vector_stores import VectorStore
 
 
 class DocumentPipeline:
+    """Orchestrates the full document ingestion pipeline.
+
+    Chains parsing → chunking → enrichment → embedding → ChunkRecord
+    construction → optional vector store upsert. Auto-detects ``.txt`` vs
+    ``.pdf`` by file extension.
+
+    All optional components (``embedding_model``, ``vector_store``,
+    ``enricher``) can be omitted. Upsert is skipped unless both
+    ``embedding_model`` and ``vector_store`` are set.
+    """
+
     def __init__(
         self,
         chunk_size: int = 1000,
@@ -21,6 +32,18 @@ class DocumentPipeline:
         enricher: Optional[Enricher] = None,
         collection: str = "documents",
     ):
+        """
+        Args:
+            chunk_size: Maximum words per chunk passed to ``WindowChunker``.
+            overlap: Word overlap between consecutive chunks.
+            embedding_model: Embedding model to use. When ``None``, no
+                embeddings are generated and upsert is skipped.
+            vector_store: Vector store backend. When ``None``, chunks are
+                returned but not persisted.
+            enricher: Enrichment step. When ``None``, ``entities`` and
+                ``semantic_hints`` are left empty on each record.
+            collection: Default collection name used when upserting documents.
+        """
         self.text_parser = TextParser()
         self.pdf_parser = PDFParser()
         self.chunker = WindowChunker(chunk_size=chunk_size, overlap=overlap)
@@ -32,6 +55,20 @@ class DocumentPipeline:
         self.overlap = overlap
 
     def ingest(self, path: str) -> List[Dict[str, Any]]:
+        """Parse, chunk, enrich, and embed a file.
+
+        Args:
+            path: Path to a ``.txt`` or ``.pdf`` file.
+
+        Returns:
+            List of ``ChunkRecord.to_dict()`` dicts, one per chunk. Each dict
+            includes provenance fields (``document_id``, ``chunk_id``,
+            ``page_start``/``page_end`` for PDFs) and optional ``embedding``.
+
+        Raises:
+            ValueError: If the file extension is not ``.txt`` or ``.pdf``.
+            FileNotFoundError: If the file does not exist.
+        """
         file_path = Path(path)
         suffix = file_path.suffix.lower()
 
@@ -156,6 +193,18 @@ class DocumentPipeline:
         return records
 
     def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+        """Embed a query and return the k nearest chunks from the vector store.
+
+        Args:
+            query: Natural language query string.
+            k: Number of results to return.
+
+        Returns:
+            List of matching chunk dicts as returned by the vector store.
+
+        Raises:
+            ValueError: If ``embedding_model`` or ``vector_store`` is not set.
+        """
         if self.embedding_model is None:
             raise ValueError("An embedding_model is required for search")
         if self.vector_store is None:

@@ -4,11 +4,11 @@ from .base import VectorStore
 
 
 class RedisVectorAdapter(VectorStore):
-    """
-    Adapter around Blue's existing RedisVectorSource.
+    """Adapter around Blue's existing RedisVectorSource.
 
-    This keeps the document source independent from Redis-specific
-    implementation details while still reusing Blue's vector infrastructure.
+    Translates ``VectorStore`` calls into ``execute_query({op: "VECTOR.*"})``
+    calls on the injected ``redis_source``. Does not own or manage the Redis
+    connection — callers are responsible for providing a live source.
     """
 
     def __init__(
@@ -17,6 +17,15 @@ class RedisVectorAdapter(VectorStore):
         default_dim: int = 1536,
         embedding_field: str = "embedding",
     ):
+        """
+        Args:
+            redis_source: A Blue ``RedisVectorSource`` instance (or any object
+                that implements ``execute_query``).
+            default_dim: Embedding dimension used when ``create_index`` is
+                called without an explicit ``dim``. Must match the model in use
+                (1536 for ``text-embedding-3-small``).
+            embedding_field: Key name of the embedding in the document dict.
+        """
         self.redis_source = redis_source
         self.default_dim = default_dim
         self.embedding_field = embedding_field

@@ -7,15 +7,25 @@ from blue_doc_source.vector_stores import VectorStore
 
 
 class DocumentDataSource:
-    """
-    Top-level entry point for document ingestion and retrieval.
+    """Top-level entry point for document ingestion and retrieval.
 
-    Exposes an execute_query interface consistent with Blue's DataSource
-    abstraction, dispatching on the "op" field of the request dict.
+    Exposes an ``execute_query`` interface consistent with Blue's DataSource
+    abstraction, dispatching on the ``"op"`` field of the request dict.
 
     Supported ops:
-      DOCUMENT.INGEST  — parse, chunk, enrich, embed, and upsert a document
-      DOCUMENT.SEARCH  — embed a query and return matching chunks via KNN
+
+    - ``DOCUMENT.INGEST`` — parse, chunk, enrich, embed, and upsert a document
+    - ``DOCUMENT.SEARCH`` — embed a query and return matching chunks via KNN
+
+    Example::
+
+        source = DocumentDataSource(
+            embedding_model=OpenAIEmbeddingModel(),
+            vector_store=RedisVectorAdapter(redis_source),
+            enricher=BasicEnricher(),
+        )
+        records = source.execute_query({"op": "DOCUMENT.INGEST", "path": "doc.pdf"})
+        results = source.execute_query({"op": "DOCUMENT.SEARCH", "query": "eligibility", "k": 5})
     """
 
     def __init__(
@@ -27,6 +37,18 @@ class DocumentDataSource:
         overlap: int = 150,
         default_collection: str = "documents",
     ):
+        """
+        Args:
+            embedding_model: Embedding model for chunk and query vectors.
+                Required for ``DOCUMENT.SEARCH`` and for upsert to fire on ingest.
+            vector_store: Vector store backend for upsert and KNN search.
+                Required for ``DOCUMENT.SEARCH``.
+            enricher: Optional enrichment step run on each chunk during ingest.
+            chunk_size: Maximum words per chunk.
+            overlap: Word overlap between consecutive chunks.
+            default_collection: Collection name used when the request does not
+                specify one.
+        """
         self._embedding_model = embedding_model
         self._vector_store = vector_store
         self._enricher = enricher
