@@ -89,6 +89,52 @@ python examples/ingest_txt.py sample.txt --embedding dummy
 python examples/ingest_txt.py report.pdf --embedding openai --query "eligibility requirements"
 ```
 
+## Local end-to-end demo (PDF → Redis → search)
+
+`examples/demo_pdf.py` runs the full pipeline against a local Redis Stack instance.
+
+### Prerequisites
+
+**Redis Stack** (provides RediSearch + RedisJSON):
+
+```bash
+docker run -p 6379:6379 redis/redis-stack-server:latest
+```
+
+**Install dependencies** (includes `redis[hiredis]`):
+
+```bash
+pip install -e .
+```
+
+### Run
+
+```bash
+# Dummy embeddings — no OpenAI key required, not real semantic similarity
+python examples/demo_pdf.py mydoc.pdf --query "eligibility requirements"
+
+# Real semantic search via OpenAI
+OPENAI_API_KEY=sk-... python examples/demo_pdf.py mydoc.pdf \
+    --query "eligibility requirements" \
+    --embedding openai
+```
+
+### Options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--query` | required | Search query to run after ingestion |
+| `--embedding` | `dummy` | `dummy` (SHA-256 hash) or `openai` |
+| `--openai-model` | `text-embedding-3-small` | OpenAI embedding model |
+| `--chunk-size` | `300` | Max words per chunk |
+| `--overlap` | `50` | Word overlap between chunks |
+| `--top-k` | `3` | Number of results to return |
+| `--collection` | `demo_docs` | Redis key prefix and index name |
+| `--redis-host` | `localhost` | Redis host |
+| `--redis-port` | `6379` | Redis port |
+
+> **Note:** `examples/local_redis_store.py` is demo-only and is not part of the `blue_doc_source` package. Production use should go through `RedisVectorAdapter` with Blue's `RedisVectorSource`.
+
 ## Architecture
 
 ```
