@@ -1,7 +1,7 @@
 import argparse
 
-from blue_doc_source.embeddings import DummyEmbeddingModel, OpenAIEmbeddingModel
-from blue_doc_source.pipeline import DocumentPipeline
+from blue_doc_source.source.document.embeddings import DummyEmbeddingModel, OpenAIEmbeddingModel
+from blue_doc_source.source.document.pipeline import DocumentPipeline
 
 
 if __name__ == "__main__":

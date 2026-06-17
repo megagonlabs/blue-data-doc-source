@@ -10,8 +10,8 @@ Usage:
 import argparse
 import sys
 
-from blue_doc_source.embeddings import DummyEmbeddingModel, OpenAIEmbeddingModel
-from blue_doc_source.pipeline import DocumentPipeline
+from blue_doc_source.source.document.embeddings import DummyEmbeddingModel, OpenAIEmbeddingModel
+from blue_doc_source.source.document.pipeline import DocumentPipeline
 
 sys.path.insert(0, "examples")
 from local_redis_store import LocalRedisVectorStore
@@ -50,8 +50,8 @@ if __name__ == "__main__":
 
     dim = EMBEDDING_DIMS[args.embedding]
     vector_store.create_index(
-        collection=args.collection,
         index_name=args.collection,
+        collection=args.collection,
         dim=dim,
     )
 
@@ -59,7 +59,7 @@ if __name__ == "__main__":
         chunk_size=args.chunk_size,
         overlap=args.overlap,
         embedding_model=embedding_model,
-        vector_store=vector_store,
+        vector_source=vector_store,
         collection=args.collection,
     )
 

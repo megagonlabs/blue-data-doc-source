@@ -15,7 +15,7 @@ pip install -e .
 Ingest a file with no embeddings — useful for inspecting chunks before wiring up a vector store:
 
 ```python
-from blue_doc_source.pipeline import DocumentPipeline
+from blue_doc_source.source.document.pipeline import DocumentPipeline
 
 pipeline = DocumentPipeline(chunk_size=500, overlap=100)
 records = pipeline.ingest("mydoc.pdf")
@@ -28,19 +28,21 @@ for r in records:
 
 Full pipeline: parse → chunk → enrich → embed → upsert to Redis → search.
 
-```python
-from blue_doc_source.source import DocumentDataSource
-from blue_doc_source.embeddings import OpenAIEmbeddingModel
-from blue_doc_source.enrichment import BasicEnricher
-from blue_doc_source.vector_stores import RedisVectorAdapter
+`blue-data-doc-source` depends on `blue-data`. Pass a `VectorSource` instance (e.g. `RedisVectorSource`) from blue-data as the `vector_source`.
 
-# Wrap Blue's existing RedisVectorSource
-redis_source = ...  # your Blue RedisVectorSource instance
-vector_store = RedisVectorAdapter(redis_source, default_dim=1536)
+```python
+from blue_doc_source.source.document.document_source import DocumentDataSource
+from blue_doc_source.source.document.embeddings import OpenAIEmbeddingModel
+from blue_doc_source.source.document.enrichment import BasicEnricher
+from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
+
+# Instantiate blue-data's RedisVectorSource
+redis_source = RedisVectorSource(name="my_redis", host="localhost", port=6379)
 
 source = DocumentDataSource(
+    name="contracts",
     embedding_model=OpenAIEmbeddingModel(model="text-embedding-3-small"),
-    vector_store=vector_store,
+    vector_source=redis_source,
     enricher=BasicEnricher(),
     chunk_size=1000,
     overlap=150,
@@ -66,7 +68,7 @@ for r in results:
     print(r["chunk_id"], r["text"][:120])
 ```
 
-### Without enrichment or a vector store
+### Without enrichment or a vector source
 
 Embeddings and enrichment are both optional. Omit either to skip that step:
 
@@ -77,7 +79,7 @@ source = DocumentDataSource(
 records = source.execute_query({"op": "DOCUMENT.INGEST", "path": "report.txt"})
 ```
 
-Upsert only fires when both `embedding_model` and `vector_store` are provided and the chunk has an embedding.
+Upsert only fires when both `embedding_model` and `vector_source` are provided and the chunk has an embedding.
 
 ## CLI example
 
@@ -133,12 +135,12 @@ OPENAI_API_KEY=sk-... python examples/demo_pdf.py mydoc.pdf \
 | `--redis-host` | `localhost` | Redis host |
 | `--redis-port` | `6379` | Redis port |
 
-> **Note:** `examples/local_redis_store.py` is demo-only and is not part of the `blue_doc_source` package. Production use should go through `RedisVectorAdapter` with Blue's `RedisVectorSource`.
+> **Note:** `examples/local_redis_store.py` is demo-only and is not part of the `blue_doc_source` package. Production use should pass Blue's `RedisVectorSource` directly as `vector_source`.
 
 ## Architecture
 
 ```
-DocumentDataSource          ← public entry point (execute_query op-code interface)
+DocumentDataSource (extends blue-data DataSource)  ← public entry point
   └─ DocumentPipeline       ← orchestrates all layers; auto-detects .txt vs .pdf
        ├─ TextParser         ← reads .txt → raw string
        ├─ PDFParser          ← reads .pdf → [{page_num, text}, ...] via pypdf
@@ -146,7 +148,7 @@ DocumentDataSource          ← public entry point (execute_query op-code interf
        ├─ BasicEnricher      ← regex entity/keyword extraction (optional)
        ├─ OpenAIEmbeddingModel / DummyEmbeddingModel  (optional)
        ├─ ChunkRecord        ← canonical chunk schema with provenance fields
-       └─ RedisVectorAdapter ← wraps Blue's RedisVectorSource (optional)
+       └─ VectorSource       ← blue-data VectorSource injected by caller (optional)
 ```
 
 ### ChunkRecord schema
@@ -186,9 +188,9 @@ Every ingested chunk becomes a `ChunkRecord`, serialised via `.to_dict()`. Optio
 | `OpenAIEmbeddingModel` | Production; calls `text-embedding-3-small` by default |
 | `DummyEmbeddingModel` | Tests; SHA-256 hash → fixed-dim float vector (not real similarity) |
 
-### Vector store
+### Vector source
 
-`RedisVectorAdapter` does not own a Redis connection. Inject Blue's `RedisVectorSource` as `redis_source`; the adapter translates `upsert` / `search` calls to `execute_query({op: "VECTOR.*", ...})`.
+`DocumentDataSource` and `DocumentPipeline` accept any `VectorSource` from blue-data (e.g. `RedisVectorSource`, `MemoryVectorSource`). The pipeline calls `.upsert()` on ingest and `.knn()` on search — no adapter layer needed.
 
 ## Running tests
 
