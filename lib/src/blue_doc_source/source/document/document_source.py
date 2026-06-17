@@ -1,12 +1,14 @@
 from typing import Any, Dict, List, Optional
 
+from blue_data.source.source import DataSource
+from blue_data.source.vector.vector_source import VectorSource
+
 from .embeddings import EmbeddingModel
 from .enrichment import Enricher
 from .pipeline import DocumentPipeline
-from .base import VectorStore
 
 
-class DocumentDataSource:
+class DocumentDataSource(DataSource):
     """Top-level entry point for document ingestion and retrieval.
 
     Exposes an ``execute_query`` interface consistent with Blue's DataSource
@@ -20,8 +22,9 @@ class DocumentDataSource:
     Example::
 
         source = DocumentDataSource(
+            name="contracts",
             embedding_model=OpenAIEmbeddingModel(),
-            vector_store=RedisVectorAdapter(redis_source),
+            vector_source=RedisVectorSource(...),
             enricher=BasicEnricher(),
         )
         records = source.execute_query({"op": "DOCUMENT.INGEST", "path": "doc.pdf"})
@@ -30,75 +33,80 @@ class DocumentDataSource:
 
     def __init__(
         self,
+        name: str = "document",
         embedding_model: Optional[EmbeddingModel] = None,
-        vector_store: Optional[VectorStore] = None,
+        vector_source: Optional[VectorSource] = None,
         enricher: Optional[Enricher] = None,
         chunk_size: int = 1000,
         overlap: int = 150,
         default_collection: str = "documents",
+        properties: Optional[Dict[str, Any]] = None,
     ):
         """
         Args:
+            name: Source name registered in blue-data's DataRegistry.
             embedding_model: Embedding model for chunk and query vectors.
                 Required for ``DOCUMENT.SEARCH`` and for upsert to fire on ingest.
-            vector_store: Vector store backend for upsert and KNN search.
-                Required for ``DOCUMENT.SEARCH``.
+            vector_source: VectorSource backend (e.g. RedisVectorSource from blue-data)
+                for upsert and KNN search. Required for ``DOCUMENT.SEARCH``.
             enricher: Optional enrichment step run on each chunk during ingest.
             chunk_size: Maximum words per chunk.
             overlap: Word overlap between consecutive chunks.
             default_collection: Collection name used when the request does not
                 specify one.
+            properties: Optional metadata properties passed to DataSource.
         """
+        super().__init__(name, properties)
         self._embedding_model = embedding_model
-        self._vector_store = vector_store
+        self._vector_source = vector_source
         self._enricher = enricher
         self._chunk_size = chunk_size
         self._overlap = overlap
         self._default_collection = default_collection
 
-    def execute_query(self, request: Dict[str, Any]) -> Any:
-        op = request.get("op")
+    def execute_query(self, query, database=None, collection=None, optional_properties=None):
+        op = query.get("op")
 
         if op == "DOCUMENT.INGEST":
-            return self._ingest(request)
+            return self._ingest(query, collection)
         elif op == "DOCUMENT.SEARCH":
-            return self._search(request)
+            return self._search(query, collection)
         else:
             raise ValueError(f"Unsupported op: {op!r}. Expected DOCUMENT.INGEST or DOCUMENT.SEARCH")
 
-    def _ingest(self, request: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _ingest(self, request: Dict[str, Any], collection_override=None) -> List[Dict[str, Any]]:
         path = request.get("path")
         if not path:
             raise ValueError("DOCUMENT.INGEST requires a 'path' field")
 
-        collection = request.get("collection", self._default_collection)
+        collection = collection_override or request.get("collection", self._default_collection)
 
         pipeline = DocumentPipeline(
             chunk_size=self._chunk_size,
             overlap=self._overlap,
             embedding_model=self._embedding_model,
-            vector_store=self._vector_store,
+            vector_source=self._vector_source,
             enricher=self._enricher,
             collection=collection,
         )
 
         return pipeline.ingest(path)
 
-    def _search(self, request: Dict[str, Any]) -> List[Dict[str, Any]]:
-        query = request.get("query")
-        if not query:
+    def _search(self, request: Dict[str, Any], collection_override=None) -> List[Dict[str, Any]]:
+        query_text = request.get("query")
+        if not query_text:
             raise ValueError("DOCUMENT.SEARCH requires a 'query' field")
 
-        collection = request.get("collection", self._default_collection)
+        collection = collection_override or request.get("collection", self._default_collection)
         k = request.get("k", 5)
 
         pipeline = DocumentPipeline(
             chunk_size=self._chunk_size,
             overlap=self._overlap,
             embedding_model=self._embedding_model,
-            vector_store=self._vector_store,
+            vector_source=self._vector_source,
             enricher=self._enricher,
             collection=collection,
         )
 
-        return pipeline.search(query, k=k)
+        return pipeline.search(query_text, k=k)

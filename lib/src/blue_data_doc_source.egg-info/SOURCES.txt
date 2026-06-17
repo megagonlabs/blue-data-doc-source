@@ -8,11 +8,9 @@ lib/src/blue_data_doc_source.egg-info/top_level.txt
 lib/src/blue_doc_source/__init__.py
 lib/src/blue_doc_source/source/__init__.py
 lib/src/blue_doc_source/source/document/__init__.py
-lib/src/blue_doc_source/source/document/base.py
 lib/src/blue_doc_source/source/document/chunk_record.py
 lib/src/blue_doc_source/source/document/document_source.py
 lib/src/blue_doc_source/source/document/pipeline.py
-lib/src/blue_doc_source/source/document/redis_vector_adapter.py
 lib/src/blue_doc_source/source/document/chunkers/__init__.py
 lib/src/blue_doc_source/source/document/chunkers/window_chunker.py
 lib/src/blue_doc_source/source/document/embeddings/__init__.py

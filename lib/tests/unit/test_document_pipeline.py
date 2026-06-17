@@ -44,25 +44,25 @@ def test_ingest_txt_with_embedding(tmp_path):
     assert len(records[0]["embedding"]) == 8
 
 
-def test_ingest_txt_upserts_to_vector_store(tmp_path):
+def test_ingest_txt_upserts_to_vector_source(tmp_path):
     path = make_txt(tmp_path)
-    vector_store = MagicMock()
+    vector_source = MagicMock()
     pipeline = DocumentPipeline(
         chunk_size=5,
         overlap=1,
         embedding_model=DummyEmbeddingModel(dim=8),
-        vector_store=vector_store,
+        vector_source=vector_source,
     )
     records = pipeline.ingest(path)
-    assert vector_store.upsert.call_count == len(records)
+    assert vector_source.upsert.call_count == len(records)
 
 
 def test_ingest_no_upsert_without_embedding(tmp_path):
     path = make_txt(tmp_path)
-    vector_store = MagicMock()
-    pipeline = DocumentPipeline(chunk_size=5, overlap=1, vector_store=vector_store)
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(chunk_size=5, overlap=1, vector_source=vector_source)
     pipeline.ingest(path)
-    vector_store.upsert.assert_not_called()
+    vector_source.upsert.assert_not_called()
 
 
 def test_ingest_unsupported_extension_raises(tmp_path):
@@ -73,28 +73,28 @@ def test_ingest_unsupported_extension_raises(tmp_path):
 
 
 def test_search_requires_embedding_model(tmp_path):
-    vector_store = MagicMock()
-    pipeline = DocumentPipeline(vector_store=vector_store)
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(vector_source=vector_source)
     with pytest.raises(ValueError, match="embedding_model"):
         pipeline.search("query")
 
 
-def test_search_requires_vector_store():
+def test_search_requires_vector_source():
     pipeline = DocumentPipeline(embedding_model=DummyEmbeddingModel())
-    with pytest.raises(ValueError, match="vector_store"):
+    with pytest.raises(ValueError, match="vector_source"):
         pipeline.search("query")
 
 
-def test_search_calls_vector_store():
-    vector_store = MagicMock()
-    vector_store.search.return_value = []
+def test_search_calls_vector_source():
+    vector_source = MagicMock()
+    vector_source.knn.return_value = []
     pipeline = DocumentPipeline(
         embedding_model=DummyEmbeddingModel(dim=8),
-        vector_store=vector_store,
+        vector_source=vector_source,
     )
     pipeline.search("what is eligibility?", k=3)
-    vector_store.search.assert_called_once()
-    call_kwargs = vector_store.search.call_args
+    vector_source.knn.assert_called_once()
+    call_kwargs = vector_source.knn.call_args
     assert call_kwargs.kwargs["k"] == 3
 
 

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Prototype document ingestion and retrieval source for Blue Data Intelligence"
 requires-python = ">=3.10"
 dependencies = [
+    "blue-data @ file:../blue-data",
     "openai>=1.0.0",
     "pypdf>=4.0.0",
     "redis[hiredis]>=4.5.0",

@@ -3,12 +3,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+from blue_data.source.vector.vector_source import VectorSource
+
 from .chunkers import WindowChunker
 from .embeddings import EmbeddingModel
 from .enrichment import Enricher
 from .chunk_record import ChunkRecord
 from .parsers import PDFParser, TextParser
-from .base import VectorStore
 
 
 class DocumentPipeline:
@@ -18,9 +19,9 @@ class DocumentPipeline:
     construction → optional vector store upsert. Auto-detects ``.txt`` vs
     ``.pdf`` by file extension.
 
-    All optional components (``embedding_model``, ``vector_store``,
+    All optional components (``embedding_model``, ``vector_source``,
     ``enricher``) can be omitted. Upsert is skipped unless both
-    ``embedding_model`` and ``vector_store`` are set.
+    ``embedding_model`` and ``vector_source`` are set.
     """
 
     def __init__(
@@ -28,7 +29,7 @@ class DocumentPipeline:
         chunk_size: int = 1000,
         overlap: int = 150,
         embedding_model: Optional[EmbeddingModel] = None,
-        vector_store: Optional[VectorStore] = None,
+        vector_source: Optional[VectorSource] = None,
         enricher: Optional[Enricher] = None,
         collection: str = "documents",
     ):
@@ -38,8 +39,8 @@ class DocumentPipeline:
             overlap: Word overlap between consecutive chunks.
             embedding_model: Embedding model to use. When ``None``, no
                 embeddings are generated and upsert is skipped.
-            vector_store: Vector store backend. When ``None``, chunks are
-                returned but not persisted.
+            vector_source: VectorSource backend from blue-data. When ``None``,
+                chunks are returned but not persisted.
             enricher: Enrichment step. When ``None``, ``entities`` and
                 ``semantic_hints`` are left empty on each record.
             collection: Default collection name used when upserting documents.
@@ -48,7 +49,7 @@ class DocumentPipeline:
         self.pdf_parser = PDFParser()
         self.chunker = WindowChunker(chunk_size=chunk_size, overlap=overlap)
         self.embedding_model = embedding_model
-        self.vector_store = vector_store
+        self.vector_source = vector_source
         self.enricher = enricher
         self.collection = collection
         self.chunk_size = chunk_size
@@ -128,11 +129,11 @@ class DocumentPipeline:
         )
 
     def _upsert(self, chunk_id: str, record_dict: Dict[str, Any]) -> None:
-        if self.vector_store is not None and record_dict.get("embedding") is not None:
-            self.vector_store.upsert(
+        if self.vector_source is not None and record_dict.get("embedding") is not None:
+            self.vector_source.upsert(
                 collection=self.collection,
                 doc_id=chunk_id,
-                document=record_dict,
+                doc=record_dict,
             )
 
     def _ingest_txt(self, file_path: Path) -> List[Dict[str, Any]]:
@@ -203,15 +204,15 @@ class DocumentPipeline:
             List of matching chunk dicts as returned by the vector store.
 
         Raises:
-            ValueError: If ``embedding_model`` or ``vector_store`` is not set.
+            ValueError: If ``embedding_model`` or ``vector_source`` is not set.
         """
         if self.embedding_model is None:
             raise ValueError("An embedding_model is required for search")
-        if self.vector_store is None:
-            raise ValueError("A vector_store is required for search")
+        if self.vector_source is None:
+            raise ValueError("A vector_source is required for search")
 
         query_vector = self.embedding_model.embed_text(query)
-        return self.vector_store.search(
+        return self.vector_source.knn(
             index_name=self.collection,
             query_vector=query_vector,
             k=k,
