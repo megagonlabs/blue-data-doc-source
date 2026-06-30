@@ -1,4 +1,0 @@
-blue-data @ file:../blue-data
-openai>=1.0.0
-pypdf>=4.0.0
-redis[hiredis]>=4.5.0
