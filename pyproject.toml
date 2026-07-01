@@ -16,3 +16,6 @@ include = ["blue_doc_source*"]
 
 [tool.pytest.ini_options]
 testpaths = ["lib/tests/unit"]
+markers = [
+    "integration: end-to-end tests requiring external services (Redis)",
+]

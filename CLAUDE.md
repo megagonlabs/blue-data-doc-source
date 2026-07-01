@@ -14,8 +14,15 @@ pip install pytest
 ## Tests
 
 ```bash
-.venv/bin/pytest tests/ -v          # all tests
-.venv/bin/pytest tests/test_window_chunker.py -v   # single file
+# Unit tests (default)
+.venv/bin/pytest lib/tests/unit/ -v
+
+# Single file
+.venv/bin/pytest lib/tests/unit/test_window_chunker.py -v
+
+# Integration tests (requires Redis Stack on localhost:6379)
+docker run -p 6379:6379 redis/redis-stack-server:latest
+.venv/bin/pytest lib/tests/integration/ -v
 ```
 
 ## Running the example
@@ -33,23 +40,45 @@ The pipeline is a strict one-way chain of single-responsibility layers:
 ```
 File (.txt / .pdf)
   → parsers/      — extract raw text (TextParser) or page-by-page text (PDFParser)
-  → chunkers/     — word-based sliding window (WindowChunker)
-  → embeddings/   — EmbeddingModel ABC; OpenAIEmbeddingModel or DummyEmbeddingModel
-  → models/       — ChunkRecord dataclass: canonical chunk schema with provenance fields
-  → vector_stores/— VectorStore ABC; RedisVectorAdapter wraps an injected redis_source
-  → pipeline/     — DocumentPipeline orchestrates all layers; entry point for callers
+  → chunkers/     — SectionChunker (default) detects headers and chunks within sections;
+                    WindowChunker is the word-based sliding window fallback
+  → embeddings/   — EmbeddingModel ABC with dim property;
+                    OpenAIEmbeddingModel or DummyEmbeddingModel
+  → chunk_record  — ChunkRecord dataclass: canonical chunk schema with provenance fields
+  → enrichment/   — Enricher ABC; BasicEnricher does regex entity/keyword extraction
+  → pipeline/     — DocumentPipeline orchestrates all layers
+  → document_source/ — DocumentDataSource extends blue-data DataSource; public entry point
 ```
 
-**`DocumentPipeline`** is the only public entry point. It auto-detects `.txt` vs `.pdf` by extension. `ingest(path)` returns `List[Dict]` and optionally upserts to a vector store. `search(query)` embeds the query and calls `VECTOR.KNN`.
+**`DocumentDataSource`** is the top-level public entry point. It extends blue-data's `DataSource`
+abstraction and dispatches on `op` codes: `DOCUMENT.INGEST`, `DOCUMENT.SEARCH`,
+`DOCUMENT.ENSURE_INDEX`. It owns a single `DocumentPipeline` instance reused across calls.
 
-**`RedisVectorAdapter`** does not own a Redis connection — callers inject a `redis_source` object that speaks `execute_query({op: ...})`. This adapter is a thin wrapper over Blue's existing `RedisVectorSource`, which lives in a separate repo.
+**`DocumentPipeline`** orchestrates the ingestion chain. Auto-detects `.txt` vs `.pdf` by
+extension. `ingest(path)` returns `List[Dict]` and optionally upserts to a vector store.
+`search(query)` embeds the query and delegates KNN to the injected `VectorSource`.
+`ensure_index(collection)` calls `VectorSource.create_index` with the correct embedding dim.
 
-**`ChunkRecord`** is the canonical schema shared across all document types. Key provenance fields: `document_id`, `chunk_id`, `page_start`, `page_end`, `section_title`. These must be preserved for downstream agent explainability.
+**`VectorSource`** is blue-data's abstraction (lives in the `blue-data` repo). The pipeline
+accepts any `VectorSource` implementation (e.g. `RedisVectorSource`) — no adapter layer needed.
+
+**`ChunkRecord`** is the canonical schema shared across all document types. Key provenance
+fields: `document_id`, `chunk_id`, `page_start`, `page_end`, `section_title`. These must
+be preserved for downstream agent explainability.
 
 ## Key design constraints
 
+- `document_id` is derived from a SHA-256 hash of the file's bytes — re-ingesting the same
+  file produces the same chunk IDs, so vector store upsert overwrites rather than duplicates.
 - PDF chunks are page-scoped: `page_start == page_end`. Chunks never span page boundaries in V1.
-- `WindowChunker` operates on **word count**, not character count.
+- `SectionChunker` is the default chunker. It falls back to window chunking when no section
+  headers are detected. Pass a custom `chunker=` to `DocumentPipeline` to override.
+- `WindowChunker` and `SectionChunker` both operate on **word count**, not character count.
+- `EmbeddingModel` subclasses must implement a `dim` property. This is used by `ensure_index`
+  and validated against the actual embedding length on every chunk.
 - `DummyEmbeddingModel` is SHA-256 hash based — for testing only, not real similarity.
-- No vector retrieval logic lives inside `DocumentPipeline` — it delegates entirely to `VectorStore`.
-- `ChunkRecord.to_dict()` omits `None` optional fields (`page_start`, `page_end`, `section_title`, `embedding`) rather than serialising them as null.
+- No vector retrieval logic lives inside `DocumentPipeline` — it delegates entirely to `VectorSource`.
+- `ChunkRecord.to_dict()` omits `None` optional fields (`page_start`, `page_end`, `section_title`,
+  `embedding`) rather than serialising them as null.
+- Call `DOCUMENT.ENSURE_INDEX` (or `pipeline.ensure_index()`) before the first ingest when
+  using a vector store — the pipeline does not auto-create the index.

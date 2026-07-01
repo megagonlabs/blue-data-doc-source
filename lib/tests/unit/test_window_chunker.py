@@ -44,3 +44,10 @@ def test_negative_overlap_raises():
 def test_overlap_gte_chunk_size_raises():
     with pytest.raises(ValueError):
         WindowChunker(chunk_size=5, overlap=5)
+
+
+def test_chunk_with_titles_all_none():
+    chunker = WindowChunker(chunk_size=3, overlap=1)
+    results = chunker.chunk_with_titles("a b c d e f g")
+    assert all(title is None for title, _ in results)
+    assert [text for _, text in results] == chunker.chunk("a b c d e f g")

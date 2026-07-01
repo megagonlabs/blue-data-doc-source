@@ -1,8 +1,20 @@
 import pytest
 from unittest.mock import MagicMock
 from blue_doc_source.source.document.pipeline import DocumentPipeline
-from blue_doc_source.source.document.embeddings import DummyEmbeddingModel
+from blue_doc_source.source.document.embeddings import DummyEmbeddingModel, EmbeddingModel
+from blue_doc_source.source.document.chunkers import SectionChunker, WindowChunker
 from blue_doc_source.source.document.enrichment import BasicEnricher
+from typing import List
+
+
+class _WrongDimModel(EmbeddingModel):
+    """Returns vectors shorter than advertised dim — for mismatch validation tests."""
+    @property
+    def dim(self) -> int:
+        return 16
+
+    def embed_text(self, text: str) -> List[float]:
+        return [0.0] * 4  # intentionally wrong
 
 
 def make_txt(tmp_path, content="The quick brown fox jumps over the lazy dog"):
@@ -217,3 +229,23 @@ def test_ensure_index_no_op_without_embedding_model():
 
 def test_embedding_dim_property():
     assert DummyEmbeddingModel(dim=16).dim == 16
+
+
+def test_embedding_dim_mismatch_raises(tmp_path):
+    path = make_txt(tmp_path)
+    pipeline = DocumentPipeline(chunk_size=50, overlap=0, embedding_model=_WrongDimModel())
+    with pytest.raises(ValueError, match="dimension mismatch"):
+        pipeline.ingest(path)
+
+
+def test_default_chunker_is_section_chunker():
+    pipeline = DocumentPipeline()
+    assert isinstance(pipeline.chunker, SectionChunker)
+
+
+def test_custom_chunker_is_used(tmp_path):
+    path = make_txt(tmp_path, " ".join(["word"] * 20))
+    window = WindowChunker(chunk_size=5, overlap=1)
+    pipeline = DocumentPipeline(chunker=window)
+    records = pipeline.ingest(path)
+    assert len(records) > 0
