@@ -96,3 +96,18 @@ def test_ingest_with_enricher(tmp_path):
     })
     assert "entities" in records[0]
     assert "semantic_hints" in records[0]
+
+
+def test_pipeline_reused_across_calls(tmp_path):
+    source = DocumentDataSource(chunk_size=5, overlap=1)
+    pipeline_id = id(source._pipeline)
+    source.execute_query({"op": "DOCUMENT.INGEST", "path": make_txt(tmp_path)})
+    assert id(source._pipeline) == pipeline_id
+
+
+def test_deduplication_same_file_same_document_id(tmp_path):
+    source = DocumentDataSource(chunk_size=5, overlap=1)
+    path = make_txt(tmp_path)
+    first = source.execute_query({"op": "DOCUMENT.INGEST", "path": path})
+    second = source.execute_query({"op": "DOCUMENT.INGEST", "path": path})
+    assert first[0]["document_id"] == second[0]["document_id"]

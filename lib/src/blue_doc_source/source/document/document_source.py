@@ -57,12 +57,15 @@ class DocumentDataSource(DataSource):
             properties: Optional metadata properties passed to DataSource.
         """
         super().__init__(name, properties)
-        self._embedding_model = embedding_model
-        self._vector_source = vector_source
-        self._enricher = enricher
-        self._chunk_size = chunk_size
-        self._overlap = overlap
         self._default_collection = default_collection
+        self._pipeline = DocumentPipeline(
+            chunk_size=chunk_size,
+            overlap=overlap,
+            embedding_model=embedding_model,
+            vector_source=vector_source,
+            enricher=enricher,
+            collection=default_collection,
+        )
 
     def execute_query(self, query, database=None, collection=None, optional_properties=None):
         op = query.get("op")
@@ -79,34 +82,14 @@ class DocumentDataSource(DataSource):
         if not path:
             raise ValueError("DOCUMENT.INGEST requires a 'path' field")
 
-        collection = collection_override or request.get("collection", self._default_collection)
-
-        pipeline = DocumentPipeline(
-            chunk_size=self._chunk_size,
-            overlap=self._overlap,
-            embedding_model=self._embedding_model,
-            vector_source=self._vector_source,
-            enricher=self._enricher,
-            collection=collection,
-        )
-
-        return pipeline.ingest(path)
+        collection = collection_override or request.get("collection")
+        return self._pipeline.ingest(path, collection=collection)
 
     def _search(self, request: Dict[str, Any], collection_override=None) -> List[Dict[str, Any]]:
         query_text = request.get("query")
         if not query_text:
             raise ValueError("DOCUMENT.SEARCH requires a 'query' field")
 
-        collection = collection_override or request.get("collection", self._default_collection)
+        collection = collection_override or request.get("collection")
         k = request.get("k", 5)
-
-        pipeline = DocumentPipeline(
-            chunk_size=self._chunk_size,
-            overlap=self._overlap,
-            embedding_model=self._embedding_model,
-            vector_source=self._vector_source,
-            enricher=self._enricher,
-            collection=collection,
-        )
-
-        return pipeline.search(query_text, k=k)
+        return self._pipeline.search(query_text, k=k, collection=collection)

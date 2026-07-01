@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from uuid import uuid4
 
 from blue_data.source.vector.vector_source import VectorSource
 
@@ -55,11 +55,12 @@ class DocumentPipeline:
         self.chunk_size = chunk_size
         self.overlap = overlap
 
-    def ingest(self, path: str) -> List[Dict[str, Any]]:
+    def ingest(self, path: str, collection: Optional[str] = None) -> List[Dict[str, Any]]:
         """Parse, chunk, enrich, and embed a file.
 
         Args:
             path: Path to a ``.txt`` or ``.pdf`` file.
+            collection: Override the instance-level collection for this call only.
 
         Returns:
             List of ``ChunkRecord.to_dict()`` dicts, one per chunk. Each dict
@@ -72,11 +73,12 @@ class DocumentPipeline:
         """
         file_path = Path(path)
         suffix = file_path.suffix.lower()
+        effective_collection = collection or self.collection
 
         if suffix == ".txt":
-            return self._ingest_txt(file_path)
+            return self._ingest_txt(file_path, effective_collection)
         elif suffix == ".pdf":
-            return self._ingest_pdf(file_path)
+            return self._ingest_pdf(file_path, effective_collection)
         else:
             raise ValueError(f"Unsupported file type: {suffix}")
 
@@ -128,19 +130,24 @@ class DocumentPipeline:
             },
         )
 
-    def _upsert(self, chunk_id: str, record_dict: Dict[str, Any]) -> None:
+    @staticmethod
+    def _file_document_id(file_path: Path) -> str:
+        digest = sha256(file_path.read_bytes()).hexdigest()[:16]
+        return f"doc_{digest}"
+
+    def _upsert(self, chunk_id: str, record_dict: Dict[str, Any], collection: str) -> None:
         if self.vector_source is not None and record_dict.get("embedding") is not None:
             self.vector_source.upsert(
-                collection=self.collection,
+                collection=collection,
                 doc_id=chunk_id,
                 doc=record_dict,
             )
 
-    def _ingest_txt(self, file_path: Path) -> List[Dict[str, Any]]:
+    def _ingest_txt(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
         text = self.text_parser.parse(str(file_path))
         chunks = self.chunker.chunk(text)
 
-        document_id = f"doc_{uuid4().hex}"
+        document_id = self._file_document_id(file_path)
         ingested_at = datetime.now(timezone.utc).isoformat()
         records = []
 
@@ -157,14 +164,14 @@ class DocumentPipeline:
             )
             record_dict = record.to_dict()
             records.append(record_dict)
-            self._upsert(chunk_id, record_dict)
+            self._upsert(chunk_id, record_dict, collection)
 
         return records
 
-    def _ingest_pdf(self, file_path: Path) -> List[Dict[str, Any]]:
+    def _ingest_pdf(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
         pages = self.pdf_parser.parse_pages(str(file_path))
 
-        document_id = f"doc_{uuid4().hex}"
+        document_id = self._file_document_id(file_path)
         ingested_at = datetime.now(timezone.utc).isoformat()
         records = []
         chunk_index = 0
@@ -188,17 +195,18 @@ class DocumentPipeline:
                 )
                 record_dict = record.to_dict()
                 records.append(record_dict)
-                self._upsert(chunk_id, record_dict)
+                self._upsert(chunk_id, record_dict, collection)
                 chunk_index += 1
 
         return records
 
-    def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+    def search(self, query: str, k: int = 5, collection: Optional[str] = None) -> List[Dict[str, Any]]:
         """Embed a query and return the k nearest chunks from the vector store.
 
         Args:
             query: Natural language query string.
             k: Number of results to return.
+            collection: Override the instance-level collection for this call only.
 
         Returns:
             List of matching chunk dicts as returned by the vector store.
@@ -213,7 +221,7 @@ class DocumentPipeline:
 
         query_vector = self.embedding_model.embed_text(query)
         return self.vector_source.knn(
-            index_name=self.collection,
+            index_name=collection or self.collection,
             query_vector=query_vector,
             k=k,
         )

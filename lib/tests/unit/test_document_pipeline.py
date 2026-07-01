@@ -120,3 +120,47 @@ def test_all_chunks_share_document_id(tmp_path):
     records = DocumentPipeline(chunk_size=5, overlap=1).ingest(path)
     doc_ids = {r["document_id"] for r in records}
     assert len(doc_ids) == 1
+
+
+def test_same_file_same_document_id(tmp_path):
+    path = make_txt(tmp_path, " ".join(["word"] * 50))
+    pipeline = DocumentPipeline(chunk_size=5, overlap=1)
+    first = pipeline.ingest(path)
+    second = pipeline.ingest(path)
+    assert first[0]["document_id"] == second[0]["document_id"]
+
+
+def test_different_content_different_document_id(tmp_path):
+    p1 = tmp_path / "a.txt"
+    p2 = tmp_path / "b.txt"
+    p1.write_text("content alpha", encoding="utf-8")
+    p2.write_text("content beta", encoding="utf-8")
+    pipeline = DocumentPipeline(chunk_size=50, overlap=0)
+    id1 = pipeline.ingest(str(p1))[0]["document_id"]
+    id2 = pipeline.ingest(str(p2))[0]["document_id"]
+    assert id1 != id2
+
+
+def test_ingest_collection_override(tmp_path):
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(
+        chunk_size=5,
+        overlap=1,
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+        collection="default",
+    )
+    pipeline.ingest(make_txt(tmp_path), collection="override")
+    assert vector_source.upsert.call_args_list[0].kwargs["collection"] == "override"
+
+
+def test_search_collection_override():
+    vector_source = MagicMock()
+    vector_source.knn.return_value = []
+    pipeline = DocumentPipeline(
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+        collection="default",
+    )
+    pipeline.search("query", collection="override")
+    assert vector_source.knn.call_args.kwargs["index_name"] == "override"
