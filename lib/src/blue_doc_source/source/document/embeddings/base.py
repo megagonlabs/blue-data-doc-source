@@ -5,6 +5,12 @@ from typing import List
 class EmbeddingModel(ABC):
     """Abstract base class for text embedding models."""
 
+    @property
+    @abstractmethod
+    def dim(self) -> int:
+        """Output vector dimension. Must match the target vector index configuration."""
+        raise NotImplementedError
+
     @abstractmethod
     def embed_text(self, text: str) -> List[float]:
         """Embed a string and return a fixed-length float vector.

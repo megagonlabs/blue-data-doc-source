@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from blue_data.source.vector.vector_source import VectorSource
 
-from .chunkers import WindowChunker
+from .chunkers import Chunker, SectionChunker
 from .embeddings import EmbeddingModel
 from .enrichment import Enricher
 from .chunk_record import ChunkRecord
@@ -28,6 +28,7 @@ class DocumentPipeline:
         self,
         chunk_size: int = 1000,
         overlap: int = 150,
+        chunker: Optional[Chunker] = None,
         embedding_model: Optional[EmbeddingModel] = None,
         vector_source: Optional[VectorSource] = None,
         enricher: Optional[Enricher] = None,
@@ -35,8 +36,10 @@ class DocumentPipeline:
     ):
         """
         Args:
-            chunk_size: Maximum words per chunk passed to ``WindowChunker``.
+            chunk_size: Maximum words per chunk. Passed to the default SectionChunker.
             overlap: Word overlap between consecutive chunks.
+            chunker: Chunker instance to use. Defaults to ``SectionChunker``, which
+                detects section headers and falls back to window chunking.
             embedding_model: Embedding model to use. When ``None``, no
                 embeddings are generated and upsert is skipped.
             vector_source: VectorSource backend from blue-data. When ``None``,
@@ -47,7 +50,7 @@ class DocumentPipeline:
         """
         self.text_parser = TextParser()
         self.pdf_parser = PDFParser()
-        self.chunker = WindowChunker(chunk_size=chunk_size, overlap=overlap)
+        self.chunker = chunker or SectionChunker(chunk_size=chunk_size, overlap=overlap)
         self.embedding_model = embedding_model
         self.vector_source = vector_source
         self.enricher = enricher
@@ -92,11 +95,17 @@ class DocumentPipeline:
         ingested_at: str,
         page_start: Optional[int] = None,
         page_end: Optional[int] = None,
+        section_title: Optional[str] = None,
         mime_type: str = "text/plain",
     ) -> ChunkRecord:
         embedding = None
         if self.embedding_model is not None:
             embedding = self.embedding_model.embed_text(chunk_text)
+            if len(embedding) != self.embedding_model.dim:
+                raise ValueError(
+                    f"Embedding dimension mismatch: expected {self.embedding_model.dim}, "
+                    f"got {len(embedding)}"
+                )
 
         entities = []
         semantic_hints: Dict[str, Any] = {}
@@ -113,6 +122,7 @@ class DocumentPipeline:
             text=chunk_text,
             page_start=page_start,
             page_end=page_end,
+            section_title=section_title,
             entities=entities,
             semantic_hints=semantic_hints,
             embedding=embedding,
@@ -143,15 +153,32 @@ class DocumentPipeline:
                 doc=record_dict,
             )
 
+    def ensure_index(self, collection: Optional[str] = None) -> None:
+        """Create the vector index for a collection if it does not already exist.
+
+        Must be called before the first ingest when using a vector store, or the
+        store may reject upserts that target a non-existent index.
+
+        Args:
+            collection: Collection / index name. Defaults to the instance-level collection.
+        """
+        if self.vector_source is None or self.embedding_model is None:
+            return
+        self.vector_source.create_index(
+            index_name=collection or self.collection,
+            collection=collection or self.collection,
+            dim=self.embedding_model.dim,
+        )
+
     def _ingest_txt(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
         text = self.text_parser.parse(str(file_path))
-        chunks = self.chunker.chunk(text)
+        chunks = self.chunker.chunk_with_titles(text)
 
         document_id = self._file_document_id(file_path)
         ingested_at = datetime.now(timezone.utc).isoformat()
         records = []
 
-        for idx, chunk_text in enumerate(chunks):
+        for idx, (section_title, chunk_text) in enumerate(chunks):
             chunk_id = f"{document_id}_chunk_{idx:04d}"
             record = self._make_record(
                 document_id=document_id,
@@ -159,6 +186,7 @@ class DocumentPipeline:
                 file_path=file_path,
                 chunk_text=chunk_text,
                 chunk_index=idx,
+                section_title=section_title,
                 mime_type="text/plain",
                 ingested_at=ingested_at,
             )
@@ -178,9 +206,9 @@ class DocumentPipeline:
 
         for page in pages:
             page_num = page["page_num"]
-            chunks = self.chunker.chunk(page["text"])
+            chunks = self.chunker.chunk_with_titles(page["text"])
 
-            for chunk_text in chunks:
+            for section_title, chunk_text in chunks:
                 chunk_id = f"{document_id}_chunk_{chunk_index:04d}"
                 record = self._make_record(
                     document_id=document_id,
@@ -190,6 +218,7 @@ class DocumentPipeline:
                     chunk_index=chunk_index,
                     page_start=page_num,
                     page_end=page_num,
+                    section_title=section_title,
                     mime_type="application/pdf",
                     ingested_at=ingested_at,
                 )

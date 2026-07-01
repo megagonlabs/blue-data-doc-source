@@ -74,8 +74,13 @@ class DocumentDataSource(DataSource):
             return self._ingest(query, collection)
         elif op == "DOCUMENT.SEARCH":
             return self._search(query, collection)
+        elif op == "DOCUMENT.ENSURE_INDEX":
+            return self._ensure_index(query, collection)
         else:
-            raise ValueError(f"Unsupported op: {op!r}. Expected DOCUMENT.INGEST or DOCUMENT.SEARCH")
+            raise ValueError(
+                f"Unsupported op: {op!r}. "
+                "Expected DOCUMENT.INGEST, DOCUMENT.SEARCH, or DOCUMENT.ENSURE_INDEX"
+            )
 
     def _ingest(self, request: Dict[str, Any], collection_override=None) -> List[Dict[str, Any]]:
         path = request.get("path")
@@ -93,3 +98,7 @@ class DocumentDataSource(DataSource):
         collection = collection_override or request.get("collection")
         k = request.get("k", 5)
         return self._pipeline.search(query_text, k=k, collection=collection)
+
+    def _ensure_index(self, request: Dict[str, Any], collection_override=None) -> None:
+        collection = collection_override or request.get("collection")
+        self._pipeline.ensure_index(collection=collection)

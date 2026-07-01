@@ -164,3 +164,56 @@ def test_search_collection_override():
     )
     pipeline.search("query", collection="override")
     assert vector_source.knn.call_args.kwargs["index_name"] == "override"
+
+
+def test_section_title_in_record(tmp_path):
+    f = tmp_path / "doc.txt"
+    f.write_text("# Eligibility\nCustomers must meet the following criteria.", encoding="utf-8")
+    pipeline = DocumentPipeline(chunk_size=200, overlap=0)
+    records = pipeline.ingest(str(f))
+    titled = [r for r in records if r.get("section_title") == "Eligibility"]
+    assert len(titled) > 0
+
+
+def test_plain_text_section_title_absent(tmp_path):
+    path = make_txt(tmp_path, "no headers here just plain words")
+    records = DocumentPipeline(chunk_size=200, overlap=0).ingest(path)
+    assert all("section_title" not in r for r in records)
+
+
+def test_ensure_index_calls_create_index():
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+        collection="docs",
+    )
+    pipeline.ensure_index()
+    vector_source.create_index.assert_called_once_with(
+        index_name="docs", collection="docs", dim=8
+    )
+
+
+def test_ensure_index_collection_override():
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+        collection="default",
+    )
+    pipeline.ensure_index(collection="override")
+    assert vector_source.create_index.call_args.kwargs["index_name"] == "override"
+
+
+def test_ensure_index_no_op_without_vector_source():
+    pipeline = DocumentPipeline(embedding_model=DummyEmbeddingModel(dim=8))
+    pipeline.ensure_index()  # should not raise
+
+
+def test_ensure_index_no_op_without_embedding_model():
+    pipeline = DocumentPipeline(vector_source=MagicMock())
+    pipeline.ensure_index()  # should not raise
+
+
+def test_embedding_dim_property():
+    assert DummyEmbeddingModel(dim=16).dim == 16

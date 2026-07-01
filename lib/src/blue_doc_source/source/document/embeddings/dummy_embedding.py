@@ -16,7 +16,11 @@ class DummyEmbeddingModel(EmbeddingModel):
         Args:
             dim: Output vector length (max 32, limited by SHA-256 digest size).
         """
-        self.dim = dim
+        self._dim = dim
+
+    @property
+    def dim(self) -> int:
+        return self._dim
 
     def embed_text(self, text: str) -> List[float]:
         digest = hashlib.sha256(text.encode("utf-8")).digest()

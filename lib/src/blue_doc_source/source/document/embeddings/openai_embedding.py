@@ -1,8 +1,14 @@
-from typing import List
+from typing import Dict, List
 
 from openai import OpenAI
 
 from .base import EmbeddingModel
+
+_MODEL_DIMS: Dict[str, int] = {
+    "text-embedding-3-small": 1536,
+    "text-embedding-3-large": 3072,
+    "text-embedding-ada-002": 1536,
+}
 
 
 class OpenAIEmbeddingModel(EmbeddingModel):
@@ -22,6 +28,15 @@ class OpenAIEmbeddingModel(EmbeddingModel):
         """
         self.model = model
         self.client = OpenAI(api_key=api_key)
+
+    @property
+    def dim(self) -> int:
+        if self.model not in _MODEL_DIMS:
+            raise ValueError(
+                f"Unknown embedding model {self.model!r}. "
+                f"Known models: {list(_MODEL_DIMS)}"
+            )
+        return _MODEL_DIMS[self.model]
 
     def embed_text(self, text: str) -> List[float]:
         response = self.client.embeddings.create(input=text, model=self.model)

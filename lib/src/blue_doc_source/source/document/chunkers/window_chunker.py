@@ -1,7 +1,9 @@
-from typing import List
+from typing import List, Optional, Tuple
+
+from .base import Chunker
 
 
-class WindowChunker:
+class WindowChunker(Chunker):
     """Splits text into overlapping chunks using a word-count sliding window.
 
     Chunk boundaries are word-aligned, so chunk sizes are exact in words but
@@ -59,3 +61,6 @@ class WindowChunker:
             start = end - self.overlap
 
         return chunks
+
+    def chunk_with_titles(self, text: str) -> List[Tuple[Optional[str], str]]:
+        return [(None, chunk) for chunk in self.chunk(text)]

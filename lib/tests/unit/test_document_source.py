@@ -111,3 +111,24 @@ def test_deduplication_same_file_same_document_id(tmp_path):
     first = source.execute_query({"op": "DOCUMENT.INGEST", "path": path})
     second = source.execute_query({"op": "DOCUMENT.INGEST", "path": path})
     assert first[0]["document_id"] == second[0]["document_id"]
+
+
+def test_ensure_index_op_calls_create_index():
+    vector_source = MagicMock()
+    source = DocumentDataSource(
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+        default_collection="docs",
+    )
+    source.execute_query({"op": "DOCUMENT.ENSURE_INDEX"})
+    vector_source.create_index.assert_called_once()
+
+
+def test_ensure_index_op_collection_override():
+    vector_source = MagicMock()
+    source = DocumentDataSource(
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    source.execute_query({"op": "DOCUMENT.ENSURE_INDEX", "collection": "contracts"})
+    assert vector_source.create_index.call_args.kwargs["index_name"] == "contracts"
