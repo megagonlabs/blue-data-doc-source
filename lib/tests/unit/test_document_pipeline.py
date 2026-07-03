@@ -231,6 +231,73 @@ def test_embedding_dim_property():
     assert DummyEmbeddingModel(dim=16).dim == 16
 
 
+def test_ensure_index_idempotent_no_double_create():
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+        collection="docs",
+    )
+    pipeline.ensure_index()
+    pipeline.ensure_index()
+    assert vector_source.create_index.call_count == 1
+
+
+def test_ensure_index_suppresses_already_exists_error():
+    vector_source = MagicMock()
+    vector_source.create_index.side_effect = Exception("Index already exists")
+    pipeline = DocumentPipeline(
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    pipeline.ensure_index()  # should not raise
+
+
+def test_ensure_index_reraises_other_errors():
+    vector_source = MagicMock()
+    vector_source.create_index.side_effect = Exception("Connection refused")
+    pipeline = DocumentPipeline(
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    with pytest.raises(Exception, match="Connection refused"):
+        pipeline.ensure_index()
+
+
+def test_stale_chunks_deleted_on_content_change(tmp_path):
+    path = tmp_path / "doc.txt"
+    path.write_text("original content", encoding="utf-8")
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(
+        chunk_size=50,
+        overlap=0,
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    pipeline.ingest(str(path))
+    first_call_count = vector_source.upsert.call_count
+
+    path.write_text("completely different content that changes the hash", encoding="utf-8")
+    pipeline.ingest(str(path))
+
+    vector_source.delete.assert_called()
+    assert vector_source.upsert.call_count > first_call_count
+
+
+def test_same_content_no_delete(tmp_path):
+    path = make_txt(tmp_path)
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(
+        chunk_size=50,
+        overlap=0,
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    pipeline.ingest(str(path))
+    pipeline.ingest(str(path))
+    vector_source.delete.assert_not_called()
+
+
 def test_embedding_dim_mismatch_raises(tmp_path):
     path = make_txt(tmp_path)
     pipeline = DocumentPipeline(chunk_size=50, overlap=0, embedding_model=_WrongDimModel())

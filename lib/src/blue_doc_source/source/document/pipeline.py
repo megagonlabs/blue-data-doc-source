@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from blue_data.source.vector.vector_source import VectorSource
 
@@ -57,6 +57,10 @@ class DocumentPipeline:
         self.collection = collection
         self.chunk_size = chunk_size
         self.overlap = overlap
+        # path → (document_id, chunk_count, collection) — used to delete stale chunks
+        self._doc_registry: Dict[str, Tuple[str, int, str]] = {}
+        # collections for which create_index has already succeeded this session
+        self._index_created: Set[str] = set()
 
     def ingest(self, path: str, collection: Optional[str] = None) -> List[Dict[str, Any]]:
         """Parse, chunk, enrich, and embed a file.
@@ -156,25 +160,64 @@ class DocumentPipeline:
     def ensure_index(self, collection: Optional[str] = None) -> None:
         """Create the vector index for a collection if it does not already exist.
 
-        Must be called before the first ingest when using a vector store, or the
-        store may reject upserts that target a non-existent index.
+        Idempotent: safe to call multiple times. Skips the call if this pipeline
+        instance already created the index this session. If the backend reports
+        that the index already exists, the error is suppressed.
 
         Args:
             collection: Collection / index name. Defaults to the instance-level collection.
         """
         if self.vector_source is None or self.embedding_model is None:
             return
-        self.vector_source.create_index(
-            index_name=collection or self.collection,
-            collection=collection or self.collection,
-            dim=self.embedding_model.dim,
-        )
+        target = collection or self.collection
+        if target in self._index_created:
+            return
+        try:
+            self.vector_source.create_index(
+                index_name=target,
+                collection=target,
+                dim=self.embedding_model.dim,
+            )
+        except Exception as exc:
+            if "already exists" not in str(exc).lower():
+                raise
+        self._index_created.add(target)
+
+    def _cleanup_stale_chunks(self, file_path: Path, new_doc_id: str) -> None:
+        """Delete chunks from the previous version of a file when content has changed.
+
+        Best-effort: individual delete failures are silently ignored so a partially
+        cleaned-up state does not block the new ingest.
+
+        Note: the registry is in-process only. Stale chunks from previous process
+        runs are not cleaned up automatically; use DOCUMENT.DELETE for that.
+        """
+        key = str(file_path)
+        if key not in self._doc_registry:
+            return
+        old_doc_id, old_count, old_collection = self._doc_registry[key]
+        if old_doc_id == new_doc_id:
+            return  # same content — upsert will overwrite in place
+        if self.vector_source is None:
+            return
+        for idx in range(old_count):
+            try:
+                self.vector_source.delete(
+                    collection=old_collection,
+                    doc_id=f"{old_doc_id}_chunk_{idx:04d}",
+                )
+            except Exception:
+                pass
+
+    def _register_doc(self, file_path: Path, doc_id: str, chunk_count: int, collection: str) -> None:
+        self._doc_registry[str(file_path)] = (doc_id, chunk_count, collection)
 
     def _ingest_txt(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
         text = self.text_parser.parse(str(file_path))
         chunks = self.chunker.chunk_with_titles(text)
 
         document_id = self._file_document_id(file_path)
+        self._cleanup_stale_chunks(file_path, document_id)
         ingested_at = datetime.now(timezone.utc).isoformat()
         records = []
 
@@ -194,12 +237,14 @@ class DocumentPipeline:
             records.append(record_dict)
             self._upsert(chunk_id, record_dict, collection)
 
+        self._register_doc(file_path, document_id, len(records), collection)
         return records
 
     def _ingest_pdf(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
         pages = self.pdf_parser.parse_pages(str(file_path))
 
         document_id = self._file_document_id(file_path)
+        self._cleanup_stale_chunks(file_path, document_id)
         ingested_at = datetime.now(timezone.utc).isoformat()
         records = []
         chunk_index = 0
@@ -227,6 +272,7 @@ class DocumentPipeline:
                 self._upsert(chunk_id, record_dict, collection)
                 chunk_index += 1
 
+        self._register_doc(file_path, document_id, len(records), collection)
         return records
 
     def search(self, query: str, k: int = 5, collection: Optional[str] = None) -> List[Dict[str, Any]]:
