@@ -52,12 +52,15 @@ File (.txt / .pdf)
 
 **`DocumentDataSource`** is the top-level public entry point. It extends blue-data's `DataSource`
 abstraction and dispatches on `op` codes: `DOCUMENT.INGEST`, `DOCUMENT.SEARCH`,
-`DOCUMENT.ENSURE_INDEX`. It owns a single `DocumentPipeline` instance reused across calls.
+`DOCUMENT.ENSURE_INDEX`, `DOCUMENT.DELETE`. It owns a single `DocumentPipeline` instance reused
+across calls.
 
 **`DocumentPipeline`** orchestrates the ingestion chain. Auto-detects `.txt` vs `.pdf` by
 extension. `ingest(path)` returns `List[Dict]` and optionally upserts to a vector store.
 `search(query)` embeds the query and delegates KNN to the injected `VectorSource`.
 `ensure_index(collection)` calls `VectorSource.create_index` with the correct embedding dim.
+`delete(path=...)` or `delete(document_id=..., chunk_count=...)` removes all chunks for a
+document from the vector store.
 
 **`VectorSource`** is blue-data's abstraction (lives in the `blue-data` repo). The pipeline
 accepts any `VectorSource` implementation (e.g. `RedisVectorSource`) — no adapter layer needed.
