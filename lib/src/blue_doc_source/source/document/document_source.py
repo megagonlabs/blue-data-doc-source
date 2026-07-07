@@ -18,6 +18,8 @@ class DocumentDataSource(DataSource):
 
     - ``DOCUMENT.INGEST`` — parse, chunk, enrich, embed, and upsert a document
     - ``DOCUMENT.SEARCH`` — embed a query and return matching chunks via KNN
+    - ``DOCUMENT.ENSURE_INDEX`` — create the vector index (idempotent)
+    - ``DOCUMENT.DELETE`` — remove all chunks for a document from the vector store
 
     Example::
 
@@ -76,10 +78,12 @@ class DocumentDataSource(DataSource):
             return self._search(query, collection)
         elif op == "DOCUMENT.ENSURE_INDEX":
             return self._ensure_index(query, collection)
+        elif op == "DOCUMENT.DELETE":
+            return self._delete(query, collection)
         else:
             raise ValueError(
                 f"Unsupported op: {op!r}. "
-                "Expected DOCUMENT.INGEST, DOCUMENT.SEARCH, or DOCUMENT.ENSURE_INDEX"
+                "Expected DOCUMENT.INGEST, DOCUMENT.SEARCH, DOCUMENT.ENSURE_INDEX, or DOCUMENT.DELETE"
             )
 
     def _ingest(self, request: Dict[str, Any], collection_override=None) -> List[Dict[str, Any]]:
@@ -102,3 +106,15 @@ class DocumentDataSource(DataSource):
     def _ensure_index(self, request: Dict[str, Any], collection_override=None) -> None:
         collection = collection_override or request.get("collection")
         self._pipeline.ensure_index(collection=collection)
+
+    def _delete(self, request: Dict[str, Any], collection_override=None) -> int:
+        path = request.get("path")
+        document_id = request.get("document_id")
+        chunk_count = request.get("chunk_count")
+        collection = collection_override or request.get("collection")
+        return self._pipeline.delete(
+            path=path,
+            document_id=document_id,
+            chunk_count=chunk_count,
+            collection=collection,
+        )

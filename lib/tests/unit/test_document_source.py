@@ -81,7 +81,41 @@ def test_search_op_passes_k():
 def test_unsupported_op_raises():
     source = DocumentDataSource()
     with pytest.raises(ValueError, match="Unsupported op"):
-        source.execute_query({"op": "DOCUMENT.DELETE"})
+        source.execute_query({"op": "DOCUMENT.UNKNOWN"})
+
+
+def test_delete_op_removes_chunks(tmp_path):
+    vector_source = MagicMock()
+    source = DocumentDataSource(
+        chunk_size=5,
+        overlap=1,
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    path = make_txt(tmp_path)
+    records = source.execute_query({"op": "DOCUMENT.INGEST", "path": path})
+    deleted = source.execute_query({"op": "DOCUMENT.DELETE", "path": path})
+    assert deleted == len(records)
+    assert vector_source.delete.call_count == len(records)
+
+
+def test_delete_op_cross_process(tmp_path):
+    vector_source = MagicMock()
+    source = DocumentDataSource(
+        chunk_size=5,
+        overlap=1,
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    path = make_txt(tmp_path)
+    records = source.execute_query({"op": "DOCUMENT.INGEST", "path": path})
+    doc_id = records[0]["document_id"]
+    deleted = source.execute_query({
+        "op": "DOCUMENT.DELETE",
+        "document_id": doc_id,
+        "chunk_count": len(records),
+    })
+    assert deleted == len(records)
 
 
 def test_ingest_with_enricher(tmp_path):

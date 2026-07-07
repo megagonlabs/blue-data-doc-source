@@ -15,7 +15,12 @@ class DummyEmbeddingModel(EmbeddingModel):
         """
         Args:
             dim: Output vector length (max 32, limited by SHA-256 digest size).
+
+        Raises:
+            ValueError: If dim is not between 1 and 32.
         """
+        if not (1 <= dim <= 32):
+            raise ValueError(f"DummyEmbeddingModel dim must be between 1 and 32, got {dim}")
         self._dim = dim
 
     @property

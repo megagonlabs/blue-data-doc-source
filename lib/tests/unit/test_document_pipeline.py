@@ -403,3 +403,91 @@ def test_custom_chunker_is_used(tmp_path):
     pipeline = DocumentPipeline(chunker=window)
     records = pipeline.ingest(path)
     assert len(records) > 0
+
+
+def test_chunk_id_uses_six_digit_index(tmp_path):
+    path = make_txt(tmp_path, " ".join(["word"] * 20))
+    pipeline = DocumentPipeline(chunk_size=5, overlap=0)
+    records = pipeline.ingest(path)
+    for record in records:
+        suffix = record["chunk_id"].split("_chunk_")[1]
+        assert len(suffix) == 6, f"Expected 6-digit index, got {suffix!r}"
+
+
+# --- DOCUMENT.DELETE ---
+
+def test_delete_by_path(tmp_path):
+    path = make_txt(tmp_path)
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(
+        chunk_size=5, overlap=1,
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    records = pipeline.ingest(str(path))
+    deleted = pipeline.delete(path=str(path))
+    assert deleted == len(records)
+    assert vector_source.delete.call_count == len(records)
+
+
+def test_delete_by_document_id_and_chunk_count(tmp_path):
+    path = make_txt(tmp_path)
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(
+        chunk_size=5, overlap=1,
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    records = pipeline.ingest(str(path))
+    doc_id = records[0]["document_id"]
+    deleted = pipeline.delete(document_id=doc_id, chunk_count=len(records))
+    assert deleted == len(records)
+
+
+def test_delete_clears_registry(tmp_path):
+    path = make_txt(tmp_path)
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(
+        chunk_size=5, overlap=1,
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    pipeline.ingest(str(path))
+    pipeline.delete(path=str(path))
+    assert str(path) not in pipeline._doc_registry
+
+
+def test_delete_requires_vector_source(tmp_path):
+    path = make_txt(tmp_path)
+    pipeline = DocumentPipeline(chunk_size=5, overlap=1)
+    pipeline.ingest(str(path))
+    with pytest.raises(ValueError, match="vector_source"):
+        pipeline.delete(path=str(path))
+
+
+def test_delete_unknown_path_raises(tmp_path):
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(vector_source=vector_source)
+    with pytest.raises(ValueError, match="No registry entry"):
+        pipeline.delete(path=str(tmp_path / "unknown.txt"))
+
+
+def test_delete_missing_args_raises():
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(vector_source=vector_source)
+    with pytest.raises(ValueError, match="document_id"):
+        pipeline.delete()
+
+
+def test_delete_handles_backend_failure_gracefully(tmp_path):
+    path = make_txt(tmp_path)
+    vector_source = MagicMock()
+    vector_source.delete.side_effect = Exception("Redis gone")
+    pipeline = DocumentPipeline(
+        chunk_size=5, overlap=1,
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    pipeline.ingest(str(path))
+    deleted = pipeline.delete(path=str(path))
+    assert deleted == 0  # all failed silently

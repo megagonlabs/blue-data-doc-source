@@ -204,7 +204,7 @@ class DocumentPipeline:
             try:
                 self.vector_source.delete(
                     collection=old_collection,
-                    doc_id=f"{old_doc_id}_chunk_{idx:04d}",
+                    doc_id=f"{old_doc_id}_chunk_{idx:06d}",
                 )
             except Exception:
                 pass
@@ -222,7 +222,7 @@ class DocumentPipeline:
         records = []
 
         for idx, (section_title, chunk_text) in enumerate(chunks):
-            chunk_id = f"{document_id}_chunk_{idx:04d}"
+            chunk_id = f"{document_id}_chunk_{idx:06d}"
             record = self._make_record(
                 document_id=document_id,
                 chunk_id=chunk_id,
@@ -254,7 +254,7 @@ class DocumentPipeline:
             chunks = self.chunker.chunk_with_titles(page["text"])
 
             for section_title, chunk_text in chunks:
-                chunk_id = f"{document_id}_chunk_{chunk_index:04d}"
+                chunk_id = f"{document_id}_chunk_{chunk_index:06d}"
                 record = self._make_record(
                     document_id=document_id,
                     chunk_id=chunk_id,
@@ -274,6 +274,78 @@ class DocumentPipeline:
 
         self._register_doc(file_path, document_id, len(records), collection)
         return records
+
+    def delete(
+        self,
+        path: Optional[str] = None,
+        document_id: Optional[str] = None,
+        chunk_count: Optional[int] = None,
+        collection: Optional[str] = None,
+    ) -> int:
+        """Delete all chunks for a document from the vector store.
+
+        Two ways to identify the document:
+
+        - Pass ``path``: looks up the in-process registry populated by ``ingest()``.
+          Fails with ``ValueError`` if the path is unknown (e.g. ingested in a
+          different process). Removes the registry entry after deletion.
+        - Pass both ``document_id`` and ``chunk_count``: reconstructs chunk IDs
+          directly, enabling cross-process deletion when the caller stores the
+          ingest response.
+
+        Args:
+            path: File path used during ingestion.
+            document_id: Content-hash document ID from ``ChunkRecord.document_id``.
+            chunk_count: Total number of chunks (``len(ingest(...))``).
+            collection: Collection to delete from. Defaults to the registered
+                collection for the path, or the instance-level default.
+
+        Returns:
+            Number of successful delete calls issued.
+
+        Raises:
+            ValueError: If neither ``path`` nor ``document_id + chunk_count`` is
+                provided, if ``path`` is not in the registry, or if
+                ``vector_source`` is not set.
+        """
+        if self.vector_source is None:
+            raise ValueError("A vector_source is required for delete")
+
+        doc_id: str
+        count: int
+        target: str
+
+        if path is not None:
+            key = str(Path(path))
+            if key not in self._doc_registry:
+                raise ValueError(
+                    f"No registry entry for {path!r}. "
+                    "Pass document_id and chunk_count to delete cross-process."
+                )
+            doc_id, count, reg_collection = self._doc_registry[key]
+            target = collection or reg_collection
+        elif document_id is not None and chunk_count is not None:
+            doc_id = document_id
+            count = chunk_count
+            target = collection or self.collection
+        else:
+            raise ValueError(
+                "Provide either 'path' or both 'document_id' and 'chunk_count'"
+            )
+
+        deleted = 0
+        for idx in range(count):
+            chunk_id = f"{doc_id}_chunk_{idx:06d}"
+            try:
+                self.vector_source.delete(collection=target, doc_id=chunk_id)
+                deleted += 1
+            except Exception:
+                pass
+
+        if path is not None:
+            self._doc_registry.pop(str(Path(path)), None)
+
+        return deleted
 
     def search(self, query: str, k: int = 5, collection: Optional[str] = None) -> List[Dict[str, Any]]:
         """Embed a query and return the k nearest chunks from the vector store.
