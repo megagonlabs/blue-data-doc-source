@@ -54,6 +54,13 @@ def test_semantic_hints_has_numbers():
     assert enricher.enrich("No numbers here.")["semantic_hints"]["has_numbers"] is False
 
 
+def test_extracts_money_entity():
+    enricher = BasicEnricher()
+    result = enricher.enrich("The total cost is $1,500.00.")
+    money = [e for e in result["entities"] if e["type"] == "MONEY"]
+    assert len(money) > 0
+
+
 def test_empty_text_returns_empty():
     enricher = BasicEnricher()
     result = enricher.enrich("")

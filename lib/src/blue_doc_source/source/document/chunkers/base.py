@@ -16,4 +16,4 @@ class Chunker(ABC):
             List of (section_title, chunk_text) tuples. ``section_title`` is
             ``None`` when the chunk does not belong to a named section.
         """
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover

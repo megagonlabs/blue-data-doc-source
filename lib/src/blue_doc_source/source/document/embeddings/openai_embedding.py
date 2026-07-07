@@ -38,6 +38,6 @@ class OpenAIEmbeddingModel(EmbeddingModel):
             )
         return _MODEL_DIMS[self.model]
 
-    def embed_text(self, text: str) -> List[float]:
+    def embed_text(self, text: str) -> List[float]:  # pragma: no cover
         response = self.client.embeddings.create(input=text, model=self.model)
         return response.data[0].embedding

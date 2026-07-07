@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from blue_doc_source.source.document.pipeline import DocumentPipeline
 from blue_doc_source.source.document.embeddings import DummyEmbeddingModel, EmbeddingModel
 from blue_doc_source.source.document.chunkers import SectionChunker, WindowChunker
@@ -308,6 +308,93 @@ def test_embedding_dim_mismatch_raises(tmp_path):
 def test_default_chunker_is_section_chunker():
     pipeline = DocumentPipeline()
     assert isinstance(pipeline.chunker, SectionChunker)
+
+
+@patch("blue_doc_source.source.document.pipeline.PDFParser")
+def test_ingest_pdf_returns_records(mock_parser_cls, tmp_path):
+    pdf_path = tmp_path / "doc.pdf"
+    pdf_path.write_bytes(b"fake")
+    mock_parser_cls.return_value.parse_pages.return_value = [
+        {"page_num": 1, "text": "Page one content here."},
+        {"page_num": 2, "text": "Page two content here."},
+    ]
+    pipeline = DocumentPipeline(chunk_size=200, overlap=0)
+    records = pipeline.ingest(str(pdf_path))
+    assert len(records) >= 2
+    assert records[0]["mime_type"] == "application/pdf"
+
+
+@patch("blue_doc_source.source.document.pipeline.PDFParser")
+def test_ingest_pdf_page_provenance(mock_parser_cls, tmp_path):
+    pdf_path = tmp_path / "doc.pdf"
+    pdf_path.write_bytes(b"fake")
+    mock_parser_cls.return_value.parse_pages.return_value = [
+        {"page_num": 3, "text": "Content on page three."},
+    ]
+    pipeline = DocumentPipeline(chunk_size=200, overlap=0)
+    records = pipeline.ingest(str(pdf_path))
+    assert records[0]["page_start"] == 3
+    assert records[0]["page_end"] == 3
+
+
+@patch("blue_doc_source.source.document.pipeline.PDFParser")
+def test_ingest_pdf_upserts_to_vector_source(mock_parser_cls, tmp_path):
+    pdf_path = tmp_path / "doc.pdf"
+    pdf_path.write_bytes(b"fake")
+    mock_parser_cls.return_value.parse_pages.return_value = [
+        {"page_num": 1, "text": "Some content to embed and store."},
+    ]
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(
+        chunk_size=200,
+        overlap=0,
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    records = pipeline.ingest(str(pdf_path))
+    assert vector_source.upsert.call_count == len(records)
+
+
+@patch("blue_doc_source.source.document.pipeline.PDFParser")
+def test_ingest_pdf_section_title(mock_parser_cls, tmp_path):
+    pdf_path = tmp_path / "doc.pdf"
+    pdf_path.write_bytes(b"fake")
+    mock_parser_cls.return_value.parse_pages.return_value = [
+        {"page_num": 1, "text": "# Eligibility\nCustomers must be 18 or older."},
+    ]
+    pipeline = DocumentPipeline(chunk_size=200, overlap=0)
+    records = pipeline.ingest(str(pdf_path))
+    assert records[0].get("section_title") == "Eligibility"
+
+
+def test_stale_cleanup_no_op_without_vector_source(tmp_path):
+    f = tmp_path / "doc.txt"
+    f.write_text("first version", encoding="utf-8")
+    pipeline = DocumentPipeline(chunk_size=50, overlap=0)
+    pipeline.ingest(str(f))
+    f.write_text("second version with changed content", encoding="utf-8")
+    # should not raise even without a vector_source
+    records = pipeline.ingest(str(f))
+    assert len(records) > 0
+
+
+def test_stale_cleanup_delete_failure_does_not_block_ingest(tmp_path):
+    f = tmp_path / "doc.txt"
+    f.write_text("first version content here", encoding="utf-8")
+    vector_source = MagicMock()
+    vector_source.delete.side_effect = Exception("Redis connection lost")
+    pipeline = DocumentPipeline(
+        chunk_size=50,
+        overlap=0,
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    pipeline.ingest(str(f))
+    f.write_text("completely different second version", encoding="utf-8")
+    # delete will fail but ingest should still succeed
+    records = pipeline.ingest(str(f))
+    assert len(records) > 0
+    vector_source.delete.assert_called()
 
 
 def test_custom_chunker_is_used(tmp_path):

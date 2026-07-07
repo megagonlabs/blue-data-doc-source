@@ -17,4 +17,4 @@ class Enricher(ABC):
             - ``entities``: list of ``{text: str, type: str}`` dicts
             - ``semantic_hints``: dict of scalar metadata about the chunk
         """
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover

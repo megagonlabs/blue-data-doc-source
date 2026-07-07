@@ -9,7 +9,7 @@ class EmbeddingModel(ABC):
     @abstractmethod
     def dim(self) -> int:
         """Output vector dimension. Must match the target vector index configuration."""
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
     @abstractmethod
     def embed_text(self, text: str) -> List[float]:
@@ -21,4 +21,4 @@ class EmbeddingModel(ABC):
         Returns:
             A list of floats representing the embedding vector.
         """
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
