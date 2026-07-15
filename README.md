@@ -84,24 +84,30 @@ Upsert only fires when both `embedding_model` and `vector_source` are provided a
 ## CLI example
 
 ```bash
-# Ingest with dummy embeddings (no OpenAI key required)
-python examples/ingest_txt.py sample.txt --embedding dummy
+# Ingest the sample policy — no embeddings, just inspect chunks
+python examples/ingest_txt.py
 
-# Ingest a PDF with OpenAI embeddings and run a search query
-python examples/ingest_txt.py report.pdf --embedding openai --query "eligibility requirements"
+# Ingest with dummy embeddings
+python examples/ingest_txt.py --embedding dummy
+
+# Ingest your own file
+python examples/ingest_txt.py path/to/doc.txt --embedding dummy --query "eligibility requirements"
 ```
 
 ## Local end-to-end demo (PDF → Redis → search)
 
 `examples/demo_pdf.py` runs the full pipeline against a local Redis Stack instance.
+Sample data is included in `data/` — no file needed to get started.
 
 ### Prerequisites
 
 **Redis Stack** (provides RediSearch + RedisJSON):
 
 ```bash
-docker run -p 6379:6379 redis/redis-stack-server:latest
+docker run -d -p 6379:6379 redis/redis-stack-server:latest
 ```
+
+> If Redis is already running on port 6379 (e.g. from a previous session), this command will fail — that's fine, just skip it and proceed.
 
 **Install dependencies** (includes `redis[hiredis]`):
 
@@ -112,11 +118,17 @@ pip install -e .
 ### Run
 
 ```bash
-# Dummy embeddings — no OpenAI key required, not real semantic similarity
-python examples/demo_pdf.py mydoc.pdf --query "eligibility requirements"
+# Zero-config — uses data/sample_policy.pdf and a built-in query
+python examples/demo_pdf.py
+
+# Custom query
+python examples/demo_pdf.py --query "what happens if I miss a premium payment"
+
+# Your own PDF
+python examples/demo_pdf.py path/to/doc.pdf --query "termination clause"
 
 # Real semantic search via OpenAI
-OPENAI_API_KEY=sk-... python examples/demo_pdf.py mydoc.pdf \
+OPENAI_API_KEY=sk-... python examples/demo_pdf.py \
     --query "eligibility requirements" \
     --embedding openai
 ```
@@ -125,7 +137,8 @@ OPENAI_API_KEY=sk-... python examples/demo_pdf.py mydoc.pdf \
 
 | Flag | Default | Description |
 |---|---|---|
-| `--query` | required | Search query to run after ingestion |
+| `path` | `data/sample_policy.pdf` | Path to a `.pdf` file |
+| `--query` | built-in | Search query to run after ingestion |
 | `--embedding` | `dummy` | `dummy` (SHA-256 hash) or `openai` |
 | `--openai-model` | `text-embedding-3-small` | OpenAI embedding model |
 | `--chunk-size` | `300` | Max words per chunk |

@@ -3,13 +3,13 @@
 Requires Redis Stack running locally:
     docker run -p 6379:6379 redis/redis-stack-server:latest
 """
+import json
 import struct
 from typing import Any, Dict, List, Optional
 
 import redis
 from redis.commands.search.field import NumericField, TextField, VectorField
-from redis.commands.search.indexDefinition import IndexDefinition, IndexType
-from redis.commands.search.query import Query
+from redis.commands.search.index_definition import IndexDefinition, IndexType
 
 
 class LocalRedisVectorStore:
@@ -70,21 +70,22 @@ class LocalRedisVectorStore:
         return_fields: Optional[List[str]] = None,
         filter_expr: str = "*",
     ) -> List[Dict[str, Any]]:
-        fields = return_fields or ["text", "document_id", "chunk_id", "file_name", "page_start", "page_end"]
         vec_bytes = struct.pack(f"{len(query_vector)}f", *query_vector)
-        q = (
-            Query(f"*=>[KNN {k} @{embedding_field} $vec AS {score_alias}]")
-            .sort_by(score_alias)
-            .return_fields(*fields, score_alias)
-            .dialect(2)
+        raw = self.client.execute_command(
+            "FT.SEARCH", index_name,
+            f"*=>[KNN {k} @{embedding_field} $vec AS {score_alias}]",
+            "PARAMS", "2", "vec", vec_bytes,
+            "SORTBY", score_alias,
+            "DIALECT", "2",
         )
-        results = self.client.ft(index_name).search(q, query_params={"vec": vec_bytes})
+        results = raw.get(b"results", [])
         out = []
-        for doc in results.docs:
-            row = {}
-            for f in [*fields, score_alias]:
-                val = getattr(doc, f, None)
-                if val is not None:
-                    row[f] = val.decode() if isinstance(val, bytes) else val
-            out.append(row)
+        for item in results:
+            extra = item.get(b"extra_attributes", {})
+            score = extra.get(b"score", b"0")
+            raw_doc = extra.get(b"$", b"{}")
+            doc = json.loads(raw_doc)
+            doc[score_alias] = float(score)
+            doc.pop("embedding", None)
+            out.append(doc)
         return out
