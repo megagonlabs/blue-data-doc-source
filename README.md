@@ -15,7 +15,7 @@ pip install -e .
 Ingest a file with no embeddings — useful for inspecting chunks before wiring up a vector store:
 
 ```python
-from blue_doc_source.source.document.pipeline import DocumentPipeline
+from blue_doc_source import DocumentPipeline
 
 pipeline = DocumentPipeline(chunk_size=500, overlap=100)
 records = pipeline.ingest("mydoc.pdf")
@@ -31,9 +31,7 @@ Full pipeline: parse → chunk → enrich → embed → upsert to Redis → sear
 `blue-data-doc-source` depends on `blue-data`. Pass a `VectorSource` instance (e.g. `RedisVectorSource`) from blue-data as the `vector_source`.
 
 ```python
-from blue_doc_source.source.document.document_source import DocumentDataSource
-from blue_doc_source.source.document.embeddings import OpenAIEmbeddingModel
-from blue_doc_source.source.document.enrichment import BasicEnricher
+from blue_doc_source import DocumentDataSource, OpenAIEmbeddingModel, BasicEnricher
 from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
 
 # Instantiate blue-data's RedisVectorSource
@@ -121,16 +119,38 @@ pip install -e .
 # Zero-config — uses data/sample_policy.pdf and a built-in query
 python examples/demo_pdf.py
 
-# Custom query
-python examples/demo_pdf.py --query "what happens if I miss a premium payment"
+# With OpenAI embeddings for real semantic search
+OPENAI_API_KEY=sk-... python examples/demo_pdf.py \
+    --embedding openai \
+    --query "what is the deductible"
 
 # Your own PDF
-python examples/demo_pdf.py path/to/doc.pdf --query "termination clause"
+OPENAI_API_KEY=sk-... python examples/demo_pdf.py path/to/doc.pdf \
+    --embedding openai \
+    --query "termination clause"
+```
 
-# Real semantic search via OpenAI
-OPENAI_API_KEY=sk-... python examples/demo_pdf.py \
-    --query "eligibility requirements" \
-    --embedding openai
+### Natural language queries
+
+`--nl-query` lets you ask in plain English. Under the hood, `NLQueryParser` uses an LLM (GPT-4o-mini by default) to parse the instruction into the right op and parameters, then calls `execute_query` automatically.
+
+```python
+from blue_doc_source import DocumentDataSource, NLQueryParser, OpenAIEmbeddingModel
+
+source = DocumentDataSource(
+    embedding_model=OpenAIEmbeddingModel(),
+    vector_source=redis_source,
+    nl_parser=NLQueryParser(),
+)
+
+results = source.execute_query_nl("find the termination clause")
+records = source.execute_query_nl("ingest /docs/policy.pdf into contracts")
+```
+
+You can swap in any LLM backend via `parse_fn`:
+
+```python
+parser = NLQueryParser(parse_fn=lambda text: my_llm_call(text))
 ```
 
 ### Options
@@ -139,6 +159,7 @@ OPENAI_API_KEY=sk-... python examples/demo_pdf.py \
 |---|---|---|
 | `path` | `data/sample_policy.pdf` | Path to a `.pdf` file |
 | `--query` | built-in | Search query to run after ingestion |
+| `--nl-query` | — | Natural language query — LLM parses intent automatically (requires `--embedding openai`) |
 | `--embedding` | `dummy` | `dummy` (SHA-256 hash) or `openai` |
 | `--openai-model` | `text-embedding-3-small` | OpenAI embedding model |
 | `--chunk-size` | `300` | Max words per chunk |
@@ -179,7 +200,7 @@ Every ingested chunk becomes a `ChunkRecord`, serialised via `.to_dict()`. Optio
 | `text` | str | Chunk text |
 | `page_start` | int \| omitted | PDF only — 1-based page number |
 | `page_end` | int \| omitted | PDF only — same as `page_start` in V1 |
-| `section_title` | str \| omitted | Reserved for future use |
+| `section_title` | str \| omitted | Section heading detected by SectionChunker — omitted when no structure found |
 | `entities` | list | Extracted entities: `{text, type}` each |
 | `semantic_hints` | dict | `word_count`, `sentence_count`, `has_questions`, `has_numbers`, `keywords` |
 | `embedding` | list[float] \| omitted | Present only when an embedding model is set |

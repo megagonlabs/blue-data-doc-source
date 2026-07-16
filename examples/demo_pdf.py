@@ -4,15 +4,21 @@ Usage:
     # Start Redis Stack first:
     #   docker run -p 6379:6379 redis/redis-stack-server:latest
 
-    python examples/demo_pdf.py                            # uses sample policy
-    python examples/demo_pdf.py data/sample_policy.pdf --query "what is the deductible"
-    python examples/demo_pdf.py mydoc.pdf --query "eligibility" --embedding openai
+    python examples/demo_pdf.py                                         # dummy embeddings, built-in query
+    python examples/demo_pdf.py --embedding openai --query "what is the deductible"
+    python examples/demo_pdf.py --embedding openai --nl-query "find the termination clause"
+    python examples/demo_pdf.py mydoc.pdf --embedding openai --query "eligibility requirements"
 """
 import argparse
 import sys
 from pathlib import Path
 
-from blue_doc_source import DocumentDataSource, DummyEmbeddingModel, OpenAIEmbeddingModel
+from blue_doc_source import (
+    DocumentDataSource,
+    DummyEmbeddingModel,
+    NLQueryParser,
+    OpenAIEmbeddingModel,
+)
 
 sys.path.insert(0, str(Path(__file__).parent))
 from local_redis_store import LocalRedisVectorStore
@@ -28,7 +34,8 @@ EMBEDDING_DIMS = {
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="End-to-end PDF ingestion + search demo")
     parser.add_argument("path", nargs="?", default=str(DEFAULT_PATH), help="Path to a .pdf file")
-    parser.add_argument("--query", default=DEFAULT_QUERY, help="Search query to run after ingestion")
+    parser.add_argument("--query", default=None, help="Structured search query")
+    parser.add_argument("--nl-query", default=None, help="Natural language query (requires --embedding openai)")
     parser.add_argument("--embedding", choices=["dummy", "openai"], default="dummy")
     parser.add_argument("--openai-model", default="text-embedding-3-small")
     parser.add_argument("--chunk-size", type=int, default=300)
@@ -38,6 +45,10 @@ if __name__ == "__main__":
     parser.add_argument("--redis-host", default="localhost")
     parser.add_argument("--redis-port", type=int, default=6379)
     args = parser.parse_args()
+
+    if args.nl_query and args.embedding != "openai":
+        print("--nl-query requires --embedding openai for meaningful results.")
+        sys.exit(1)
 
     if args.embedding == "openai":
         embedding_model = OpenAIEmbeddingModel(model=args.openai_model)
@@ -49,8 +60,10 @@ if __name__ == "__main__":
         vector_store = LocalRedisVectorStore(host=args.redis_host, port=args.redis_port)
     except Exception as e:
         print(f"Could not connect to Redis: {e}")
-        print("Start Redis Stack with: docker run -p 6379:6379 redis/redis-stack-server:latest")
+        print("Start Redis Stack with: docker run -d -p 6379:6379 redis/redis-stack-server:latest")
         sys.exit(1)
+
+    nl_parser = NLQueryParser() if args.nl_query else None
 
     source = DocumentDataSource(
         name="demo",
@@ -59,6 +72,7 @@ if __name__ == "__main__":
         chunk_size=args.chunk_size,
         overlap=args.overlap,
         default_collection=args.collection,
+        nl_parser=nl_parser,
     )
 
     source.execute_query({"op": "DOCUMENT.ENSURE_INDEX", "collection": args.collection})
@@ -71,13 +85,18 @@ if __name__ == "__main__":
     })
     print(f"Stored {len(records)} chunks (collection='{args.collection}')\n")
 
-    print(f"Searching: \"{args.query}\"")
-    results = source.execute_query({
-        "op": "DOCUMENT.SEARCH",
-        "query": args.query,
-        "collection": args.collection,
-        "k": args.top_k,
-    })
+    if args.nl_query:
+        print(f"NL query: \"{args.nl_query}\"")
+        results = source.execute_query_nl(args.nl_query, collection=args.collection)
+    else:
+        query = args.query or DEFAULT_QUERY
+        print(f"Searching: \"{query}\"")
+        results = source.execute_query({
+            "op": "DOCUMENT.SEARCH",
+            "query": query,
+            "collection": args.collection,
+            "k": args.top_k,
+        })
 
     if not results:
         print("No results returned.")
