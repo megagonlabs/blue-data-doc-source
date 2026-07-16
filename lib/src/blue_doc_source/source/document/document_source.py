@@ -5,6 +5,7 @@ from blue_data.source.vector.vector_source import VectorSource
 
 from .embeddings import EmbeddingModel
 from .enrichment import Enricher
+from .nl_parser import NLQueryParser
 from .pipeline import DocumentPipeline
 
 
@@ -21,16 +22,17 @@ class DocumentDataSource(DataSource):
     - ``DOCUMENT.ENSURE_INDEX`` — create the vector index (idempotent)
     - ``DOCUMENT.DELETE`` — remove all chunks for a document from the vector store
 
-    Example::
+    Natural language queries are supported via ``execute_query_nl`` when an
+    ``NLQueryParser`` is provided::
 
         source = DocumentDataSource(
             name="contracts",
             embedding_model=OpenAIEmbeddingModel(),
             vector_source=RedisVectorSource(...),
-            enricher=BasicEnricher(),
+            nl_parser=NLQueryParser(),
         )
-        records = source.execute_query({"op": "DOCUMENT.INGEST", "path": "doc.pdf"})
-        results = source.execute_query({"op": "DOCUMENT.SEARCH", "query": "eligibility", "k": 5})
+        results = source.execute_query_nl("find the termination clause")
+        records = source.execute_query_nl("ingest /docs/policy.pdf into contracts")
     """
 
     def __init__(
@@ -42,6 +44,7 @@ class DocumentDataSource(DataSource):
         chunk_size: int = 1000,
         overlap: int = 150,
         default_collection: str = "documents",
+        nl_parser: Optional[NLQueryParser] = None,
         properties: Optional[Dict[str, Any]] = None,
     ):
         """
@@ -56,10 +59,14 @@ class DocumentDataSource(DataSource):
             overlap: Word overlap between consecutive chunks.
             default_collection: Collection name used when the request does not
                 specify one.
+            nl_parser: Optional ``NLQueryParser`` instance. Required for
+                ``execute_query_nl``. Pass a custom ``parse_fn`` to use any
+                LLM backend instead of OpenAI.
             properties: Optional metadata properties passed to DataSource.
         """
         super().__init__(name, properties)
         self._default_collection = default_collection
+        self._nl_parser = nl_parser
         self._pipeline = DocumentPipeline(
             chunk_size=chunk_size,
             overlap=overlap,
@@ -106,6 +113,34 @@ class DocumentDataSource(DataSource):
     def _ensure_index(self, request: Dict[str, Any], collection_override=None) -> None:
         collection = collection_override or request.get("collection")
         self._pipeline.ensure_index(collection=collection)
+
+    def execute_query_nl(self, text: str, database=None, collection=None, optional_properties=None):
+        """Parse a natural language instruction and execute the corresponding op.
+
+        Requires an ``NLQueryParser`` passed as ``nl_parser`` at construction time.
+
+        Args:
+            text: Natural language instruction, e.g.
+                ``"find the termination clause in the contracts collection"``.
+
+        Returns:
+            The result of the dispatched ``execute_query`` call.
+
+        Raises:
+            ValueError: If no ``nl_parser`` was provided at construction.
+        """
+        if self._nl_parser is None:
+            raise ValueError(
+                "execute_query_nl requires an nl_parser. "
+                "Pass NLQueryParser() as nl_parser= when constructing DocumentDataSource."
+            )
+        op_dict = self._nl_parser.parse(text)
+        return self.execute_query(
+            op_dict,
+            database=database,
+            collection=collection,
+            optional_properties=optional_properties,
+        )
 
     def _delete(self, request: Dict[str, Any], collection_override=None) -> int:
         path = request.get("path")
