@@ -491,3 +491,149 @@ def test_delete_handles_backend_failure_gracefully(tmp_path):
     pipeline.ingest(str(path))
     deleted = pipeline.delete(path=str(path))
     assert deleted == 0  # all failed silently
+
+
+# --- Pluggable parser tests ---
+
+from blue_doc_source.source.document.parsers import Parser
+
+
+class _StaticParser(Parser):
+    """Test parser that returns fixed pages regardless of path."""
+    def __init__(self, pages):
+        self._pages = pages
+
+    def parse(self, path: str):
+        return self._pages
+
+
+def test_custom_parser_used_when_provided(tmp_path):
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"fake")
+    parser = _StaticParser([{"page_num": 1, "text": "injected content from custom parser"}])
+    pipeline = DocumentPipeline(chunk_size=50, overlap=5, parser=parser)
+    records = pipeline.ingest(str(pdf))
+    assert len(records) == 1
+    assert records[0]["text"] == "injected content from custom parser"
+    assert records[0]["page_start"] == 1
+
+
+def test_custom_parser_sets_mime_type_from_extension(tmp_path):
+    pdf = tmp_path / "scan.pdf"
+    pdf.write_bytes(b"fake")
+    pipeline = DocumentPipeline(
+        chunk_size=50, overlap=5,
+        parser=_StaticParser([{"text": "scanned text"}]),
+    )
+    records = pipeline.ingest(str(pdf))
+    assert records[0]["mime_type"] == "application/pdf"
+
+
+def test_custom_parser_txt_extension_mime_type(tmp_path):
+    f = tmp_path / "doc.txt"
+    f.write_text("hello")
+    pipeline = DocumentPipeline(
+        chunk_size=50, overlap=5,
+        parser=_StaticParser([{"text": "custom parsed text"}]),
+    )
+    records = pipeline.ingest(str(f))
+    assert records[0]["mime_type"] == "text/plain"
+
+
+def test_default_behavior_unchanged_without_custom_parser(tmp_path):
+    path = make_txt(tmp_path, "word " * 10)
+    pipeline = DocumentPipeline(chunk_size=5, overlap=1)
+    records = pipeline.ingest(path)
+    assert len(records) > 0
+    assert records[0]["file_name"] == "test.txt"
+
+
+# --- ingest_text tests ---
+
+def test_ingest_text_returns_chunks():
+    pipeline = DocumentPipeline(chunk_size=5, overlap=1)
+    records = pipeline.ingest_text("word " * 20, file_name="report.txt")
+    assert len(records) > 0
+
+
+def test_ingest_text_record_fields():
+    pipeline = DocumentPipeline(chunk_size=50, overlap=5)
+    records = pipeline.ingest_text("some document content here", file_name="report.txt")
+    r = records[0]
+    assert r["file_name"] == "report.txt"
+    assert r["mime_type"] == "text/plain"
+    assert r["source_type"] == "document"
+    assert "document_id" in r
+    assert r["metadata"]["source_path"] is None
+
+
+def test_ingest_text_custom_mime_type():
+    pipeline = DocumentPipeline(chunk_size=50, overlap=5)
+    records = pipeline.ingest_text("content", file_name="doc.html", mime_type="text/html")
+    assert records[0]["mime_type"] == "text/html"
+
+
+def test_ingest_text_stable_document_id():
+    pipeline = DocumentPipeline(chunk_size=50, overlap=5)
+    text = "stable content"
+    r1 = pipeline.ingest_text(text, file_name="a.txt")
+    r2 = pipeline.ingest_text(text, file_name="b.txt")
+    assert r1[0]["document_id"] == r2[0]["document_id"]
+
+
+# --- ingest_pages tests ---
+
+def test_ingest_pages_returns_chunks():
+    pipeline = DocumentPipeline(chunk_size=50, overlap=5)
+    pages = [
+        {"page_num": 1, "text": "First page content with enough words to chunk properly."},
+        {"page_num": 2, "text": "Second page content with different information here."},
+    ]
+    records = pipeline.ingest_pages(pages, file_name="contract.pdf")
+    assert len(records) == 2
+
+
+def test_ingest_pages_page_provenance():
+    pipeline = DocumentPipeline(chunk_size=50, overlap=5)
+    pages = [{"page_num": 3, "text": "content on page three"}]
+    records = pipeline.ingest_pages(pages, file_name="doc.pdf")
+    assert records[0]["page_start"] == 3
+    assert records[0]["page_end"] == 3
+
+
+def test_ingest_pages_without_page_num():
+    pipeline = DocumentPipeline(chunk_size=50, overlap=5)
+    records = pipeline.ingest_pages([{"text": "no page number here"}], file_name="doc.pdf")
+    assert "page_start" not in records[0]
+    assert "page_end" not in records[0]
+
+
+def test_ingest_pages_default_mime_type():
+    pipeline = DocumentPipeline(chunk_size=50, overlap=5)
+    records = pipeline.ingest_pages([{"text": "content"}], file_name="doc.pdf")
+    assert records[0]["mime_type"] == "application/pdf"
+
+
+def test_ingest_pages_upserts_with_embedding():
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(
+        chunk_size=50, overlap=5,
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    pages = [{"page_num": 1, "text": "embeddable content for vector store"}]
+    records = pipeline.ingest_pages(pages, file_name="doc.pdf")
+    assert vector_source.upsert.call_count == len(records)
+
+
+def test_ingest_text_with_embedding():
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(
+        chunk_size=50, overlap=5,
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    records = pipeline.ingest_text("embeddable content for vector store", file_name="report.txt")
+    assert "embedding" in records[0]
+    assert len(records[0]["embedding"]) == 8
+    assert vector_source.upsert.call_count == len(records)

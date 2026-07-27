@@ -5,7 +5,7 @@ from .source.document.nl_parser import NLQueryParser
 from .source.document.chunkers import Chunker, SectionChunker, WindowChunker
 from .source.document.embeddings import EmbeddingModel, DummyEmbeddingModel, OpenAIEmbeddingModel
 from .source.document.enrichment import Enricher, BasicEnricher
-from .source.document.parsers import TextParser, PDFParser
+from .source.document.parsers import Parser, TextParser, PDFParser
 
 __all__ = [
     "DocumentDataSource",
@@ -19,6 +19,7 @@ __all__ = [
     "OpenAIEmbeddingModel",
     "Enricher",
     "BasicEnricher",
+    "Parser",
     "TextParser",
     "PDFParser",
     "NLQueryParser",

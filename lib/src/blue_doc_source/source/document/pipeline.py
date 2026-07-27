@@ -9,7 +9,7 @@ from .chunkers import Chunker, SectionChunker
 from .embeddings import EmbeddingModel
 from .enrichment import Enricher
 from .chunk_record import ChunkRecord
-from .parsers import PDFParser, TextParser
+from .parsers import Parser, PDFParser, TextParser
 
 
 class DocumentPipeline:
@@ -29,6 +29,7 @@ class DocumentPipeline:
         chunk_size: int = 1000,
         overlap: int = 150,
         chunker: Optional[Chunker] = None,
+        parser: Optional[Parser] = None,
         embedding_model: Optional[EmbeddingModel] = None,
         vector_source: Optional[VectorSource] = None,
         enricher: Optional[Enricher] = None,
@@ -40,6 +41,10 @@ class DocumentPipeline:
             overlap: Word overlap between consecutive chunks.
             chunker: Chunker instance to use. Defaults to ``SectionChunker``, which
                 detects section headers and falls back to window chunking.
+            parser: Custom ``Parser`` instance. When provided, ``ingest()`` calls
+                ``parser.parse(path)`` instead of the built-in ``TextParser`` /
+                ``PDFParser``. Use this to plug in LlamaIndex, a vision model, or
+                any other external document processor.
             embedding_model: Embedding model to use. When ``None``, no
                 embeddings are generated and upsert is skipped.
             vector_source: VectorSource backend from blue-data. When ``None``,
@@ -50,6 +55,7 @@ class DocumentPipeline:
         """
         self.text_parser = TextParser()
         self.pdf_parser = PDFParser()
+        self.parser = parser
         self.chunker = chunker or SectionChunker(chunk_size=chunk_size, overlap=overlap)
         self.embedding_model = embedding_model
         self.vector_source = vector_source
@@ -82,6 +88,22 @@ class DocumentPipeline:
         suffix = file_path.suffix.lower()
         effective_collection = collection or self.collection
 
+        if self.parser is not None:
+            pages = self.parser.parse(path)
+            mime_type = "application/pdf" if suffix == ".pdf" else "text/plain"
+            document_id = self._file_document_id(file_path)
+            self._cleanup_stale_chunks(file_path, document_id)
+            records = self._ingest_from_pages(
+                pages=pages,
+                file_name=file_path.name,
+                source_path=str(file_path),
+                mime_type=mime_type,
+                document_id=document_id,
+                collection=effective_collection,
+            )
+            self._register_doc(file_path, document_id, len(records), effective_collection)
+            return records
+
         if suffix == ".txt":
             return self._ingest_txt(file_path, effective_collection)
         elif suffix == ".pdf":
@@ -93,7 +115,8 @@ class DocumentPipeline:
         self,
         document_id: str,
         chunk_id: str,
-        file_path: Path,
+        file_name: str,
+        source_path: Optional[str],
         chunk_text: str,
         chunk_index: int,
         ingested_at: str,
@@ -121,7 +144,7 @@ class DocumentPipeline:
         return ChunkRecord(
             document_id=document_id,
             chunk_id=chunk_id,
-            file_name=file_path.name,
+            file_name=file_name,
             mime_type=mime_type,
             text=chunk_text,
             page_start=page_start,
@@ -131,7 +154,7 @@ class DocumentPipeline:
             semantic_hints=semantic_hints,
             embedding=embedding,
             metadata={
-                "source_path": str(file_path),
+                "source_path": source_path,
                 "chunk_index": chunk_index,
                 "chunk_size": self.chunk_size,
                 "overlap": self.overlap,
@@ -212,66 +235,138 @@ class DocumentPipeline:
     def _register_doc(self, file_path: Path, doc_id: str, chunk_count: int, collection: str) -> None:
         self._doc_registry[str(file_path)] = (doc_id, chunk_count, collection)
 
-    def _ingest_txt(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
-        text = self.text_parser.parse(str(file_path))
-        chunks = self.chunker.chunk_with_titles(text)
+    def ingest_text(
+        self,
+        text: str,
+        file_name: str,
+        mime_type: str = "text/plain",
+        collection: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Chunk, enrich, and embed pre-extracted text, bypassing file parsing.
 
-        document_id = self._file_document_id(file_path)
-        self._cleanup_stale_chunks(file_path, document_id)
-        ingested_at = datetime.now(timezone.utc).isoformat()
-        records = []
+        Use this when text has already been extracted by an external tool
+        (e.g. LlamaIndex, a vision model, or a custom extractor) and you want
+        to feed it directly into the chunking → embedding → storage pipeline.
 
-        for idx, (section_title, chunk_text) in enumerate(chunks):
-            chunk_id = f"{document_id}_chunk_{idx:06d}"
-            record = self._make_record(
-                document_id=document_id,
-                chunk_id=chunk_id,
-                file_path=file_path,
-                chunk_text=chunk_text,
-                chunk_index=idx,
-                section_title=section_title,
-                mime_type="text/plain",
-                ingested_at=ingested_at,
-            )
-            record_dict = record.to_dict()
-            records.append(record_dict)
-            self._upsert(chunk_id, record_dict, collection)
+        Args:
+            text: Full document text.
+            file_name: Used for provenance fields on each ``ChunkRecord``.
+            mime_type: MIME type recorded on each chunk.
+            collection: Override the instance-level collection for this call.
 
-        self._register_doc(file_path, document_id, len(records), collection)
-        return records
+        Returns:
+            List of ``ChunkRecord.to_dict()`` dicts, one per chunk.
+        """
+        document_id = "doc_" + sha256(text.encode()).hexdigest()[:16]
+        return self._ingest_from_pages(
+            pages=[{"text": text}],
+            file_name=file_name,
+            source_path=None,
+            mime_type=mime_type,
+            document_id=document_id,
+            collection=collection or self.collection,
+        )
 
-    def _ingest_pdf(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
-        pages = self.pdf_parser.parse_pages(str(file_path))
+    def ingest_pages(
+        self,
+        pages: List[Dict[str, Any]],
+        file_name: str,
+        mime_type: str = "application/pdf",
+        collection: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Chunk, enrich, and embed pre-extracted pages, bypassing file parsing.
 
-        document_id = self._file_document_id(file_path)
-        self._cleanup_stale_chunks(file_path, document_id)
+        Use this when page-level text has already been extracted by an external
+        tool (e.g. a vision model or LlamaIndex's PDF reader) and you want to
+        feed it directly into the chunking → embedding → storage pipeline.
+
+        Args:
+            pages: List of dicts with ``"text": str`` and optional
+                ``"page_num": int`` (1-based). ``page_num`` is propagated to
+                ``page_start`` / ``page_end`` on each ``ChunkRecord``.
+            file_name: Used for provenance fields on each ``ChunkRecord``.
+            mime_type: MIME type recorded on each chunk.
+            collection: Override the instance-level collection for this call.
+
+        Returns:
+            List of ``ChunkRecord.to_dict()`` dicts, one per chunk.
+        """
+        combined = "".join(p.get("text", "") for p in pages)
+        document_id = "doc_" + sha256(combined.encode()).hexdigest()[:16]
+        return self._ingest_from_pages(
+            pages=pages,
+            file_name=file_name,
+            source_path=None,
+            mime_type=mime_type,
+            document_id=document_id,
+            collection=collection or self.collection,
+        )
+
+    def _ingest_from_pages(
+        self,
+        pages: List[Dict[str, Any]],
+        file_name: str,
+        source_path: Optional[str],
+        mime_type: str,
+        document_id: str,
+        collection: str,
+    ) -> List[Dict[str, Any]]:
         ingested_at = datetime.now(timezone.utc).isoformat()
         records = []
         chunk_index = 0
 
         for page in pages:
-            page_num = page["page_num"]
+            page_num = page.get("page_num")
             chunks = self.chunker.chunk_with_titles(page["text"])
-
             for section_title, chunk_text in chunks:
                 chunk_id = f"{document_id}_chunk_{chunk_index:06d}"
                 record = self._make_record(
                     document_id=document_id,
                     chunk_id=chunk_id,
-                    file_path=file_path,
+                    file_name=file_name,
+                    source_path=source_path,
                     chunk_text=chunk_text,
                     chunk_index=chunk_index,
+                    ingested_at=ingested_at,
                     page_start=page_num,
                     page_end=page_num,
                     section_title=section_title,
-                    mime_type="application/pdf",
-                    ingested_at=ingested_at,
+                    mime_type=mime_type,
                 )
                 record_dict = record.to_dict()
                 records.append(record_dict)
                 self._upsert(chunk_id, record_dict, collection)
                 chunk_index += 1
 
+        return records
+
+    def _ingest_txt(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
+        text = self.text_parser.parse(str(file_path))
+        document_id = self._file_document_id(file_path)
+        self._cleanup_stale_chunks(file_path, document_id)
+        records = self._ingest_from_pages(
+            pages=[{"text": text}],
+            file_name=file_path.name,
+            source_path=str(file_path),
+            mime_type="text/plain",
+            document_id=document_id,
+            collection=collection,
+        )
+        self._register_doc(file_path, document_id, len(records), collection)
+        return records
+
+    def _ingest_pdf(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
+        pages = self.pdf_parser.parse_pages(str(file_path))
+        document_id = self._file_document_id(file_path)
+        self._cleanup_stale_chunks(file_path, document_id)
+        records = self._ingest_from_pages(
+            pages=pages,
+            file_name=file_path.name,
+            source_path=str(file_path),
+            mime_type="application/pdf",
+            document_id=document_id,
+            collection=collection,
+        )
         self._register_doc(file_path, document_id, len(records), collection)
         return records
 

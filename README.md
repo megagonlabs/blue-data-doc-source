@@ -234,6 +234,42 @@ pipeline = DocumentPipeline(chunker=WindowChunker(chunk_size=500, overlap=50))
 
 All embedding models expose a `dim` property used by `ensure_index` and validated against the actual embedding length on every chunk. `OpenAIEmbeddingModel` supports `text-embedding-3-small` (1536), `text-embedding-3-large` (3072), and `text-embedding-ada-002` (1536).
 
+### Pluggable parsers
+
+The built-in parsers (`TextParser`, `PDFParser`) cover standard digitally-created files. To use an external document processor — LlamaIndex, a vision model, a cloud OCR API — implement the `Parser` ABC and pass it as `parser=` to `DocumentPipeline`. Everything downstream (chunking, enrichment, embedding, storage) is unchanged.
+
+```python
+from blue_doc_source import DocumentPipeline, Parser
+
+class LlamaIndexParser(Parser):
+    def parse(self, path: str):
+        from llama_index.core import SimpleDirectoryReader
+        docs = SimpleDirectoryReader(input_files=[path]).load_data()
+        return [{"text": doc.text} for doc in docs]
+
+pipeline = DocumentPipeline(parser=LlamaIndexParser(), embedding_model=...)
+pipeline.ingest("complex_layout.pdf")  # LlamaIndex parses; our pipeline chunks and stores
+```
+
+`parse()` must return a list of dicts with `"text": str`. Include `"page_num": int` (1-based) for page-aware documents — it propagates to `page_start` / `page_end` on each `ChunkRecord`.
+
+#### Bypassing the parser entirely
+
+When you already have extracted text or pages from an external tool, skip file parsing altogether:
+
+```python
+# Pre-extracted text (no file path needed)
+pipeline.ingest_text(text, file_name="report.txt")
+
+# Pre-extracted pages from a vision model
+pipeline.ingest_pages(
+    [{"page_num": 1, "text": "..."}, {"page_num": 2, "text": "..."}],
+    file_name="contract.pdf",
+)
+```
+
+`document_id` is derived from a SHA-256 hash of the content, so calling these methods twice with the same text is safe — it overwrites rather than duplicates.
+
 ### Scanned PDF support (OCR)
 
 By default, `PDFParser` uses pypdf to read the text layer embedded in a PDF. Pages with no text layer — scanned documents, photographed pages — are silently skipped.
