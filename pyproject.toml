@@ -10,6 +10,12 @@ dependencies = [
     "redis[hiredis]>=4.5.0",
 ]
 
+[project.optional-dependencies]
+ocr = [
+    "pytesseract>=0.3.10",
+    "pdf2image>=1.16.0",
+]
+
 [tool.setuptools.packages.find]
 where = ["lib/src"]
 include = ["blue_doc_source*"]

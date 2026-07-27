@@ -234,6 +234,32 @@ pipeline = DocumentPipeline(chunker=WindowChunker(chunk_size=500, overlap=50))
 
 All embedding models expose a `dim` property used by `ensure_index` and validated against the actual embedding length on every chunk. `OpenAIEmbeddingModel` supports `text-embedding-3-small` (1536), `text-embedding-3-large` (3072), and `text-embedding-ada-002` (1536).
 
+### Scanned PDF support (OCR)
+
+By default, `PDFParser` uses pypdf to read the text layer embedded in a PDF. Pages with no text layer — scanned documents, photographed pages — are silently skipped.
+
+Pass `ocr_fallback=True` to run Tesseract OCR on any blank page instead of dropping it:
+
+```python
+from blue_doc_source.source.document.parsers import PDFParser
+
+parser = PDFParser(ocr_fallback=True)
+pages = parser.parse_pages("scanned_contract.pdf")
+```
+
+OCR'd pages carry `"ocr": True` in the result dict so downstream code can identify them.
+
+**Install OCR dependencies:**
+
+```bash
+pip install blue-data-doc-source[ocr]   # installs pytesseract + pdf2image
+brew install tesseract                   # macOS — Tesseract must be on PATH
+```
+
+> `pdf2image` also requires [Poppler](https://poppler.freedesktop.org/). On macOS: `brew install poppler`. On Ubuntu: `apt-get install poppler-utils`.
+
+A clear `ImportError` is raised if OCR is requested but the dependencies are not installed.
+
 ### Vector source and index creation
 
 `DocumentDataSource` and `DocumentPipeline` accept any `VectorSource` from blue-data (e.g. `RedisVectorSource`, `MemoryVectorSource`). The pipeline calls `.upsert()` on ingest and `.knn()` on search — no adapter layer needed.
