@@ -46,6 +46,7 @@ class DocumentDataSource(DataSource):
         default_collection: str = "documents",
         nl_parser: Optional[NLQueryParser] = None,
         properties: Optional[Dict[str, Any]] = None,
+        ocr_fallback: bool = False,
     ):
         """
         Args:
@@ -63,6 +64,8 @@ class DocumentDataSource(DataSource):
                 ``execute_query_nl``. Pass a custom ``parse_fn`` to use any
                 LLM backend instead of OpenAI.
             properties: Optional metadata properties passed to DataSource.
+            ocr_fallback: When ``True``, enables Tesseract OCR for scanned PDF
+                pages with no text layer. Requires the ``[ocr]`` extras.
         """
         super().__init__(name, properties)
         self._default_collection = default_collection
@@ -74,6 +77,7 @@ class DocumentDataSource(DataSource):
             vector_source=vector_source,
             enricher=enricher,
             collection=default_collection,
+            ocr_fallback=ocr_fallback,
         )
 
     def execute_query(self, query, database=None, collection=None, optional_properties=None):

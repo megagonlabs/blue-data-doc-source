@@ -166,3 +166,15 @@ def test_ensure_index_op_collection_override():
     )
     source.execute_query({"op": "DOCUMENT.ENSURE_INDEX", "collection": "contracts"})
     assert vector_source.create_index.call_args.kwargs["index_name"] == "contracts"
+
+
+# --- OCR wiring ---
+
+def test_document_source_ocr_fallback_wired_to_pipeline():
+    source = DocumentDataSource(ocr_fallback=True)
+    assert source._pipeline.pdf_parser._ocr_fallback is True
+
+
+def test_document_source_ocr_fallback_defaults_to_false():
+    source = DocumentDataSource()
+    assert source._pipeline.pdf_parser._ocr_fallback is False

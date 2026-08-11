@@ -34,6 +34,7 @@ class DocumentPipeline:
         vector_source: Optional[VectorSource] = None,
         enricher: Optional[Enricher] = None,
         collection: str = "documents",
+        ocr_fallback: bool = False,
     ):
         """
         Args:
@@ -52,9 +53,13 @@ class DocumentPipeline:
             enricher: Enrichment step. When ``None``, ``entities`` and
                 ``semantic_hints`` are left empty on each record.
             collection: Default collection name used when upserting documents.
+            ocr_fallback: When ``True``, passes ``ocr_fallback=True`` to the
+                built-in ``PDFParser`` so scanned PDF pages are OCR'd via
+                Tesseract. Has no effect when a custom ``parser=`` is provided.
+                Requires the ``[ocr]`` extras.
         """
         self.text_parser = TextParser()
-        self.pdf_parser = PDFParser()
+        self.pdf_parser = PDFParser(ocr_fallback=ocr_fallback)
         self.parser = parser
         self.chunker = chunker or SectionChunker(chunk_size=chunk_size, overlap=overlap)
         self.embedding_model = embedding_model
@@ -124,6 +129,7 @@ class DocumentPipeline:
         page_end: Optional[int] = None,
         section_title: Optional[str] = None,
         mime_type: str = "text/plain",
+        page_ocr_meta: Optional[Dict[str, Any]] = None,
     ) -> ChunkRecord:
         embedding = None
         if self.embedding_model is not None:
@@ -141,6 +147,21 @@ class DocumentPipeline:
             entities = enriched.get("entities", [])
             semantic_hints = enriched.get("semantic_hints", {})
 
+        metadata: Dict[str, Any] = {
+            "source_path": source_path,
+            "chunk_index": chunk_index,
+            "chunk_size": self.chunk_size,
+            "overlap": self.overlap,
+            "ingested_at": ingested_at,
+            "embedding_model": (
+                self.embedding_model.__class__.__name__
+                if self.embedding_model is not None
+                else None
+            ),
+        }
+        if page_ocr_meta:
+            metadata.update(page_ocr_meta)
+
         return ChunkRecord(
             document_id=document_id,
             chunk_id=chunk_id,
@@ -153,18 +174,7 @@ class DocumentPipeline:
             entities=entities,
             semantic_hints=semantic_hints,
             embedding=embedding,
-            metadata={
-                "source_path": source_path,
-                "chunk_index": chunk_index,
-                "chunk_size": self.chunk_size,
-                "overlap": self.overlap,
-                "ingested_at": ingested_at,
-                "embedding_model": (
-                    self.embedding_model.__class__.__name__
-                    if self.embedding_model is not None
-                    else None
-                ),
-            },
+            metadata=metadata,
         )
 
     @staticmethod
@@ -317,6 +327,12 @@ class DocumentPipeline:
 
         for page in pages:
             page_num = page.get("page_num")
+            page_ocr_meta: Dict[str, Any] = {}
+            if page.get("ocr"):
+                page_ocr_meta["ocr"] = True
+            if page.get("ocr_confidence") is not None:
+                page_ocr_meta["ocr_confidence"] = page["ocr_confidence"]
+
             chunks = self.chunker.chunk_with_titles(page["text"])
             for section_title, chunk_text in chunks:
                 chunk_id = f"{document_id}_chunk_{chunk_index:06d}"
@@ -332,6 +348,7 @@ class DocumentPipeline:
                     page_end=page_num,
                     section_title=section_title,
                     mime_type=mime_type,
+                    page_ocr_meta=page_ocr_meta or None,
                 )
                 record_dict = record.to_dict()
                 records.append(record_dict)

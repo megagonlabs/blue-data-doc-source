@@ -479,6 +479,51 @@ def test_delete_missing_args_raises():
         pipeline.delete()
 
 
+# --- OCR wiring ---
+
+def test_pipeline_ocr_fallback_wires_to_pdf_parser():
+    pipeline = DocumentPipeline(ocr_fallback=True)
+    assert pipeline.pdf_parser._ocr_fallback is True
+
+
+def test_pipeline_ocr_fallback_defaults_to_false():
+    pipeline = DocumentPipeline()
+    assert pipeline.pdf_parser._ocr_fallback is False
+
+
+@patch("blue_doc_source.source.document.pipeline.PDFParser")
+def test_ocr_metadata_propagated_to_chunk_record(mock_parser_cls, tmp_path):
+    pdf_path = tmp_path / "scan.pdf"
+    pdf_path.write_bytes(b"fake")
+    mock_parser_cls.return_value.parse_pages.return_value = [
+        {
+            "page_num": 1,
+            "text": "Scanned invoice content here.",
+            "ocr": True,
+            "ocr_confidence": 82.4,
+        }
+    ]
+    pipeline = DocumentPipeline(chunk_size=200, overlap=0, ocr_fallback=True)
+    records = pipeline.ingest(str(pdf_path))
+
+    assert records[0]["metadata"]["ocr"] is True
+    assert records[0]["metadata"]["ocr_confidence"] == 82.4
+
+
+@patch("blue_doc_source.source.document.pipeline.PDFParser")
+def test_non_ocr_pages_have_no_ocr_metadata(mock_parser_cls, tmp_path):
+    pdf_path = tmp_path / "doc.pdf"
+    pdf_path.write_bytes(b"fake")
+    mock_parser_cls.return_value.parse_pages.return_value = [
+        {"page_num": 1, "text": "Normal extracted text."}
+    ]
+    pipeline = DocumentPipeline(chunk_size=200, overlap=0)
+    records = pipeline.ingest(str(pdf_path))
+
+    assert "ocr" not in records[0]["metadata"]
+    assert "ocr_confidence" not in records[0]["metadata"]
+
+
 def test_delete_handles_backend_failure_gracefully(tmp_path):
     path = make_txt(tmp_path)
     vector_source = MagicMock()
