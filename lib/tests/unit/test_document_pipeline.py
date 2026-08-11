@@ -78,7 +78,7 @@ def test_ingest_no_upsert_without_embedding(tmp_path):
 
 
 def test_ingest_unsupported_extension_raises(tmp_path):
-    f = tmp_path / "doc.docx"
+    f = tmp_path / "doc.pptx"
     f.write_bytes(b"fake")
     with pytest.raises(ValueError, match="Unsupported file type"):
         DocumentPipeline().ingest(str(f))
@@ -591,6 +591,83 @@ def test_default_behavior_unchanged_without_custom_parser(tmp_path):
     records = pipeline.ingest(path)
     assert len(records) > 0
     assert records[0]["file_name"] == "test.txt"
+
+
+# --- DOCX ingestion ---
+
+def make_docx(tmp_path, specs):
+    from docx import Document as DocxDocument
+    doc = DocxDocument()
+    for spec in specs:
+        if isinstance(spec, str):
+            doc.add_paragraph(spec)
+        else:
+            doc.add_paragraph(spec["text"], style=spec.get("style", "Normal"))
+    path = tmp_path / "test.docx"
+    doc.save(str(path))
+    return str(path)
+
+
+def test_ingest_docx_returns_records(tmp_path):
+    path = make_docx(tmp_path, ["This is a Word document with some content."])
+    records = DocumentPipeline(chunk_size=200, overlap=0).ingest(path)
+    assert len(records) > 0
+
+
+def test_ingest_docx_mime_type(tmp_path):
+    path = make_docx(tmp_path, ["Content here."])
+    records = DocumentPipeline(chunk_size=200, overlap=0).ingest(path)
+    assert records[0]["mime_type"] == (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
+
+def test_ingest_docx_file_name(tmp_path):
+    path = make_docx(tmp_path, ["Content."])
+    records = DocumentPipeline(chunk_size=200, overlap=0).ingest(path)
+    assert records[0]["file_name"] == "test.docx"
+
+
+def test_ingest_docx_section_titles_detected(tmp_path):
+    path = make_docx(tmp_path, [
+        {"text": "Eligibility", "style": "Heading 1"},
+        "Customers must be 18 or older.",
+        {"text": "Payment", "style": "Heading 1"},
+        "Payment is due within 30 days.",
+    ])
+    records = DocumentPipeline(chunk_size=200, overlap=0).ingest(path)
+    titles = {r.get("section_title") for r in records}
+    assert "Eligibility" in titles
+    assert "Payment" in titles
+
+
+def test_ingest_docx_document_id_is_stable(tmp_path):
+    path = make_docx(tmp_path, ["Stable content."])
+    pipeline = DocumentPipeline(chunk_size=200, overlap=0)
+    first  = pipeline.ingest(path)
+    second = pipeline.ingest(path)
+    assert first[0]["document_id"] == second[0]["document_id"]
+
+
+def test_ingest_docx_upserts_to_vector_source(tmp_path):
+    from unittest.mock import MagicMock
+    from blue_doc_source.source.document.embeddings import DummyEmbeddingModel
+    path = make_docx(tmp_path, ["Content to embed."])
+    vector_source = MagicMock()
+    pipeline = DocumentPipeline(
+        chunk_size=200, overlap=0,
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    records = pipeline.ingest(path)
+    assert vector_source.upsert.call_count == len(records)
+
+
+def test_ingest_unsupported_extension_still_raises(tmp_path):
+    f = tmp_path / "doc.pptx"
+    f.write_bytes(b"fake")
+    with pytest.raises(ValueError, match="Unsupported file type"):
+        DocumentPipeline().ingest(str(f))
 
 
 # --- ingest_text tests ---

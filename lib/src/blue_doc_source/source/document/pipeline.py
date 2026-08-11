@@ -9,7 +9,7 @@ from .chunkers import Chunker, SectionChunker
 from .embeddings import EmbeddingModel
 from .enrichment import Enricher
 from .chunk_record import ChunkRecord
-from .parsers import Parser, PDFParser, TextParser
+from .parsers import DocxParser, Parser, PDFParser, TextParser
 
 
 class DocumentPipeline:
@@ -60,6 +60,7 @@ class DocumentPipeline:
         """
         self.text_parser = TextParser()
         self.pdf_parser = PDFParser(ocr_fallback=ocr_fallback)
+        self.docx_parser = DocxParser()
         self.parser = parser
         self.chunker = chunker or SectionChunker(chunk_size=chunk_size, overlap=overlap)
         self.embedding_model = embedding_model
@@ -113,6 +114,8 @@ class DocumentPipeline:
             return self._ingest_txt(file_path, effective_collection)
         elif suffix == ".pdf":
             return self._ingest_pdf(file_path, effective_collection)
+        elif suffix == ".docx":
+            return self._ingest_docx(file_path, effective_collection)
         else:
             raise ValueError(f"Unsupported file type: {suffix}")
 
@@ -381,6 +384,21 @@ class DocumentPipeline:
             file_name=file_path.name,
             source_path=str(file_path),
             mime_type="application/pdf",
+            document_id=document_id,
+            collection=collection,
+        )
+        self._register_doc(file_path, document_id, len(records), collection)
+        return records
+
+    def _ingest_docx(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
+        text = self.docx_parser.parse(str(file_path))
+        document_id = self._file_document_id(file_path)
+        self._cleanup_stale_chunks(file_path, document_id)
+        records = self._ingest_from_pages(
+            pages=[{"text": text}],
+            file_name=file_path.name,
+            source_path=str(file_path),
+            mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             document_id=document_id,
             collection=collection,
         )
