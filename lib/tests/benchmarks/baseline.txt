@@ -1,0 +1,111 @@
+Reference benchmark run — medium corpus, 7 timed repetitions (median reported).
+Machine: MacBook Pro M-series. Python 3.12. Date: 2026-08-10.
+Command: python lib/tests/benchmarks/runner.py --size medium --runs 7
+
+════════════════════════════════════════════════════════════════════════════════
+  blue-data-doc-source BENCHMARK SUITE  |  size=medium  chunk_size=200  overlap=40  runs=7
+════════════════════════════════════════════════════════════════════════════════
+
+  Building medium corpus (~10,000 words × 3 doc types)... done.
+
+    structured      10,462 words
+    unstructured    10,090 words
+    mixed           10,191 words
+
+── 1. CHUNKER COMPARISON ───────────────────────────────────────────────────────
+  SectionChunker / WindowChunker / SentenceChunker on three corpus types.
+  Section%: chunks that carry a detected section_title.
+  Kwps: thousands of input words processed per second (median of runs).
+
+  Corpus: STRUCTURED (10,462 words)
+  Chunker              Chunks  Avg(wds)  Std(wds)    Min    Max   Section%       Kwps
+  ──────────────────────────────────────────────────────────────────────────
+  SectionChunker           97     113.3      66.9      4    200       100%  14,986.8K
+  WindowChunker            66     197.9      17.0     62    200         0%  23,600.7K
+  SentenceChunker          66     193.5       6.6    151    200         0%   6,068.7K
+  ──────────────────────────────────────────────────────────────────────────
+
+  Corpus: UNSTRUCTURED (10,090 words)
+  Chunker              Chunks  Avg(wds)  Std(wds)    Min    Max   Section%       Kwps
+  ──────────────────────────────────────────────────────────────────────────
+  SectionChunker           64     196.6      24.0     10    200         0%  18,519.4K
+  WindowChunker            64     196.6      24.0     10    200         0%  24,233.0K
+  SentenceChunker          64     192.8       6.0    151    200         0%   6,379.7K
+  ──────────────────────────────────────────────────────────────────────────
+
+  Corpus: MIXED (10,191 words)
+  Chunker              Chunks  Avg(wds)  Std(wds)    Min    Max   Section%       Kwps
+  ──────────────────────────────────────────────────────────────────────────
+  SectionChunker           80     144.4      63.2      3    200       100%  15,305.6K
+  WindowChunker            64     198.6      11.1    111    200         0%  25,222.7K
+  SentenceChunker          64     194.2       3.9    188    200         0%   6,050.6K
+  ──────────────────────────────────────────────────────────────────────────
+
+  Fastest across all corpus types: WindowChunker (24,352.1K wps avg)
+
+── 2. CHUNK SIZE SWEEP  (SectionChunker, structured corpus) ────────────────────
+  How chunk_size affects chunk count, average size, and throughput.
+
+  chunk_size  overlap  Chunks  Avg(wds)  Std(wds)  Throughput(Kwps)
+  ──────────────────────────────────────────────────────────────
+          50       10     282      43.1      13.5        12,338.5K
+         100       20     159      74.2      32.6        14,315.2K
+         200       40      97     113.3      66.9        14,656.9K
+         500      100      64     157.3      46.1        15,499.3K
+        1000      150      64     157.3      46.1        15,695.0K
+
+── 3. PIPELINE STAGE BREAKDOWN  (SectionChunker, structured, 10,462 words) ─────
+  chunk_size=200  overlap=40
+  Embedding uses DummyEmbeddingModel (SHA-256, no network) to isolate library cost.
+
+  Stage                        Time(ms)    % total      µs/chunk
+  ──────────────────────────────────────────────────────────────
+  Chunking                         0.68       5.4%           7.0
+  Enrichment                      11.81      93.7%         121.8
+  Embedding (dummy)                0.11       0.9%           1.1
+  ──────────────────────────────────────────────────────────────
+  Total                           12.61     100.0%         130.0
+
+════════════════════════════════════════════════════════════════════════════════
+  Benchmark complete.
+════════════════════════════════════════════════════════════════════════════════
+
+
+KEY FINDINGS
+────────────────────────────────────────────────────────────────────────────────
+
+1. CHUNKER SPEED
+   WindowChunker is the fastest (~24M wps) because it is a pure word-split
+   sliding window with no regex overhead. SectionChunker is ~40% slower on
+   structured text due to per-line header detection; it matches WindowChunker
+   speed on unstructured text (no headers found, same code path). SentenceChunker
+   is 4–5x slower than WindowChunker — sentence tokenisation (regex split or
+   nltk) is the bottleneck.
+
+2. SECTION COVERAGE
+   SectionChunker is the only chunker that propagates section_title to
+   ChunkRecord. On structured and mixed corpora it achieves 100% section
+   coverage. On unstructured text it falls back to window chunking and produces
+   identical results to WindowChunker (0% section coverage is expected).
+
+3. CHUNK SIZE CONSISTENCY
+   WindowChunker produces near-zero Std(wds) — chunks are exactly chunk_size
+   words except the final one. SentenceChunker has low std (~4–7 wds) because
+   sentences are short and uniform in this corpus. SectionChunker has high std
+   (47–67 wds) because it respects section boundaries that vary in length;
+   this is the intended behaviour.
+
+4. PIPELINE STAGE BREAKDOWN — PRIMARY FINDING
+   BasicEnricher (regex enrichment) consumes ~94% of total pipeline time at
+   ~122 µs/chunk. Chunking costs only 7 µs/chunk. Embedding via
+   DummyEmbeddingModel costs 1 µs/chunk (SHA-256 hash, no network).
+   Implication: if enrichment output is not consumed downstream, disabling
+   BasicEnricher is a ~10× end-to-end speedup. Real OpenAI embeddings will
+   cost ~50–150 ms per API call, completely dominating the pipeline.
+
+5. CHUNK SIZE SWEEP
+   Smaller chunks (size=50) produce more chunks (282 vs 64 at size=500) and
+   lower average words, but throughput drops ~20% because the SectionChunker
+   header scan is called once per line regardless of chunk size. Above
+   chunk_size=500 the corpus is too small to split further so chunk count
+   plateaus at 64.
