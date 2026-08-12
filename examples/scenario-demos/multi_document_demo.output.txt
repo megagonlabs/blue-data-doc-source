@@ -1,0 +1,152 @@
+
+========================================================================
+Multi-Document Collections
+========================================================================
+
+  One collection. Four documents. Every result knows its source.
+
+------------------------------------------------------------------------
+Step 1 — Ingest four documents into one collection
+------------------------------------------------------------------------
+
+  benefits_policy.txt               4 chunks   4 sections
+  security_policy.txt               4 chunks   4 sections
+  engineering_handbook.txt          4 chunks   4 sections
+  vendor_contracts.txt              4 chunks   4 sections
+
+  Collection: 'company_knowledge'
+  Documents : 4
+  Total chunks in store: 16
+
+------------------------------------------------------------------------
+Step 2 — Collection inventory
+------------------------------------------------------------------------
+
+  Document                        document_id           Chunks  Sections
+  ------------------------------  --------------------  ------  -----------------------------------
+  benefits_policy.txt             doc_da8bf7117257209d       4  Dental and Vision, Health Insurance, Parental Leave
+  security_policy.txt             doc_9d96be7254185114       4  Access Control, Data Classification, Encryption Standards
+  engineering_handbook.txt        doc_ddee207895dfc36f       4  Code Review Standards, Deployment Process, On-Call Responsibilities
+  vendor_contracts.txt            doc_ad3d148446417944       4  Contract Terms, Procurement Policy, SLA Requirements
+
+  Each document has a unique document_id (SHA-256 of content).
+  All chunks share the same collection and are searched together.
+
+------------------------------------------------------------------------
+Step 3 — Targeted queries: one document answers each
+------------------------------------------------------------------------
+
+  [retirement / benefits question]
+
+  Query: "401(k)"  →  1 result(s)
+
+  [1] benefits_policy.txt › § Retirement Plan
+      "The company matches 401(k) contributions up to 4% of base salary. Employees are fully vested after t…"
+
+  Results from: ['benefits_policy.txt']
+
+  [security / encryption question]
+
+  Query: "AES-256"  →  1 result(s)
+
+  [1] security_policy.txt › § Encryption Standards
+      "Data at rest must be encrypted using AES-256. Data in transit must use TLS 1.2 or higher. Encryption…"
+
+  Results from: ['security_policy.txt']
+
+  [engineering / deployment question]
+
+  Query: "canary"  →  1 result(s)
+
+  [1] engineering_handbook.txt › § Deployment Process
+      "Deployments follow a three-stage pipeline: staging, canary, and production. Canary releases expose t…"
+
+  Results from: ['engineering_handbook.txt']
+
+  [procurement / contracts question]
+
+  Query: "net-30"  →  1 result(s)
+
+  [1] vendor_contracts.txt › § Contract Terms
+      "Standard payment terms are net-30 from invoice date. Contracts must include a termination-for-conven…"
+
+  Results from: ['vendor_contracts.txt']
+
+------------------------------------------------------------------------
+Step 4 — Cross-document queries: multiple documents answer together
+------------------------------------------------------------------------
+
+  Some questions span documents. A search across the collection
+  surfaces relevant chunks from whichever document holds the answer.
+
+  Query: "30 days"
+  Note : benefits (enrollment window) + vendor contracts (notice period, procurement lead time)
+  Hits : 3 across 2 document(s)
+    • benefits_policy.txt  →  1 chunk(s)  [Health Insurance]
+    • vendor_contracts.txt  →  2 chunk(s)  [Procurement Policy, Contract Terms]
+
+  Query: "annually"
+  Note : security (key rotation, access review) + benefits (vision allowance) + vendor (assessment renewal)
+  Hits : 2 across 2 document(s)
+    • security_policy.txt  →  1 chunk(s)  [Encryption Standards]
+    • vendor_contracts.txt  →  1 chunk(s)  [Vendor Assessment]
+
+  Query: "approval"
+  Note : security (access control) + vendor contracts (procurement policy)
+  Hits : 2 across 2 document(s)
+    • security_policy.txt  →  1 chunk(s)  [Access Control]
+    • vendor_contracts.txt  →  1 chunk(s)  [Procurement Policy]
+
+------------------------------------------------------------------------
+Step 5 — Provenance citation: how an agent grounds its answer
+------------------------------------------------------------------------
+
+  Question: What must a vendor provide before handling company data?
+
+  Answer (grounded):
+    "All vendors handling company data must complete a security questionnaire and provide their SOC 2 Type II report. Cloud vendors must disclose their sub-processors. Vendor assessments are renewed annually."
+
+  Source     : vendor_contracts.txt › § Vendor Assessment
+  document_id: doc_ad3d148446417944
+  chunk_id   : doc_ad3d148446417944_chunk_000002
+
+  The agent can cite exactly which document and section this came
+  from — without any post-hoc metadata lookup.
+
+------------------------------------------------------------------------
+Step 6 — Independent deletion: remove one document, others are untouched
+------------------------------------------------------------------------
+
+  Deleted: vendor_contracts.txt  (4 chunks)
+  Store before: 16  →  after: 12  (removed 4)
+
+  Remaining documents: ['benefits_policy.txt', 'engineering_handbook.txt', 'security_policy.txt']
+
+  Vendor contracts removed : ✓
+  Other documents intact   : ✓
+
+========================================================================
+Summary
+========================================================================
+
+  One collection, many documents:
+    pipeline.ingest_text(text, file_name=...)  ← one call per document
+    pipeline.ingest('file.pdf', collection=...) ← or directly from file
+
+  Search spans the entire collection:
+    pipeline.search('query', k=5)  ← returns top chunks across all docs
+
+  Every result carries full provenance:
+    result['file_name']     → which document
+    result['section_title'] → which section
+    result['page_start']    → which page (PDF/page-aware ingestion)
+    result['document_id']   → stable content-addressed ID
+
+  Each document is independently deletable:
+    pipeline.delete(document_id=..., chunk_count=...)
+    → removes that document's chunks; others are untouched
+
+  Note: this demo uses DummyEmbeddingModel (SHA-256 hash vectors).
+  For real semantic search across documents, use OpenAIEmbeddingModel.
+  See examples/backends/openai_embeddings_demo.py
+
