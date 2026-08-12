@@ -1,6 +1,12 @@
 # blue-data-doc-source
 
-Document ingestion, enrichment, and retrieval pipeline for Blue Data Intelligence. Parses `.txt` and `.pdf` files, chunks them, optionally enriches with entity/keyword extraction, embeds via OpenAI, and upserts to a Redis vector store.
+## Overview
+
+blue-data-doc-source is a document ingestion and retrieval source for Blue Data Intelligence. It sits upstream of Blue's vector layer, converting unstructured documents into structured, provenance-aware chunk records that AI agents can search, cite, and reason over.
+
+It handles the full pipeline from raw file to queryable vector index: parsing text, PDFs, and DOCX files, detecting section structure, extracting entities and keywords, generating embeddings, and upserting into Blue's RedisVectorSource. It plugs directly into Blue's DataSource abstraction, so documents become first-class members of the same data layer as SQL databases, graph stores, and JSON sources.
+
+It answers questions like: what does this document say, which section does it come from, what page is it on, and how does it relate to a user's query.
 
 ## Installation
 
@@ -177,7 +183,8 @@ parser = NLQueryParser(parse_fn=lambda text: my_llm_call(text))
 DocumentDataSource (extends blue-data DataSource)  ← public entry point
   └─ DocumentPipeline       ← orchestrates all layers; auto-detects .txt vs .pdf
        ├─ TextParser         ← reads .txt → raw string
-       ├─ PDFParser          ← reads .pdf → [{page_num, text}, ...] via pypdf
+       ├─ PDFParser          ← reads .pdf → [{page_num, text}, ...] via pypdf; OCR fallback via Tesseract
+       ├─ DocxParser         ← reads .docx → markdown-formatted string via python-docx
        ├─ SectionChunker     ← detects headers, chunks within sections (default)
        │    └─ WindowChunker ← word-based sliding window fallback
        ├─ BasicEnricher      ← regex entity/keyword extraction (optional)
@@ -196,7 +203,7 @@ Every ingested chunk becomes a `ChunkRecord`, serialised via `.to_dict()`. Optio
 | `chunk_id` | str | `{document_id}_chunk_{index}` |
 | `source_type` | str | Always `"document"` |
 | `file_name` | str | Basename of the source file |
-| `mime_type` | str | `"text/plain"` or `"application/pdf"` |
+| `mime_type` | str | `"text/plain"`, `"application/pdf"`, or `"application/vnd.openxmlformats-officedocument.wordprocessingml.document"` |
 | `text` | str | Chunk text |
 | `page_start` | int \| omitted | PDF only — 1-based page number |
 | `page_end` | int \| omitted | PDF only — same as `page_start` in V1 |
