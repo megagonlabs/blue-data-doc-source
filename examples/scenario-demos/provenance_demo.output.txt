@@ -1,0 +1,108 @@
+
+====================================================================
+Demo 2 — Every Search Result Knows Where It Came From
+====================================================================
+
+  Document: /Users/jalalmahmud/Projects/blue-data-doc-source/data/sample_policy.txt
+  Format  : TXT (section-scoped chunks)
+
+  Ingesting …
+  11 chunks stored
+
+--------------------------------------------------------------------
+Provenance fields on every chunk
+--------------------------------------------------------------------
+
+  chunk_id                                    file_name               page  section_title
+  ------------------------------------------  ----------------------  ----  ------------------------------
+  doc_bc66f8ef9293d195_chunk_000000           sample_policy.txt          —  BLUE SHIELD HEALTH INSURANCE POLICY
+  doc_bc66f8ef9293d195_chunk_000001           sample_policy.txt          —  1. ELIGIBILITY
+  doc_bc66f8ef9293d195_chunk_000002           sample_policy.txt          —  1. ELIGIBILITY
+  doc_bc66f8ef9293d195_chunk_000003           sample_policy.txt          —  2. COVERAGE
+  doc_bc66f8ef9293d195_chunk_000004           sample_policy.txt          —  2. COVERAGE
+  doc_bc66f8ef9293d195_chunk_000005           sample_policy.txt          —  3. EXCLUSIONS
+  doc_bc66f8ef9293d195_chunk_000006           sample_policy.txt          —  4. COST SHARING
+  doc_bc66f8ef9293d195_chunk_000007           sample_policy.txt          —  5. CLAIMS
+  doc_bc66f8ef9293d195_chunk_000008           sample_policy.txt          —  5. CLAIMS
+  doc_bc66f8ef9293d195_chunk_000009           sample_policy.txt          —  6. TERMINATION
+  doc_bc66f8ef9293d195_chunk_000010           sample_policy.txt          —  7. CONTACT INFORMATION
+
+  TXT chunks: page_start/page_end are None; section_title set from headers
+
+--------------------------------------------------------------------
+Full field reference (first chunk)
+--------------------------------------------------------------------
+
+  document_id                             'doc_bc66f8ef9293d195'  ✓
+  chunk_id                   'doc_bc66f8ef9293d195_chunk_000000'  ✓
+  file_name                                  'sample_policy.txt'  ✓
+  source_type                                         'document'  ✓
+  mime_type                                         'text/plain'  ✓
+  page_start                            '—  (omitted when None)'  (absent)
+  page_end                              '—  (omitted when None)'  (absent)
+  section_title            'BLUE SHIELD HEALTH INSURANCE POLICY'  ✓
+
+  Note: ChunkRecord.to_dict() omits None optional fields entirely.
+  Check key presence, not value: 'page_start' in chunk, not chunk['page_start'] is not None
+
+--------------------------------------------------------------------
+Keyword search  →  full provenance chain per result
+--------------------------------------------------------------------
+
+  Query: "prescription drug"  →  2 matching chunk(s)
+    Source  : sample_policy.txt › § 2. COVERAGE
+    Chunk   : doc_bc66f8ef9293d195_chunk_000003
+    Snippet : 2.1 Covered Services This policy covers the following medical services when provided by an in-network provider: preventi…
+
+    Source  : sample_policy.txt › § 4. COST SHARING
+    Chunk   : doc_bc66f8ef9293d195_chunk_000006
+    Snippet : 4.1 Annual Deductible The annual deductible is $1,500 per individual and $3,000 per family. The deductible resets on Jan…
+
+
+  Query: "emergency room"  →  2 matching chunk(s)
+    Source  : sample_policy.txt › § 2. COVERAGE
+    Chunk   : doc_bc66f8ef9293d195_chunk_000003
+    Snippet : 2.1 Covered Services This policy covers the following medical services when provided by an in-network provider: preventi…
+
+    Source  : sample_policy.txt › § 4. COST SHARING
+    Chunk   : doc_bc66f8ef9293d195_chunk_000006
+    Snippet : 4.1 Annual Deductible The annual deductible is $1,500 per individual and $3,000 per family. The deductible resets on Jan…
+
+
+  Query: "deductible"  →  2 matching chunk(s)
+    Source  : sample_policy.txt › § 2. COVERAGE
+    Chunk   : doc_bc66f8ef9293d195_chunk_000004
+    Snippet : covered according to the four-tier formulary: - Tier 1 (Generic): $10 copay per 30-day supply - Tier 2 (Preferred Brand)…
+
+    Source  : sample_policy.txt › § 4. COST SHARING
+    Chunk   : doc_bc66f8ef9293d195_chunk_000006
+    Snippet : 4.1 Annual Deductible The annual deductible is $1,500 per individual and $3,000 per family. The deductible resets on Jan…
+
+
+  Query: "enrollment"  →  1 matching chunk(s)
+    Source  : sample_policy.txt › § 1. ELIGIBILITY
+    Chunk   : doc_bc66f8ef9293d195_chunk_000001
+    Snippet : 1.1 Who Is Eligible Coverage under this policy is available to individuals who meet all of the following criteria: are b…
+
+--------------------------------------------------------------------
+RAG citation  —  how an agent would format a cited answer
+--------------------------------------------------------------------
+
+  Question: What are the prescription drug copay tiers?
+
+  Answer (grounded):
+    2.1 Covered Services This policy covers the following medical services when provided by an in-network provider: preventive care and annual wellness exams, primary care visits, specialist consultations, emergency room services, urgent care visits, hospitalization and inpatient surgery, outpatient sur…
+
+  Source: sample_policy.txt › § 2. COVERAGE
+  Chunk : doc_bc66f8ef9293d195_chunk_000003
+
+====================================================================
+Result
+====================================================================
+
+  Every chunk carries a complete provenance chain:
+    document_id → file_name → page → section_title → chunk position
+
+  Agents can cite exactly which page of which document supports
+  each claim — without any post-hoc retrieval of metadata.
+

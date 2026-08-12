@@ -1,0 +1,72 @@
+
+====================================================================
+Content-Addressing and Deduplication
+====================================================================
+
+  document_id = 'doc_' + sha256(file_bytes).hexdigest()[:16]
+  chunk_id    = f'{document_id}_chunk_{index:06d}'
+
+--------------------------------------------------------------------
+Case 1 — Ingest same file twice  →  no duplicates
+--------------------------------------------------------------------
+
+  First ingest  : 1 chunks, store size = 1
+    doc_f2bbe8ee8a299104_chunk_000000
+
+  Second ingest : 1 chunks, store size = 1
+
+  ✓ Chunk IDs identical: True
+  ✓ Store size unchanged: 1 → 1
+  ✓ Upsert overwrote existing chunks, no duplicates created.
+
+--------------------------------------------------------------------
+Case 2 — Two file paths, identical content  →  same chunk IDs
+--------------------------------------------------------------------
+
+  Original path : policy_v1.txt
+  Copy path     : policy_copy.txt
+  Chunk IDs match: True
+    ✓  doc_f2bbe8ee8a299104_chunk_000000  ==  doc_f2bbe8ee8a299104_chunk_000000
+
+  ✓ Content-addressed: path does not affect identity.
+    Caution: deleting one path's chunks also removes the other's.
+
+  Store size = 1  (not 2×1 — same IDs overwritten)
+
+--------------------------------------------------------------------
+Case 3 — Content changes  →  new chunk IDs  →  stale v1 chunks
+--------------------------------------------------------------------
+
+  v1 document_id : doc_f2bbe8ee8a299104
+  v1 chunk IDs   : ['doc_f2bbe8ee8a299104_chunk_000000']
+  Store size     : 1
+
+  v2 document_id : doc_2d04e9ca64e2be68
+  v2 chunk IDs   : ['doc_2d04e9ca64e2be68_chunk_000000']
+  Store size     : 1
+
+  Overlapping IDs (same chunk in v1 and v2) : 0
+  Stale v1-only IDs still in store          : 1
+
+  ✓ In-process pipeline detects content change and removes stale
+    chunks automatically (same path, new hash → old chunks deleted).
+
+  ⚠  Cross-process: a NEW pipeline has no memory of v1.
+     Use DOCUMENT.DELETE before re-ingesting in a fresh process:
+
+       source.execute_query({
+           "op": "DOCUMENT.DELETE",
+           "document_id": "doc_f2bbe8ee8a299104",
+           "chunk_count": 1,
+       })
+
+====================================================================
+Summary
+====================================================================
+
+  ✓ Same bytes → same chunk IDs → upsert is idempotent
+  ✓ Content-addressed: path is irrelevant to identity
+  ⚠  Changed content → new IDs → stale chunks require explicit cleanup
+     in fresh processes. Use DOCUMENT.DELETE or see:
+     examples/integration-demos/corpus_update_demo.py
+

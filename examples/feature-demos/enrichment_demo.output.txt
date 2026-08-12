@@ -1,0 +1,100 @@
+
+====================================================================
+BasicEnricher Reference
+====================================================================
+
+  Pure regex. No ML. No API key. Runs on every chunk during ingestion.
+
+--------------------------------------------------------------------
+Synthetic snippets  (entity types shown per sample)
+--------------------------------------------------------------------
+
+  ── Financial terms ──
+
+  Text (52 words):
+    The deductible is $1,500 per individual ($3,000 per family) per calendar year. After the deductible is met, the plan cov…
+
+  Entities:
+    MONEY           ['$1,500', '$3,000', '$6,000', '$300']
+    PERCENT         ['80%']
+
+  Semantic hints:
+    word_count            52
+    sentence_count        5
+    has_questions         False
+    has_numbers           True
+    keywords              ['per', 'deductible', 'day', 'individual', 'family', 'calendar', 'year', 'met']
+
+  ── Dates and eligibility ──
+
+  Text (40 words):
+    Open enrollment runs from November 1 to December 15 each year, with coverage beginning on January 1 of the following yea…
+
+  Entities:
+    DATE            ['November 1', 'December 15', 'January 1', 'December 15, 2024']
+    EMAIL           ['enroll@blueshield.example.com']
+
+  Semantic hints:
+    word_count            40
+    sentence_count        5
+    has_questions         True
+    has_numbers           True
+    keywords              ['year', 'december', 'open', 'enrollment', 'runs', 'november', 'coverage', 'beginning']
+
+  ── Proper nouns ──
+
+  Text (35 words):
+    Blue Shield Health Insurance offers coverage in partnership with the American Medical Association and the National Insti…
+
+  Entities:
+    PROPER_NOUN     ['Blue Shield Health Insurance', 'American Medical Association', 'National Institutes', 'Jane Doe', 'Blue Shield Premium Plan', 'National Healthcare Administrators']
+
+  Semantic hints:
+    word_count            35
+    sentence_count        2
+    has_questions         False
+    has_numbers           False
+    keywords              ['blue', 'shield', 'health', 'national', 'insurance', 'offers', 'coverage', 'partnership']
+
+--------------------------------------------------------------------
+Live document  (sample_policy.txt — first 4 chunks via SectionChunker)
+--------------------------------------------------------------------
+
+  chunk 00  [BLUE SHIELD HEALTH INSURANCE POLICY]
+    words=12  sentences=1  has_numbers=True  entities=4
+    keywords : ['policy', 'number', 'bsh', 'effective', 'date']
+    DATE          : ['January 1, 2024']
+    PROPER_NOUN   : ['Policy Number', 'Effective Date', 'Jane Doe']
+
+  chunk 01  [1. ELIGIBILITY]
+    words=173  sentences=10  has_numbers=True  entities=7
+    keywords : ['enrollment', 'eligible', 'coverage', 'following', 'dependent']
+    DATE          : ['November 1', 'December 15', 'January 1']
+    PROPER_NOUN   : ['Who Is Eligible Coverage', 'United States', 'Dependents Eligible', 'Enrollment Periods Open']
+
+  chunk 02  [1. ELIGIBILITY]
+    words=3  sentences=2  has_numbers=False  entities=0
+    keywords : ['service', 'area']
+
+  chunk 03  [2. COVERAGE]
+    words=200  sentences=11  has_numbers=True  entities=8
+    keywords : ['services', 'care', 'emergency', 'covered', 'network']
+    MONEY         : ['$10', '$35']
+    PERCENT       : ['100%']
+    PROPER_NOUN   : ['Covered Services This', 'Preventive Care Preventive', 'Emergency Services Emergency', 'Prescription Drugs Prescription']
+
+====================================================================
+Integration
+====================================================================
+
+  BasicEnricher runs automatically inside DocumentPipeline:
+
+    pipeline = DocumentPipeline(enricher=BasicEnricher())
+    records  = pipeline.ingest('doc.txt')
+    chunk    = records[0]
+    chunk['entities']       # → list of {label, text} dicts
+    chunk['semantic_hints'] # → {word_count, keywords, …}
+
+  Swap in a custom Enricher subclass for ML-powered entity recognition:
+    pipeline = DocumentPipeline(enricher=SpacyEnricher())
+

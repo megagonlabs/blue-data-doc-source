@@ -1,0 +1,105 @@
+
+====================================================================
+Chunking Deep-Dive
+====================================================================
+
+  Document   : /Users/jalalmahmud/Projects/blue-data-doc-source/data/sample_policy.txt
+  Total words: 1116
+  chunk_size : 200 words
+  overlap    : 30 words
+  stride     : 170 words  (WindowChunker)
+
+--------------------------------------------------------------------
+WindowChunker — sliding word window, no section awareness
+--------------------------------------------------------------------
+
+  WindowChunker  →  7 chunks
+  --------------------------------------------------------------------
+  chunk 00  words= 200
+           BLUE SHIELD HEALTH INSURANCE POLICY Policy Number: BSH-2024-004521 Effective Date: January…
+  chunk 01  words= 200
+           life events including marriage, birth or adoption of a child, loss of other coverage, or r…
+  chunk 02  words= 200
+           admitted to the hospital following an emergency room visit, the inpatient cost-sharing app…
+  chunk 03  words= 200
+           of coverage, provided the policyholder maintains continuous coverage during that period. A…
+  chunk 04  words= 200
+           Inpatient hospitalization: $500 per admission 4.3 Out-of-Pocket Maximum The annual out-of-…
+  chunk 05  words= 200
+           denied, the policyholder has the right to appeal within 180 days of receiving the denial n…
+  … 1 more chunks
+
+  All titles are None (WindowChunker never assigns titles).
+  Expected chunk count ≈ 6
+
+--------------------------------------------------------------------
+SectionChunker — splits on headers, windows within each section
+--------------------------------------------------------------------
+
+  SectionChunker  →  11 chunks
+  --------------------------------------------------------------------
+  chunk 00  words=  12  [BLUE SHIELD HEALTH INSURANCE POLICY]
+           Policy Number: BSH-2024-004521 Effective Date: January 1, 2024 Policyholder: Jane Doe ====…
+  chunk 01  words= 173  [1. ELIGIBILITY]
+           1.1 Who Is Eligible Coverage under this policy is available to individuals who meet all of…
+  chunk 02  words=   3  [1. ELIGIBILITY]
+           service area. ============================================================================…
+  chunk 03  words= 200  [2. COVERAGE]
+           2.1 Covered Services This policy covers the following medical services when provided by an…
+  chunk 04  words=  61  [2. COVERAGE]
+           covered according to the four-tier formulary: - Tier 1 (Generic): $10 copay per 30-day sup…
+  chunk 05  words= 169  [3. EXCLUSIONS]
+           3.1 General Exclusions This policy does not cover: cosmetic procedures not medically neces…
+  … 5 more chunks
+
+  11 of 11 chunks carry a section title.
+
+  Header patterns matched (first 5 unique titles):
+    • BLUE SHIELD HEALTH INSURANCE POLICY
+    • 1. ELIGIBILITY
+    • 2. COVERAGE
+    • 3. EXCLUSIONS
+    • 4. COST SHARING
+
+--------------------------------------------------------------------
+SentenceChunker — splits on sentence boundaries first, then windows
+--------------------------------------------------------------------
+
+  SentenceChunker  →  7 chunks
+  --------------------------------------------------------------------
+  chunk 00  words= 193
+           BLUE SHIELD HEALTH INSURANCE POLICY Policy Number: BSH-2024-004521 Effective Date: January…
+  chunk 01  words= 167
+           ================================================================================  2. COVER…
+  chunk 02  words= 185
+           If the policyholder is admitted to the hospital following an emergency room visit, the inp…
+  chunk 03  words= 198
+           A pre-existing condition is defined as any condition for which the policyholder received d…
+  chunk 04  words= 197
+           Once this limit is reached, the plan covers 100% of covered services for the remainder of …
+  chunk 05  words= 184
+           Blue Shield will respond to appeals within 60 days. If the appeal is denied, the policyhol…
+  … 1 more chunks
+
+--------------------------------------------------------------------
+Word-count proof  (chunk_size is words, not characters)
+--------------------------------------------------------------------
+
+  chunk 0: 10 words  →  "One two three four five six seven eight nine ten"
+  chunk 1:  4 words  →  "nine ten eleven twelve."
+
+  chunk_size=10, overlap=2 → stride=8 → 2 chunks
+
+====================================================================
+Summary
+====================================================================
+
+  Chunker               Chunks   Section-aware
+  --------------------  ------  --------------
+  WindowChunker              7              No
+  SectionChunker            11             Yes
+  SentenceChunker            7              No
+
+  SectionChunker is the default. It falls back to WindowChunker
+  when no headers are detected in the document.
+

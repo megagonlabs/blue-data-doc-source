@@ -1,0 +1,111 @@
+
+====================================================================
+Demo 1 — Section-Aware Chunking vs Sliding Window
+====================================================================
+
+  Document  : /Users/jalalmahmud/Projects/blue-data-doc-source/data/sample_policy.txt
+  Words     : 1116
+  chunk_size: 200 words
+  overlap   : 30 words
+
+  Probe topics (to detect cross-section contamination):
+    • prescription drug
+    • emergency room
+    • pre-existing condition
+    • deductible
+    • enrollment period
+
+--------------------------------------------------------------------
+WindowChunker — raw word windows
+--------------------------------------------------------------------
+
+  WindowChunker  →  7 chunks
+  --------------------------------------------------------------------
+  chunk 00  words= 200  [no title]  topics=['pre-existing condition', 'enrollment period']  ⚠ multi-topic
+           BLUE SHIELD HEALTH INSURANCE POLICY Policy Number: BSH-2024-004521 Effective Date: January 1, 2024 P…
+  chunk 01  words= 200  [no title]  topics=['prescription drug', 'emergency room']  ⚠ multi-topic
+           life events including marriage, birth or adoption of a child, loss of other coverage, or relocation …
+  chunk 02  words= 200  [no title]  topics=['prescription drug', 'emergency room', 'pre-existing condition', 'deductible']  ⚠ multi-topic
+           admitted to the hospital following an emergency room visit, the inpatient cost-sharing applies rathe…
+  chunk 03  words= 200  [no title]  topics=['prescription drug', 'emergency room', 'pre-existing condition', 'deductible']  ⚠ multi-topic
+           of coverage, provided the policyholder maintains continuous coverage during that period. A pre-exist…
+  chunk 04  words= 200  [no title]  topics=['deductible']
+           Inpatient hospitalization: $500 per admission 4.3 Out-of-Pocket Maximum The annual out-of-pocket max…
+  chunk 05  words= 200  [no title]
+           denied, the policyholder has the right to appeal within 180 days of receiving the denial notice. App…
+  chunk 06  words=  96  [no title]
+           Continuation of Coverage Upon termination of group coverage, eligible individuals may continue cover…
+
+  Chunks with multiple topics in one chunk: 4 of 7 shown
+--------------------------------------------------------------------
+SectionChunker — section-aligned windows
+--------------------------------------------------------------------
+
+  SectionChunker  →  11 chunks
+  --------------------------------------------------------------------
+  chunk 00  words=  12  [BLUE SHIELD HEALTH INSURANCE POLICY]
+           Policy Number: BSH-2024-004521 Effective Date: January 1, 2024 Policyholder: Jane Doe ==============…
+  chunk 01  words= 173  [1. ELIGIBILITY]  topics=['pre-existing condition', 'enrollment period']  ⚠ multi-topic
+           1.1 Who Is Eligible Coverage under this policy is available to individuals who meet all of the follo…
+  chunk 02  words=   3  [1. ELIGIBILITY]
+           service area. ================================================================================…
+  chunk 03  words= 200  [2. COVERAGE]  topics=['prescription drug', 'emergency room']  ⚠ multi-topic
+           2.1 Covered Services This policy covers the following medical services when provided by an in-networ…
+  chunk 04  words=  61  [2. COVERAGE]  topics=['deductible']
+           covered according to the four-tier formulary: - Tier 1 (Generic): $10 copay per 30-day supply - Tier…
+  chunk 05  words= 169  [3. EXCLUSIONS]  topics=['pre-existing condition']
+           3.1 General Exclusions This policy does not cover: cosmetic procedures not medically necessary, expe…
+  chunk 06  words= 139  [4. COST SHARING]  topics=['prescription drug', 'emergency room', 'deductible']  ⚠ multi-topic
+           4.1 Annual Deductible The annual deductible is $1,500 per individual and $3,000 per family. The dedu…
+  chunk 07  words= 171  [5. CLAIMS]
+           5.1 Filing a Claim In-network providers submit claims directly to Blue Shield on behalf of the polic…
+  … 3 more chunks
+
+  Chunks with multiple topics in one chunk: 3 of 8 shown
+--------------------------------------------------------------------
+Section titles detected by SectionChunker
+--------------------------------------------------------------------
+
+  BLUE SHIELD HEALTH INSURANCE POLICY            1 chunk
+  1. ELIGIBILITY                                 2 chunks
+  2. COVERAGE                                    2 chunks
+  3. EXCLUSIONS                                  1 chunk
+  4. COST SHARING                                1 chunk
+  5. CLAIMS                                      2 chunks
+  6. TERMINATION                                 1 chunk
+  7. CONTACT INFORMATION                         1 chunk
+
+--------------------------------------------------------------------
+Retrieval relevance  —  which chunk contains 'prescription drug'?
+--------------------------------------------------------------------
+
+  WindowChunker  : 3 chunk(s) contain 'prescription drug'
+    chunk 01  [no title]  also contains: ['emergency room']
+      life events including marriage, birth or adoption of a child, loss of other coverage, or relocation to a new service are…
+    chunk 02  [no title]  also contains: ['emergency room', 'pre-existing condition', 'deductible']
+      admitted to the hospital following an emergency room visit, the inpatient cost-sharing applies rather than the emergency…
+    chunk 03  [no title]  also contains: ['emergency room', 'pre-existing condition', 'deductible']
+      of coverage, provided the policyholder maintains continuous coverage during that period. A pre-existing condition is def…
+
+  SectionChunker : 2 chunk(s) contain 'prescription drug'
+    chunk 03  [2. COVERAGE]  also contains: ['emergency room']
+      2.1 Covered Services This policy covers the following medical services when provided by an in-network provider: preventi…
+    chunk 06  [4. COST SHARING]  also contains: ['emergency room', 'deductible']
+      4.1 Annual Deductible The annual deductible is $1,500 per individual and $3,000 per family. The deductible resets on Jan…
+
+====================================================================
+Result
+====================================================================
+
+  Chunker               Chunks  Multi-topic chunks
+  --------------------  ------  ------------------
+  WindowChunker              7                   4
+  SectionChunker            11                   3
+
+  SectionChunker chunks are topically coherent because each chunk
+  stays within one section.  Retrieval finds the right section
+  without noise from adjacent topics.
+
+  WindowChunker is faster to compute and is the right choice for
+  unstructured text that has no discernible headers.
+

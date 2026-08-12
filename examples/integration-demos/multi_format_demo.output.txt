@@ -1,0 +1,73 @@
+
+====================================================================
+Multi-Format Ingestion Demo
+====================================================================
+
+  The same pipeline.ingest() call works for .txt, .pdf, and .docx.
+  Format detection is automatic; the chunk schema is always ChunkRecord.
+
+--------------------------------------------------------------------
+ingest_text()  —  flat text, no page metadata  (like a .txt file)
+--------------------------------------------------------------------
+
+  ingest_text()  →  2 chunk(s)
+  chunk_id                                    mime_type            page  section
+  ------------------------------------------  ------------------  -----  -------------------------
+  doc_19ba6ee52c203224_chunk_000000           text/plain              —  
+  doc_19ba6ee52c203224_chunk_000001           text/plain              —  
+
+  page_start present: no (None for all chunks)
+
+--------------------------------------------------------------------
+ingest_pages()  —  page-scoped chunks  (like a .pdf / .docx)
+--------------------------------------------------------------------
+
+  ingest_pages()  →  3 chunk(s)
+  chunk_id                                    mime_type            page  section
+  ------------------------------------------  ------------------  -----  -------------------------
+  doc_4b2dc1487fa90747_chunk_000000           application/pdf         1  
+  doc_4b2dc1487fa90747_chunk_000001           application/pdf         2  
+  doc_4b2dc1487fa90747_chunk_000002           application/pdf         3  
+
+  Pages with chunks: [1, 2, 3]
+  Chunks spanning multiple pages: 0  (must be 0)
+
+--------------------------------------------------------------------
+Content-addressing across formats
+--------------------------------------------------------------------
+
+  TXT chunk count  : 2
+  PDF chunk count  : 3
+  Shared chunk IDs : 0
+
+  IDs differ even for the same text because the document hash covers
+  file_name + mime_type + content — different bytes produce different IDs.
+
+  ✓ This is correct: a PDF and a TXT of the same policy are different
+    documents; both can coexist in the same collection without collision.
+
+--------------------------------------------------------------------
+Unified search across formats  —  same query hits both corpora
+--------------------------------------------------------------------
+
+  Total chunks in combined store: 5
+
+  (Semantic search requires OpenAI embeddings — see semantic_search_demo.py)
+  Keyword scan across all records:
+    'eligibility'             3 chunk(s) from: ['report.pdf', 'report.txt']
+    'prescription drug'       3 chunk(s) from: ['report.pdf', 'report.txt']
+    'emergency room'          3 chunk(s) from: ['report.pdf', 'report.txt']
+
+====================================================================
+Result
+====================================================================
+
+  One pipeline, three formats:
+    pipeline.ingest('doc.txt')   → TextParser  → flat chunks, page=None
+    pipeline.ingest('doc.pdf')   → PDFParser   → page-scoped, page=1,2,…
+    pipeline.ingest('doc.docx')  → DocxParser  → page-scoped, page=1,2,…
+
+  Bypass methods for programmatic input:
+    pipeline.ingest_text(text, ...)       → flat, like .txt
+    pipeline.ingest_pages(pages, ...)     → page-scoped, like .pdf
+

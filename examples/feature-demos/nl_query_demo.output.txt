@@ -1,0 +1,93 @@
+
+====================================================================
+NLQueryParser Demo
+====================================================================
+
+  Backend: regex parse_fn (no API key)
+
+  NLQueryParser maps natural-language strings to structured op dicts.
+  Default backend: OpenAI gpt-4o-mini.
+  Custom parse_fn: inject any callable (text: str) -> dict.
+
+--------------------------------------------------------------------
+Search intent  →  DOCUMENT.SEARCH
+--------------------------------------------------------------------
+
+  Input : 'find information about the deductible'
+  Op    : {op='DOCUMENT.SEARCH', query='find information about the deductible', k=5}
+
+  Input : 'search for emergency room coverage'
+  Op    : {op='DOCUMENT.SEARCH', query='search for emergency room coverage', k=5}
+
+  Input : 'what is the out-of-pocket maximum?'
+  Op    : {op='DOCUMENT.SEARCH', query='what is the out-of-pocket maximum?', k=5}
+
+  Input : 'show me prescription drug tiers'
+  Op    : {op='DOCUMENT.SEARCH', query='show me prescription drug tiers', k=5}
+
+  Input : 'look up pre-existing condition exclusions'
+  Op    : {op='DOCUMENT.SEARCH', query='look up pre-existing condition exclusions', k=5}
+
+  Input : 'retrieve documents about enrollment periods'
+  Op    : {op='DOCUMENT.SEARCH', query='retrieve documents about enrollment periods', k=5}
+
+--------------------------------------------------------------------
+Ingest intent  →  DOCUMENT.INGEST
+--------------------------------------------------------------------
+
+  Input : 'ingest report.pdf'
+  Op    : {op='DOCUMENT.INGEST', path='report.pdf'}
+
+  Input : 'add document /docs/policy_2025.txt'
+  Op    : {op='DOCUMENT.INGEST', path='/docs/policy_2025.txt'}
+
+  Input : 'load file contracts/agreement.pdf'
+  Op    : {op='DOCUMENT.INGEST', path='contracts/agreement.pdf'}
+
+  Input : 'import /data/handbook.docx'
+  Op    : {op='DOCUMENT.INGEST', path='/data/handbook.docx'}
+
+--------------------------------------------------------------------
+Delete intent  →  DOCUMENT.DELETE
+--------------------------------------------------------------------
+
+  Input : 'delete report.pdf'
+  Op    : {op='DOCUMENT.DELETE', path='report.pdf'}
+
+  Input : 'remove document /docs/old_policy.txt'
+  Op    : {op='DOCUMENT.DELETE', path='/docs/old_policy.txt'}
+
+--------------------------------------------------------------------
+Live end-to-end  —  execute_query_nl on a real document
+--------------------------------------------------------------------
+
+  Ingested: sample_policy.txt
+
+  execute_query_nl('find information about the deductible')
+    → top result  [2. COVERAGE]: 2.1 Covered Services This policy covers the following medical services when provided by an in-networ…
+
+  execute_query_nl('show me who is eligible for coverage')
+    → top result  [7. CONTACT INFORMATION]: Member Services: 1-800-555-0100 (Monday to Friday, 8am to 8pm EST) Claims Department: claims@blueshi…
+
+  execute_query_nl('search for prescription drug costs')
+    → top result  [3. EXCLUSIONS]: 3.1 General Exclusions This policy does not cover: cosmetic procedures not medically necessary, expe…
+
+====================================================================
+How to wire it up
+====================================================================
+
+  # Default: uses OpenAI gpt-4o-mini
+  parser = NLQueryParser(api_key='sk-...')
+
+  # Custom: inject any callable
+  parser = NLQueryParser(parse_fn=lambda t: {'op': 'DOCUMENT.SEARCH', 'query': t})
+
+  source = DocumentDataSource(
+      name='docs',
+      nl_parser=parser,   # ← inject at construction time
+      …,
+  )
+  results = source.execute_query_nl('find the termination clause')
+
+  Without nl_parser=, execute_query_nl raises ValueError.
+

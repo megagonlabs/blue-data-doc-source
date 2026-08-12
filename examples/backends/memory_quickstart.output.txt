@@ -1,0 +1,35 @@
+
+============================================================
+blue-data-doc-source — 15-line quickstart
+============================================================
+
+  File      : /Users/jalalmahmud/Projects/blue-data-doc-source/data/sample_policy.txt
+  Embedding : DummyEmbeddingModel (dim=8)
+  Storage   : LocalMemoryVectorStore (in-process)
+
+  11 chunks ingested into collection 'quickstart'
+
+  doc_bc66f8ef9293d195_chunk_000000  [BLUE SHIELD HEALTH INSURANCE POLICY]
+    Policy Number: BSH-2024-004521 Effective Date: January 1, 2024 Policyh…
+  doc_bc66f8ef9293d195_chunk_000001  [1. ELIGIBILITY]
+    1.1 Who Is Eligible Coverage under this policy is available to individ…
+  doc_bc66f8ef9293d195_chunk_000002  [1. ELIGIBILITY]
+    service area. ========================================================…
+  … 8 more chunks
+
+============================================================
+  Query: "deductible and out-of-pocket maximum"
+============================================================
+
+  [1] score=0.8614  [1. ELIGIBILITY]
+       1.1 Who Is Eligible Coverage under this policy is available to individuals who meet all of the following criteria: are b…
+
+  [2] score=0.8376  [5. CLAIMS]
+       5.1 Filing a Claim In-network providers submit claims directly to Blue Shield on behalf of the policyholder. For out-of-…
+
+  [3] score=0.7979  [4. COST SHARING]
+       4.1 Annual Deductible The annual deductible is $1,500 per individual and $3,000 per family. The deductible resets on Jan…
+
+  Tip: replace DummyEmbeddingModel with OpenAIEmbeddingModel for
+  semantic similarity — see examples/backends/openai_embeddings_demo.py
+

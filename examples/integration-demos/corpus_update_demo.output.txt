@@ -1,0 +1,80 @@
+
+====================================================================
+Corpus Update Demo  —  Add, Replace, Remove Documents
+====================================================================
+
+--------------------------------------------------------------------
+Step 1  —  Ingest three documents
+--------------------------------------------------------------------
+
+  Acme v1  document_id=doc_278039ca550e3af0  chunks=2
+  Beta SLA document_id=doc_8598edd6b9c0eac8   chunks=2
+  NDA      document_id=doc_a0f57b232c64e686   chunks=1
+
+  Total chunks in store: 5
+
+--------------------------------------------------------------------
+Step 2  —  Re-ingest same file  →  no growth
+--------------------------------------------------------------------
+
+  Re-ingest returned 2 records
+  Store size before: 5  after: 5
+  ✓ Upsert is idempotent — same bytes, same IDs, no duplicate chunks
+
+--------------------------------------------------------------------
+Step 3  —  Replace Acme v1 with v2  (changed content → new document_id)
+--------------------------------------------------------------------
+
+  Old document_id: doc_278039ca550e3af0
+  New document_id: doc_d4b20fd17f84350a
+  Same? False  (must be False — content changed)
+
+  Step 3a — DELETE old version by document_id + chunk_count
+  Store after delete: 3  (removed 2 stale chunks)
+
+  Step 3b — INGEST new version
+  New version: 3 chunks  document_id=doc_d4b20fd17f84350a
+  Store size : 6
+
+  ✓ Stale v1 chunks remaining : 0  (must be 0)
+  ✓ Fresh v2 chunks present   : 3
+
+--------------------------------------------------------------------
+Step 4  —  Remove NDA document entirely
+--------------------------------------------------------------------
+
+  Store before: 6 chunks
+  Removing document_id=doc_a0f57b232c64e686  (1 chunks)
+  Store after : 5 chunks  (removed 1)
+  ✓ NDA chunks remaining: 0  (must be 0)
+
+--------------------------------------------------------------------
+Step 5  —  Verify final corpus contents
+--------------------------------------------------------------------
+
+  Final corpus: Acme v2, Beta SLA  (NDA removed)
+
+  Acme v2 content ('weekly reports') present: ✓
+  Beta SLA content ('99.9% uptime') present : ✓
+  NDA content ('five years') present        : ✗ gone
+
+  NL search on positive cases (DummyEmbeddingModel — scores not semantic):
+  "what is the updated rate for Acme"
+    → [vendor_acme.txt] Acme Corp will deliver weekly cloud storage reports every Monday. Updated rate: $2,800 per…
+
+  "uptime guarantee compensation"
+    → [sla_beta.txt] Beta Systems guarantees 99.9% uptime for hosted services. Downtime compensation: 10% month…
+
+====================================================================
+Result
+====================================================================
+
+  Add   : pipeline.ingest(path)  or  DOCUMENT.INGEST
+  Remove: DOCUMENT.DELETE with document_id + chunk_count
+  Update: DELETE old doc_id  →  INGEST new file
+
+  Content-addressing means:
+    • Unchanged files are safely re-ingested (upsert, no growth)
+    • Changed files get a new document_id — old chunks need explicit DELETE
+    • Track document_id at ingest time so you can DELETE later
+
