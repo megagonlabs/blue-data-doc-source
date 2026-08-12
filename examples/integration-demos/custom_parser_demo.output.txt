@@ -1,0 +1,67 @@
+
+====================================================================
+Custom Parser Demo
+====================================================================
+
+  File  : /Users/jalalmahmud/Projects/blue-data-doc-source/data/sample_policy.pdf
+  Mode  : bypass
+
+--------------------------------------------------------------------
+Mode B — ingest_pages() bypass: extract externally, skip the parser
+--------------------------------------------------------------------
+
+  Use case: you already have page text from a vision model, a
+  proprietary SDK, or another library.  No Parser subclass needed.
+
+  Extracting pages with pypdf …
+  8 page(s) extracted  →  feeding to ingest_pages()
+
+  pipeline.ingest_pages(
+      pages=[{"page_num": 1, "text": "..."}, ...],
+      file_name="doc.pdf",
+  )
+
+
+  14 chunks produced
+  chunk_id                                    page  section_title
+  ------------------------------------------  ----  ------------------------------
+  doc_275cfa8d822d1ec8_chunk_000000              1  BLUE SHIELD HEALTH INSURANCE POLICY
+  doc_275cfa8d822d1ec8_chunk_000001              2  1. ELIGIBILITY
+  doc_275cfa8d822d1ec8_chunk_000002              2  26. Dependent children who are full
+  doc_275cfa8d822d1ec8_chunk_000003              3  2. COVERAGE
+  doc_275cfa8d822d1ec8_chunk_000004              3  2. COVERAGE
+  doc_275cfa8d822d1ec8_chunk_000005              4  3. EXCLUSIONS
+  … 8 more chunks
+
+  ✓ Chunks spanning multiple pages: 0  (must be 0)
+  ✓ page_start == page_end on every chunk — page-scoped ingestion preserved
+
+--------------------------------------------------------------------
+Parser ABC interface
+--------------------------------------------------------------------
+
+  from blue_doc_source import Parser
+
+  class MyParser(Parser):
+      def parse(self, path: str) -> list[dict]:
+          # Return one dict per page:
+          # {"page_num": int,   ← optional; sets page_start/page_end
+          #  "text": str}        ← required
+
+  pipeline = DocumentPipeline(parser=MyParser(), ...)
+  records  = pipeline.ingest("doc.pdf")
+
+  Alternative — bypass the parser layer entirely:
+  records = pipeline.ingest_pages(pages, file_name="doc.pdf")
+  records = pipeline.ingest_text(text,  file_name="doc.txt")
+
+====================================================================
+Result
+====================================================================
+
+  Mode A (Parser ABC): cleanest when you always use the same extractor.
+    pipeline.ingest(path) works as normal; your parser is called internally.
+
+  Mode B (bypass): best when extraction already happened elsewhere, or
+    when you want to feed content that has no file on disk.
+

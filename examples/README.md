@@ -73,11 +73,14 @@ python3 examples/feature-demos/nl_query_demo.py
 | `integration-demos/pdf_pipeline_demo.py` | PDF page-scoped chunks; page_start==page_end constraint; provenance comparison vs TXT | none (PDF optional) |
 | `integration-demos/multi_format_demo.py` | TXT + PDF + DOCX through one pipeline; ingest_text() and ingest_pages() bypass methods | none |
 | `integration-demos/corpus_update_demo.py` | Add / replace / remove documents; DOCUMENT.DELETE; stale-chunk management | none |
+| `integration-demos/custom_parser_demo.py` | Parser ABC extension (LlamaIndex wrapper) and ingest_pages() bypass for external extractors | none (LlamaIndex optional) |
 
 ```bash
 python3 examples/integration-demos/pdf_pipeline_demo.py
 python3 examples/integration-demos/multi_format_demo.py
 python3 examples/integration-demos/corpus_update_demo.py
+python3 examples/integration-demos/custom_parser_demo.py                   # bypass mode, no deps
+python3 examples/integration-demos/custom_parser_demo.py --mode llamaindex  # requires llama-index
 ```
 
 ---
