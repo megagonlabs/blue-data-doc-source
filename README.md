@@ -1,12 +1,23 @@
 # blue-data-doc-source
 
-## Overview
-
 blue-data-doc-source is a document ingestion and retrieval source for Blue Data Intelligence. It sits upstream of Blue's vector layer, converting unstructured documents into structured, provenance-aware chunk records that AI agents can search, cite, and reason over.
 
-It handles the full pipeline from raw file to queryable vector index: parsing text, PDFs, and DOCX files, detecting section structure, extracting entities and keywords, generating embeddings, and upserting into Blue's RedisVectorSource. It plugs directly into Blue's DataSource abstraction, so documents become first-class members of the same data layer as SQL databases, graph stores, and JSON sources.
+It handles the full pipeline from raw file to queryable vector index: parsing text, PDFs, and DOCX files, detecting section structure, extracting entities and keywords, generating embeddings, and upserting into Blue's vector store. It plugs directly into Blue's DataSource abstraction, so documents become first-class members of the same data layer as SQL databases, graph stores, and JSON sources.
 
-It answers questions like: what does this document say, which section does it come from, what page is it on, and how does it relate to a user's query.
+Its core capabilities include:
+
+- **Multi-format parsing** — PDF (text layer + optional Tesseract OCR), plain text, and DOCX through a single interface
+- **Section-aware chunking** — detects markdown, numbered, ALL-CAPS, and underlined headers; keeps chunks within section boundaries; preserves section heading on every chunk
+- **Content-addressed deduplication** — SHA-256 hash of file bytes; same file always produces the same chunk IDs; re-ingest is a safe upsert
+- **Full provenance** — every chunk carries `file_name`, `page_start`, `page_end`, and `section_title`; results are always citable
+- **Regex enrichment** — `BasicEnricher` extracts named entities (DATE, EMAIL, PERCENT, MONEY, PROPER_NOUN) and semantic hints with no ML dependency
+- **Pluggable embeddings** — `OpenAIEmbeddingModel`, `DummyEmbeddingModel`, or any custom `EmbeddingModel` subclass
+- **Pluggable vector storage** — any blue-data `VectorSource`; `MemoryVectorSource` for dev, `RedisVectorSource` for production
+- **Natural language queries** — `NLQueryParser` maps plain-English instructions to `DOCUMENT.*` ops; `parse_fn` injection for keyless use
+- **Pluggable parsers** — `Parser` ABC for external processors (LlamaIndex, vision models, cloud OCR); bypass via `ingest_text` / `ingest_pages`
+- **MCP server** — `platform/document-mcp` exposes all ops as tools callable from Claude Desktop
+
+→ **[Full feature list](docs/features.md)** · **[Examples](examples/README.md)** · **[MCP server](docs/mcp.md)**
 
 ## Installation
 
