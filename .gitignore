@@ -38,6 +38,9 @@ htmlcov/
 *.tar.gz
 MANIFEST
 
+# Claude Code
+CLAUDE.md
+
 # Environment & secrets
 .env
 *.envrc

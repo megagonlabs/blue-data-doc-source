@@ -17,7 +17,35 @@ Its core capabilities include:
 - **Pluggable parsers** — `Parser` ABC for external processors (LlamaIndex, vision models, cloud OCR); bypass via `ingest_text` / `ingest_pages`
 - **MCP server** — `platform/document-mcp` exposes all ops as tools callable from Claude Desktop
 
-→ **[Full feature list](docs/features.md)** · **[Examples](examples/README.md)** · **[MCP server](docs/mcp.md)**
+→ **[Full feature list](docs/features.md)** · **[Examples](examples/README.md)** · **[MCP server](docs/mcp.md)** · **[Quick start](#quick-start)**
+
+## Repository layout
+
+```
+blue-data-doc-source/
+├── lib/                              # Python library (blue-data-doc-source)
+│   ├── src/blue_data_doc_source/
+│   └── tests/
+├── platform/
+│   └── document-mcp/                 # MCP server for document operations
+├── docs/                             # Documentation
+├── data/                             # Sample documents used by examples
+├── design/                           # Architecture and design documents
+└── examples/                         # Runnable examples
+```
+
+## Requirements
+
+- Python 3.10+
+- [`blue-data`](../blue-data) (local dependency)
+- Runtime: `openai`, `pypdf`, `python-docx`, `redis[hiredis]` — installed automatically via `pip install`
+- Optional: `[ocr]` — Tesseract OCR for scanned PDFs; also requires Tesseract on PATH (`brew install tesseract`)
+- Optional: `[mcp]` — MCP server support (`platform/document-mcp`)
+- Optional: OpenAI API key for `OpenAIEmbeddingModel` and `NLQueryParser`
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
 
 ## Installation
 
@@ -32,7 +60,7 @@ pip install -e .
 Ingest a file with no embeddings — useful for inspecting chunks before wiring up a vector store:
 
 ```python
-from blue_doc_source import DocumentPipeline
+from blue_data_doc_source import DocumentPipeline
 
 pipeline = DocumentPipeline(chunk_size=500, overlap=100)
 records = pipeline.ingest("mydoc.pdf")
@@ -48,7 +76,7 @@ Full pipeline: parse → chunk → enrich → embed → upsert to Redis → sear
 `blue-data-doc-source` depends on `blue-data`. Pass a `VectorSource` instance (e.g. `RedisVectorSource`) from blue-data as the `vector_source`.
 
 ```python
-from blue_doc_source import DocumentDataSource, OpenAIEmbeddingModel, BasicEnricher
+from blue_data_doc_source import DocumentDataSource, OpenAIEmbeddingModel, BasicEnricher
 from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
 
 # Instantiate blue-data's RedisVectorSource
@@ -152,7 +180,7 @@ OPENAI_API_KEY=sk-... python examples/demo_pdf.py path/to/doc.pdf \
 `--nl-query` lets you ask in plain English. Under the hood, `NLQueryParser` uses an LLM (GPT-4o-mini by default) to parse the instruction into the right op and parameters, then calls `execute_query` automatically.
 
 ```python
-from blue_doc_source import DocumentDataSource, NLQueryParser, OpenAIEmbeddingModel
+from blue_data_doc_source import DocumentDataSource, NLQueryParser, OpenAIEmbeddingModel
 
 source = DocumentDataSource(
     embedding_model=OpenAIEmbeddingModel(),
@@ -186,7 +214,7 @@ parser = NLQueryParser(parse_fn=lambda text: my_llm_call(text))
 | `--redis-host` | `localhost` | Redis host |
 | `--redis-port` | `6379` | Redis port |
 
-> **Note:** `examples/local_redis_store.py` is demo-only and is not part of the `blue_doc_source` package. Production use should pass Blue's `RedisVectorSource` directly as `vector_source`.
+> **Note:** `examples/local_redis_store.py` is demo-only and is not part of the `blue_data_doc_source` package. Production use should pass Blue's `RedisVectorSource` directly as `vector_source`.
 
 ## Architecture
 
@@ -233,7 +261,7 @@ Every ingested chunk becomes a `ChunkRecord`, serialised via `.to_dict()`. Optio
 Pass a custom chunker to override the default:
 
 ```python
-from blue_doc_source.source.document.chunkers import WindowChunker
+from blue_data_doc_source.source.document.chunkers import WindowChunker
 pipeline = DocumentPipeline(chunker=WindowChunker(chunk_size=500, overlap=50))
 ```
 
@@ -257,7 +285,7 @@ All embedding models expose a `dim` property used by `ensure_index` and validate
 The built-in parsers (`TextParser`, `PDFParser`) cover standard digitally-created files. To use an external document processor — LlamaIndex, a vision model, a cloud OCR API — implement the `Parser` ABC and pass it as `parser=` to `DocumentPipeline`. Everything downstream (chunking, enrichment, embedding, storage) is unchanged.
 
 ```python
-from blue_doc_source import DocumentPipeline, Parser
+from blue_data_doc_source import DocumentPipeline, Parser
 
 class LlamaIndexParser(Parser):
     def parse(self, path: str):
@@ -295,7 +323,7 @@ By default, `PDFParser` uses pypdf to read the text layer embedded in a PDF. Pag
 Pass `ocr_fallback=True` to run Tesseract OCR on any blank page instead of dropping it:
 
 ```python
-from blue_doc_source.source.document.parsers import PDFParser
+from blue_data_doc_source.source.document.parsers import PDFParser
 
 parser = PDFParser(ocr_fallback=True)
 pages = parser.parse_pages("scanned_contract.pdf")
