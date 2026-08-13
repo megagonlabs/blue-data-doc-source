@@ -1,5 +1,5 @@
 import pytest
-from blue_doc_source.source.document.parsers import TextParser
+from blue_data_doc_source.source.document.parsers import TextParser
 
 
 def test_parse_txt_file(tmp_path):

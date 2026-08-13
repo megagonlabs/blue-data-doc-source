@@ -1,4 +1,4 @@
-from blue_doc_source.source.document.enrichment import BasicEnricher
+from blue_data_doc_source.source.document.enrichment import BasicEnricher
 
 
 def test_extracts_keywords():

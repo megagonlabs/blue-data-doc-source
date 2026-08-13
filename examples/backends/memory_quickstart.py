@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from local_memory_store import LocalMemoryVectorStore
 
-from blue_doc_source import DocumentPipeline, DummyEmbeddingModel
+from blue_data_doc_source import DocumentPipeline, DummyEmbeddingModel
 
 DATA_DIR    = Path(__file__).parent.parent.parent / "data"
 DEFAULT_DOC = DATA_DIR / "sample_policy.txt"

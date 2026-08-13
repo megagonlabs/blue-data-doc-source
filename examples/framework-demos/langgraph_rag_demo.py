@@ -43,7 +43,7 @@ except ImportError:
     print("  pip install langgraph langchain-openai")
     sys.exit(1)
 
-from blue_doc_source import DocumentDataSource, OpenAIEmbeddingModel, NLQueryParser
+from blue_data_doc_source import DocumentDataSource, OpenAIEmbeddingModel, NLQueryParser
 
 DATA_DIR    = Path(__file__).parent.parent.parent / "data"
 DEFAULT_DOC = DATA_DIR / "sample_policy.txt"

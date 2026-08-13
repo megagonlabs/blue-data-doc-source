@@ -31,7 +31,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-from blue_doc_source import DocumentPipeline, DummyEmbeddingModel, Parser
+from blue_data_doc_source import DocumentPipeline, DummyEmbeddingModel, Parser
 
 DATA_DIR    = Path(__file__).parent.parent.parent / "data"
 DEFAULT_PDF = DATA_DIR / "sample_policy.pdf"
@@ -194,7 +194,7 @@ def run(path: str, mode: str, chunk_size: int, overlap: int) -> None:
     print("Parser ABC interface")
     print(DIV2)
     print()
-    print("  from blue_doc_source import Parser")
+    print("  from blue_data_doc_source import Parser")
     print()
     print("  class MyParser(Parser):")
     print("      def parse(self, path: str) -> list[dict]:")

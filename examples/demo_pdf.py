@@ -13,7 +13,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from blue_doc_source import (
+from blue_data_doc_source import (
     DocumentDataSource,
     DummyEmbeddingModel,
     NLQueryParser,

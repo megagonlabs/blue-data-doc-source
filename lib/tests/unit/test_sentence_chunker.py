@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch
-from blue_doc_source.source.document.chunkers import SentenceChunker
+from blue_data_doc_source.source.document.chunkers import SentenceChunker
 
 
 SENTENCES = (

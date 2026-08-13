@@ -29,7 +29,7 @@ _pipeline = None
 
 
 def _build_pipeline():
-    from blue_doc_source import (
+    from blue_data_doc_source import (
         BasicEnricher,
         DocumentPipeline,
         DummyEmbeddingModel,

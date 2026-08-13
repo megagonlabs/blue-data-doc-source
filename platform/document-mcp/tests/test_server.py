@@ -246,7 +246,7 @@ def test_delete_missing_args_returns_error():
 def test_build_pipeline_uses_dummy_embedding_by_default(monkeypatch):
     monkeypatch.delenv("BLUE_DOC_EMBEDDING", raising=False)
     monkeypatch.delenv("BLUE_DOC_REDIS_HOST", raising=False)
-    from blue_doc_source import DummyEmbeddingModel
+    from blue_data_doc_source import DummyEmbeddingModel
     pipeline = _server._build_pipeline()
     assert isinstance(pipeline.embedding_model, DummyEmbeddingModel)
 

@@ -1,5 +1,5 @@
 import pytest
-from blue_doc_source.source.document.chunkers import WindowChunker
+from blue_data_doc_source.source.document.chunkers import WindowChunker
 
 
 def test_basic_chunking():

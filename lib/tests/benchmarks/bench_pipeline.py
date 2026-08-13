@@ -22,9 +22,9 @@ import time
 from dataclasses import dataclass
 from typing import List
 
-from blue_doc_source.source.document.chunkers import SectionChunker
-from blue_doc_source.source.document.embeddings import DummyEmbeddingModel
-from blue_doc_source.source.document.enrichment import BasicEnricher
+from blue_data_doc_source.source.document.chunkers import SectionChunker
+from blue_data_doc_source.source.document.embeddings import DummyEmbeddingModel
+from blue_data_doc_source.source.document.enrichment import BasicEnricher
 
 sys.path.insert(0, os.path.dirname(__file__))
 from datasets import build_corpus, SMALL, MEDIUM, LARGE

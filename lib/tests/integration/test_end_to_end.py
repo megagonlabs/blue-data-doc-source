@@ -7,8 +7,8 @@ Run with:
 import pytest
 
 from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
-from blue_doc_source.source.document.document_source import DocumentDataSource
-from blue_doc_source.source.document.embeddings import DummyEmbeddingModel
+from blue_data_doc_source.source.document.document_source import DocumentDataSource
+from blue_data_doc_source.source.document.embeddings import DummyEmbeddingModel
 
 from .conftest import requires_redis
 

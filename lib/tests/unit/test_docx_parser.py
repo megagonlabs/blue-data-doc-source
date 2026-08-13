@@ -1,7 +1,7 @@
 import pytest
 from docx import Document as DocxDocument
 
-from blue_doc_source.source.document.parsers.docx_parser import DocxParser
+from blue_data_doc_source.source.document.parsers.docx_parser import DocxParser
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -130,7 +130,7 @@ def test_parse_full_structured_document(tmp_path):
 
 
 def test_parse_section_titles_detectable_by_section_chunker(tmp_path):
-    from blue_doc_source.source.document.chunkers import SectionChunker
+    from blue_data_doc_source.source.document.chunkers import SectionChunker
     path = make_docx(tmp_path, [
         {"text": "Eligibility Requirements", "style": "Heading 1"},
         "Customers must be 18 or older and a legal resident.",

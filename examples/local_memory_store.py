@@ -1,4 +1,4 @@
-"""Demo-only LocalMemoryVectorStore — not part of the blue_doc_source package.
+"""Demo-only LocalMemoryVectorStore — not part of the blue_data_doc_source package.
 
 In-process vector store backed by numpy cosine similarity.
 No external services required. All data is lost when the process exits.

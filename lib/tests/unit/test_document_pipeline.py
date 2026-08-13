@@ -1,9 +1,9 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from blue_doc_source.source.document.pipeline import DocumentPipeline
-from blue_doc_source.source.document.embeddings import DummyEmbeddingModel, EmbeddingModel
-from blue_doc_source.source.document.chunkers import SectionChunker, WindowChunker
-from blue_doc_source.source.document.enrichment import BasicEnricher
+from blue_data_doc_source.source.document.pipeline import DocumentPipeline
+from blue_data_doc_source.source.document.embeddings import DummyEmbeddingModel, EmbeddingModel
+from blue_data_doc_source.source.document.chunkers import SectionChunker, WindowChunker
+from blue_data_doc_source.source.document.enrichment import BasicEnricher
 from typing import List
 
 
@@ -310,7 +310,7 @@ def test_default_chunker_is_section_chunker():
     assert isinstance(pipeline.chunker, SectionChunker)
 
 
-@patch("blue_doc_source.source.document.pipeline.PDFParser")
+@patch("blue_data_doc_source.source.document.pipeline.PDFParser")
 def test_ingest_pdf_returns_records(mock_parser_cls, tmp_path):
     pdf_path = tmp_path / "doc.pdf"
     pdf_path.write_bytes(b"fake")
@@ -324,7 +324,7 @@ def test_ingest_pdf_returns_records(mock_parser_cls, tmp_path):
     assert records[0]["mime_type"] == "application/pdf"
 
 
-@patch("blue_doc_source.source.document.pipeline.PDFParser")
+@patch("blue_data_doc_source.source.document.pipeline.PDFParser")
 def test_ingest_pdf_page_provenance(mock_parser_cls, tmp_path):
     pdf_path = tmp_path / "doc.pdf"
     pdf_path.write_bytes(b"fake")
@@ -337,7 +337,7 @@ def test_ingest_pdf_page_provenance(mock_parser_cls, tmp_path):
     assert records[0]["page_end"] == 3
 
 
-@patch("blue_doc_source.source.document.pipeline.PDFParser")
+@patch("blue_data_doc_source.source.document.pipeline.PDFParser")
 def test_ingest_pdf_upserts_to_vector_source(mock_parser_cls, tmp_path):
     pdf_path = tmp_path / "doc.pdf"
     pdf_path.write_bytes(b"fake")
@@ -355,7 +355,7 @@ def test_ingest_pdf_upserts_to_vector_source(mock_parser_cls, tmp_path):
     assert vector_source.upsert.call_count == len(records)
 
 
-@patch("blue_doc_source.source.document.pipeline.PDFParser")
+@patch("blue_data_doc_source.source.document.pipeline.PDFParser")
 def test_ingest_pdf_section_title(mock_parser_cls, tmp_path):
     pdf_path = tmp_path / "doc.pdf"
     pdf_path.write_bytes(b"fake")
@@ -491,7 +491,7 @@ def test_pipeline_ocr_fallback_defaults_to_false():
     assert pipeline.pdf_parser._ocr_fallback is False
 
 
-@patch("blue_doc_source.source.document.pipeline.PDFParser")
+@patch("blue_data_doc_source.source.document.pipeline.PDFParser")
 def test_ocr_metadata_propagated_to_chunk_record(mock_parser_cls, tmp_path):
     pdf_path = tmp_path / "scan.pdf"
     pdf_path.write_bytes(b"fake")
@@ -510,7 +510,7 @@ def test_ocr_metadata_propagated_to_chunk_record(mock_parser_cls, tmp_path):
     assert records[0]["metadata"]["ocr_confidence"] == 82.4
 
 
-@patch("blue_doc_source.source.document.pipeline.PDFParser")
+@patch("blue_data_doc_source.source.document.pipeline.PDFParser")
 def test_non_ocr_pages_have_no_ocr_metadata(mock_parser_cls, tmp_path):
     pdf_path = tmp_path / "doc.pdf"
     pdf_path.write_bytes(b"fake")
@@ -540,7 +540,7 @@ def test_delete_handles_backend_failure_gracefully(tmp_path):
 
 # --- Pluggable parser tests ---
 
-from blue_doc_source.source.document.parsers import Parser
+from blue_data_doc_source.source.document.parsers import Parser
 
 
 class _StaticParser(Parser):
@@ -651,7 +651,7 @@ def test_ingest_docx_document_id_is_stable(tmp_path):
 
 def test_ingest_docx_upserts_to_vector_source(tmp_path):
     from unittest.mock import MagicMock
-    from blue_doc_source.source.document.embeddings import DummyEmbeddingModel
+    from blue_data_doc_source.source.document.embeddings import DummyEmbeddingModel
     path = make_docx(tmp_path, ["Content to embed."])
     vector_source = MagicMock()
     pipeline = DocumentPipeline(

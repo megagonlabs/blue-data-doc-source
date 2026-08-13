@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from blue_doc_source import BasicEnricher, SectionChunker
+from blue_data_doc_source import BasicEnricher, SectionChunker
 
 DATA_DIR    = Path(__file__).parent.parent.parent / "data"
 DEFAULT_DOC = DATA_DIR / "sample_policy.txt"

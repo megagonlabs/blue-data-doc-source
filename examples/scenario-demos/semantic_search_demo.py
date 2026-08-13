@@ -30,7 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from local_memory_store import LocalMemoryVectorStore
 
-from blue_doc_source import DocumentPipeline, OpenAIEmbeddingModel
+from blue_data_doc_source import DocumentPipeline, OpenAIEmbeddingModel
 
 API_KEY = os.getenv("OPENAI_API_KEY", "")
 if not API_KEY:

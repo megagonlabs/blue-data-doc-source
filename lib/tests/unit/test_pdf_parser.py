@@ -2,7 +2,7 @@ import sys
 import pytest
 from unittest.mock import MagicMock, patch
 
-from blue_doc_source.source.document.parsers.pdf_parser import PDFParser, _preprocess_image
+from blue_data_doc_source.source.document.parsers.pdf_parser import PDFParser, _preprocess_image
 
 
 def _mock_reader(pages_text):
@@ -17,7 +17,7 @@ def _mock_reader(pages_text):
     return reader
 
 
-@patch("blue_doc_source.source.document.parsers.pdf_parser.PdfReader")
+@patch("blue_data_doc_source.source.document.parsers.pdf_parser.PdfReader")
 def test_parse_pages_returns_text(mock_reader_cls, tmp_path):
     pdf_path = tmp_path / "doc.pdf"
     pdf_path.write_bytes(b"fake")
@@ -30,7 +30,7 @@ def test_parse_pages_returns_text(mock_reader_cls, tmp_path):
     assert result[1] == {"page_num": 2, "text": "Page two content."}
 
 
-@patch("blue_doc_source.source.document.parsers.pdf_parser.PdfReader")
+@patch("blue_data_doc_source.source.document.parsers.pdf_parser.PdfReader")
 def test_parse_pages_skips_blank_pages(mock_reader_cls, tmp_path):
     pdf_path = tmp_path / "doc.pdf"
     pdf_path.write_bytes(b"fake")
@@ -43,7 +43,7 @@ def test_parse_pages_skips_blank_pages(mock_reader_cls, tmp_path):
     assert result[1]["page_num"] == 3
 
 
-@patch("blue_doc_source.source.document.parsers.pdf_parser.PdfReader")
+@patch("blue_data_doc_source.source.document.parsers.pdf_parser.PdfReader")
 def test_parse_pages_skips_whitespace_only_pages(mock_reader_cls, tmp_path):
     pdf_path = tmp_path / "doc.pdf"
     pdf_path.write_bytes(b"fake")
@@ -55,7 +55,7 @@ def test_parse_pages_skips_whitespace_only_pages(mock_reader_cls, tmp_path):
     assert result[0]["page_num"] == 1
 
 
-@patch("blue_doc_source.source.document.parsers.pdf_parser.PdfReader")
+@patch("blue_data_doc_source.source.document.parsers.pdf_parser.PdfReader")
 def test_parse_pages_page_numbers_are_1based(mock_reader_cls, tmp_path):
     pdf_path = tmp_path / "doc.pdf"
     pdf_path.write_bytes(b"fake")
@@ -66,7 +66,7 @@ def test_parse_pages_page_numbers_are_1based(mock_reader_cls, tmp_path):
     assert [r["page_num"] for r in result] == [1, 2, 3]
 
 
-@patch("blue_doc_source.source.document.parsers.pdf_parser.PdfReader")
+@patch("blue_data_doc_source.source.document.parsers.pdf_parser.PdfReader")
 def test_parse_pages_strips_whitespace(mock_reader_cls, tmp_path):
     pdf_path = tmp_path / "doc.pdf"
     pdf_path.write_bytes(b"fake")
@@ -89,7 +89,7 @@ def test_parse_pages_wrong_extension(tmp_path):
         PDFParser().parse_pages(str(f))
 
 
-@patch("blue_doc_source.source.document.parsers.pdf_parser.PdfReader")
+@patch("blue_data_doc_source.source.document.parsers.pdf_parser.PdfReader")
 def test_parse_pages_all_blank_returns_empty(mock_reader_cls, tmp_path):
     pdf_path = tmp_path / "doc.pdf"
     pdf_path.write_bytes(b"fake")
@@ -102,7 +102,7 @@ def test_parse_pages_all_blank_returns_empty(mock_reader_cls, tmp_path):
 
 # --- OCR fallback tests ---
 
-@patch("blue_doc_source.source.document.parsers.pdf_parser.PdfReader")
+@patch("blue_data_doc_source.source.document.parsers.pdf_parser.PdfReader")
 def test_ocr_fallback_called_for_blank_page(mock_reader_cls, tmp_path):
     pdf_path = tmp_path / "doc.pdf"
     pdf_path.write_bytes(b"fake")
@@ -124,7 +124,7 @@ def test_ocr_fallback_called_for_blank_page(mock_reader_cls, tmp_path):
     }
 
 
-@patch("blue_doc_source.source.document.parsers.pdf_parser.PdfReader")
+@patch("blue_data_doc_source.source.document.parsers.pdf_parser.PdfReader")
 def test_ocr_fallback_skips_page_when_ocr_returns_empty(mock_reader_cls, tmp_path):
     pdf_path = tmp_path / "doc.pdf"
     pdf_path.write_bytes(b"fake")
@@ -137,7 +137,7 @@ def test_ocr_fallback_skips_page_when_ocr_returns_empty(mock_reader_cls, tmp_pat
     assert result == []
 
 
-@patch("blue_doc_source.source.document.parsers.pdf_parser.PdfReader")
+@patch("blue_data_doc_source.source.document.parsers.pdf_parser.PdfReader")
 def test_ocr_fallback_not_called_when_disabled(mock_reader_cls, tmp_path):
     pdf_path = tmp_path / "doc.pdf"
     pdf_path.write_bytes(b"fake")
@@ -333,7 +333,7 @@ def test_ocr_confidence_present_in_parse_pages_result(mock_reader_cls=None, tmp_
         pdf_path = pathlib.Path(td) / "doc.pdf"
         pdf_path.write_bytes(b"fake")
 
-        with patch("blue_doc_source.source.document.parsers.pdf_parser.PdfReader") as mock_cls:
+        with patch("blue_data_doc_source.source.document.parsers.pdf_parser.PdfReader") as mock_cls:
             mock_cls.return_value = _mock_reader([None])
             parser = PDFParser(ocr_fallback=True)
             ocr_result = {"text": "Scanned invoice text", "ocr_confidence": 76.3}

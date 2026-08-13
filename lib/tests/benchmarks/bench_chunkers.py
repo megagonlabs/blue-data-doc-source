@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from blue_doc_source.source.document.chunkers import (
+from blue_data_doc_source.source.document.chunkers import (
     Chunker, SectionChunker, SentenceChunker, WindowChunker,
 )
 

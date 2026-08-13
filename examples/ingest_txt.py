@@ -8,7 +8,7 @@ Usage:
 import argparse
 from pathlib import Path
 
-from blue_doc_source import DocumentPipeline, DummyEmbeddingModel, OpenAIEmbeddingModel
+from blue_data_doc_source import DocumentPipeline, DummyEmbeddingModel, OpenAIEmbeddingModel
 
 DEFAULT_PATH = Path(__file__).parent.parent / "data" / "sample_policy.txt"
 

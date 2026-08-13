@@ -1,4 +1,4 @@
-"""Demo-only LocalRedisVectorStore — not part of the blue_doc_source package.
+"""Demo-only LocalRedisVectorStore — not part of the blue_data_doc_source package.
 
 Requires Redis Stack running locally:
     docker run -p 6379:6379 redis/redis-stack-server:latest

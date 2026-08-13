@@ -1,5 +1,5 @@
 import pytest
-from blue_doc_source.source.document.chunkers.section_chunker import SectionChunker
+from blue_data_doc_source.source.document.chunkers.section_chunker import SectionChunker
 
 
 def test_plain_text_falls_back_to_window():

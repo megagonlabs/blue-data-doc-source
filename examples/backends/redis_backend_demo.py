@@ -33,7 +33,7 @@ except ImportError:
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from blue_doc_source import DocumentPipeline, DocumentDataSource, DummyEmbeddingModel, NLQueryParser
+from blue_data_doc_source import DocumentPipeline, DocumentDataSource, DummyEmbeddingModel, NLQueryParser
 
 DATA_DIR    = Path(__file__).parent.parent.parent / "data"
 DEFAULT_DOC = DATA_DIR / "sample_policy.txt"

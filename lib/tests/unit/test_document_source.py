@@ -1,9 +1,9 @@
 import pytest
 from unittest.mock import MagicMock
 
-from blue_doc_source.source.document.document_source import DocumentDataSource
-from blue_doc_source.source.document.embeddings import DummyEmbeddingModel
-from blue_doc_source.source.document.enrichment import BasicEnricher
+from blue_data_doc_source.source.document.document_source import DocumentDataSource
+from blue_data_doc_source.source.document.embeddings import DummyEmbeddingModel
+from blue_data_doc_source.source.document.enrichment import BasicEnricher
 
 
 def make_txt(tmp_path, content="The quick brown fox jumps over the lazy dog"):

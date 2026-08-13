@@ -25,7 +25,7 @@ mcp = [
 
 [tool.setuptools.packages.find]
 where = ["lib/src"]
-include = ["blue_doc_source*"]
+include = ["blue_data_doc_source*"]
 
 [tool.pytest.ini_options]
 testpaths = ["lib/tests/unit"]
