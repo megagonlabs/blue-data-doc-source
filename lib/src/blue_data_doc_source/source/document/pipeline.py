@@ -11,6 +11,7 @@ from .embeddings import EmbeddingModel
 from .enrichment import Enricher
 from .chunk_record import ChunkRecord
 from .parsers import DocxParser, Parser, PDFParser, TextParser
+from .schema.base import DocumentClassifier, SchemaExtractor
 
 # Chars that need escaping inside Redis Search TAG filter values.
 _TAG_SPECIAL_RE = re.compile(r'([,.<>{}\[\]"\'`:;!@#$%^&*\-+=~|/ ])')
@@ -91,6 +92,8 @@ class DocumentPipeline:
         enricher: Optional[Enricher] = None,
         collection: str = "documents",
         ocr_fallback: bool = False,
+        classifier: Optional[DocumentClassifier] = None,
+        schema_extractor: Optional[SchemaExtractor] = None,
     ):
         """
         Args:
@@ -122,6 +125,8 @@ class DocumentPipeline:
         self.embedding_model = embedding_model
         self.vector_source = vector_source
         self.enricher = enricher
+        self.classifier = classifier
+        self.schema_extractor = schema_extractor
         self.collection = collection
         self.chunk_size = chunk_size
         self.overlap = overlap
@@ -129,6 +134,8 @@ class DocumentPipeline:
         self._doc_registry: Dict[str, Tuple[str, int, str]] = {}
         # collections for which create_index has already succeeded this session
         self._index_created: Set[str] = set()
+        # document_id → schema record — populated during ingest when classifier is set
+        self._schema_registry: Dict[str, Dict[str, Any]] = {}
 
     def ingest(self, path: str, collection: Optional[str] = None) -> List[Dict[str, Any]]:
         """Parse, chunk, enrich, and embed a file.
@@ -189,6 +196,7 @@ class DocumentPipeline:
         section_title: Optional[str] = None,
         mime_type: str = "text/plain",
         page_ocr_meta: Optional[Dict[str, Any]] = None,
+        document_type: Optional[str] = None,
     ) -> ChunkRecord:
         embedding = None
         if self.embedding_model is not None:
@@ -234,6 +242,7 @@ class DocumentPipeline:
             semantic_hints=semantic_hints,
             embedding=embedding,
             metadata=metadata,
+            document_type=document_type,
         )
 
     @staticmethod
@@ -385,6 +394,26 @@ class DocumentPipeline:
         records = []
         chunk_index = 0
 
+        # Run document classification / schema extraction once per document.
+        document_type: Optional[str] = None
+        if self.classifier is not None:
+            full_text = " ".join(p.get("text", "") for p in pages)
+            document_type, confidence = self.classifier.classify(full_text)
+            extracted_fields: Dict[str, Any] = {}
+            if self.schema_extractor is not None:
+                extracted_fields = self.schema_extractor.extract(full_text, document_type)
+            classifier_name = (
+                "llm" if self.schema_extractor is not None else "keyword"
+            )
+            self._schema_registry[document_id] = {
+                "document_id": document_id,
+                "chunk_id": f"{document_id}_schema",
+                "document_type": document_type,
+                "fields": extracted_fields,
+                "classifier": classifier_name,
+                "confidence": confidence,
+            }
+
         for page in pages:
             page_num = page.get("page_num")
             page_ocr_meta: Dict[str, Any] = {}
@@ -409,6 +438,7 @@ class DocumentPipeline:
                     section_title=section_title,
                     mime_type=mime_type,
                     page_ocr_meta=page_ocr_meta or None,
+                    document_type=document_type,
                 )
                 record_dict = record.to_dict()
                 records.append(record_dict)
@@ -416,6 +446,14 @@ class DocumentPipeline:
                 chunk_index += 1
 
         return records
+
+    def get_schema(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Return the schema record for a document, or ``None`` if not available.
+
+        Schema records are populated during ingest when a ``classifier`` is set.
+        They are stored in-process only — cross-process retrieval is not supported.
+        """
+        return self._schema_registry.get(document_id)
 
     def _ingest_txt(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
         text = self.text_parser.parse(str(file_path))

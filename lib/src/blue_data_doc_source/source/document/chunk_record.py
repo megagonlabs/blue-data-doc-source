@@ -24,6 +24,7 @@ class ChunkRecord:
     semantic_hints: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
     embedding: Optional[List[float]] = None
+    document_type: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         result = {
@@ -37,6 +38,10 @@ class ChunkRecord:
             "semantic_hints": self.semantic_hints,
             "metadata": self.metadata,
         }
+
+        if self.document_type is not None:
+            result["document_type"] = self.document_type
+            result["metadata"] = {**self.metadata, "document_type": self.document_type}
 
         if self.page_start is not None:
             result["page_start"] = self.page_start

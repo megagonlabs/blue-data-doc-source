@@ -6,6 +6,12 @@ from .source.document.chunkers import Chunker, SectionChunker, SentenceChunker, 
 from .source.document.embeddings import EmbeddingModel, DummyEmbeddingModel, OpenAIEmbeddingModel
 from .source.document.enrichment import Enricher, BasicEnricher
 from .source.document.parsers import Parser, TextParser, PDFParser, DocxParser
+from .source.document.schema import (
+    DocumentClassifier,
+    SchemaExtractor,
+    KeywordClassifier,
+    LLMSchemaExtractor,
+)
 
 __all__ = [
     "DocumentDataSource",
@@ -25,4 +31,8 @@ __all__ = [
     "PDFParser",
     "DocxParser",
     "NLQueryParser",
+    "DocumentClassifier",
+    "SchemaExtractor",
+    "KeywordClassifier",
+    "LLMSchemaExtractor",
 ]

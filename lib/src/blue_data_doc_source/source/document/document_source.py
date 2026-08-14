@@ -7,6 +7,7 @@ from .embeddings import EmbeddingModel
 from .enrichment import Enricher
 from .nl_parser import NLQueryParser
 from .pipeline import DocumentPipeline
+from .schema.base import DocumentClassifier, SchemaExtractor
 
 
 class DocumentDataSource(DataSource):
@@ -47,6 +48,8 @@ class DocumentDataSource(DataSource):
         nl_parser: Optional[NLQueryParser] = None,
         properties: Optional[Dict[str, Any]] = None,
         ocr_fallback: bool = False,
+        classifier: Optional[DocumentClassifier] = None,
+        schema_extractor: Optional[SchemaExtractor] = None,
     ):
         """
         Args:
@@ -78,6 +81,8 @@ class DocumentDataSource(DataSource):
             enricher=enricher,
             collection=default_collection,
             ocr_fallback=ocr_fallback,
+            classifier=classifier,
+            schema_extractor=schema_extractor,
         )
 
     def execute_query(self, query, database=None, collection=None, optional_properties=None):
@@ -91,10 +96,13 @@ class DocumentDataSource(DataSource):
             return self._ensure_index(query, collection)
         elif op == "DOCUMENT.DELETE":
             return self._delete(query, collection)
+        elif op == "DOCUMENT.GET_SCHEMA":
+            return self._get_schema(query)
         else:
             raise ValueError(
                 f"Unsupported op: {op!r}. "
-                "Expected DOCUMENT.INGEST, DOCUMENT.SEARCH, DOCUMENT.ENSURE_INDEX, or DOCUMENT.DELETE"
+                "Expected DOCUMENT.INGEST, DOCUMENT.SEARCH, DOCUMENT.ENSURE_INDEX, "
+                "DOCUMENT.DELETE, or DOCUMENT.GET_SCHEMA"
             )
 
     def _ingest(self, request: Dict[str, Any], collection_override=None) -> List[Dict[str, Any]]:
@@ -146,6 +154,18 @@ class DocumentDataSource(DataSource):
             collection=collection,
             optional_properties=optional_properties,
         )
+
+    def _get_schema(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        document_id = request.get("document_id")
+        if not document_id:
+            raise ValueError("DOCUMENT.GET_SCHEMA requires a 'document_id' field")
+        schema = self._pipeline.get_schema(document_id)
+        if schema is None:
+            raise ValueError(
+                f"No schema found for document_id={document_id!r}. "
+                "Schema is populated during ingest when a classifier is configured."
+            )
+        return schema
 
     def _delete(self, request: Dict[str, Any], collection_override=None) -> int:
         path = request.get("path")
