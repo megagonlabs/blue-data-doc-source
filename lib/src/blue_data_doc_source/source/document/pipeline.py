@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
@@ -10,6 +11,61 @@ from .embeddings import EmbeddingModel
 from .enrichment import Enricher
 from .chunk_record import ChunkRecord
 from .parsers import DocxParser, Parser, PDFParser, TextParser
+
+# Chars that need escaping inside Redis Search TAG filter values.
+_TAG_SPECIAL_RE = re.compile(r'([,.<>{}\[\]"\'`:;!@#$%^&*\-+=~|/ ])')
+
+# Fields indexed as TAG in the vector index — used for pre-filtering.
+_FILTER_TAG_FIELDS = ("document_id", "file_name", "section_title", "mime_type")
+
+# Extra fields passed to create_index so Redis Search can filter on them.
+_INDEX_EXTRA_FIELDS = [
+    {"path": "$.document_id",   "name": "document_id",   "field_type": "TAG"},
+    {"path": "$.file_name",     "name": "file_name",     "field_type": "TAG"},
+    {"path": "$.section_title", "name": "section_title", "field_type": "TAG"},
+    {"path": "$.mime_type",     "name": "mime_type",     "field_type": "TAG"},
+    {"path": "$.page_start",    "name": "page_start",    "field_type": "NUMERIC"},
+]
+
+
+def _escape_redis_tag(value: str) -> str:
+    """Escape special chars in a Redis Search TAG filter value."""
+    return _TAG_SPECIAL_RE.sub(r'\\\1', value)
+
+
+def _build_filter_expr(filters: Optional[Dict[str, Any]]) -> str:
+    """Translate a filters dict into a Redis Search filter expression.
+
+    Supported keys:
+        document_id, file_name, section_title, mime_type  — exact TAG match
+        page_start  — int for exact page, or {"gte": N, "lte": M} for range
+
+    Returns ``"*"`` when filters is None or empty.
+    """
+    if not filters:
+        return "*"
+
+    parts: List[str] = []
+
+    for field in _FILTER_TAG_FIELDS:
+        value = filters.get(field)
+        if value is not None:
+            parts.append(f"@{field}:{{{_escape_redis_tag(str(value))}}}")
+
+    page = filters.get("page_start")
+    if page is not None:
+        if isinstance(page, int):
+            parts.append(f"@page_start:[{page} {page}]")
+        elif isinstance(page, dict):
+            lo = page.get("gte", "-inf")
+            hi = page.get("lte", "+inf")
+            parts.append(f"@page_start:[{lo} {hi}]")
+
+    if not parts:
+        return "*"
+    if len(parts) == 1:
+        return parts[0]
+    return " ".join(f"({p})" for p in parts)
 
 
 class DocumentPipeline:
@@ -213,6 +269,7 @@ class DocumentPipeline:
                 index_name=target,
                 collection=target,
                 dim=self.embedding_model.dim,
+                extra_fields=_INDEX_EXTRA_FIELDS,
             )
         except Exception as exc:
             if "already exists" not in str(exc).lower():
@@ -477,13 +534,25 @@ class DocumentPipeline:
 
         return deleted
 
-    def search(self, query: str, k: int = 5, collection: Optional[str] = None) -> List[Dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        k: int = 5,
+        collection: Optional[str] = None,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
         """Embed a query and return the k nearest chunks from the vector store.
 
         Args:
             query: Natural language query string.
             k: Number of results to return.
             collection: Override the instance-level collection for this call only.
+            filters: Optional pre-filter applied before KNN. Supported keys:
+                ``document_id``, ``file_name``, ``section_title``, ``mime_type``
+                (exact string match) and ``page_start`` (int for exact page, or
+                ``{"gte": N, "lte": M}`` for a range). Requires ``ensure_index``
+                to have been called after this feature was added; existing indexes
+                without the extra filterable fields must be recreated.
 
         Returns:
             List of matching chunk dicts as returned by the vector store.
@@ -501,4 +570,5 @@ class DocumentPipeline:
             index_name=collection or self.collection,
             query_vector=query_vector,
             k=k,
+            filter_expr=_build_filter_expr(filters),
         )

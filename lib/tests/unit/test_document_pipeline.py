@@ -201,8 +201,9 @@ def test_ensure_index_calls_create_index():
         collection="docs",
     )
     pipeline.ensure_index()
+    from blue_data_doc_source.source.document.pipeline import _INDEX_EXTRA_FIELDS
     vector_source.create_index.assert_called_once_with(
-        index_name="docs", collection="docs", dim=8
+        index_name="docs", collection="docs", dim=8, extra_fields=_INDEX_EXTRA_FIELDS
     )
 
 

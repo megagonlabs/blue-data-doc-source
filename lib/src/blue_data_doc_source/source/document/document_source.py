@@ -112,7 +112,8 @@ class DocumentDataSource(DataSource):
 
         collection = collection_override or request.get("collection")
         k = request.get("k", 5)
-        return self._pipeline.search(query_text, k=k, collection=collection)
+        filters = request.get("filter")
+        return self._pipeline.search(query_text, k=k, collection=collection, filters=filters)
 
     def _ensure_index(self, request: Dict[str, Any], collection_override=None) -> None:
         collection = collection_override or request.get("collection")
