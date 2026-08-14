@@ -1,0 +1,169 @@
+
+========================================================================
+Document Schema Inference
+========================================================================
+
+  Four PDFs -- contract, invoice, research paper, policy.
+  Layer 1: KeywordClassifier  (always, no API cost)
+  Layer 2: LLMSchemaExtractor (no OPENAI_API_KEY -- field extraction skipped)
+           Set OPENAI_API_KEY to enable typed field extraction.
+
+------------------------------------------------------------------------
+Step 1 -- Build pipeline with two-layer schema inference
+------------------------------------------------------------------------
+
+  pipeline = DocumentPipeline(
+      classifier=KeywordClassifier(),
+      # schema_extractor not set -- add LLMSchemaExtractor() with OPENAI_API_KEY
+      ...,
+  )
+
+------------------------------------------------------------------------
+Step 2 -- Ingest four PDFs
+------------------------------------------------------------------------
+
+  pipeline.ingest(path)  -- PDF parser extracts text page by page,
+  then KeywordClassifier runs once on the full text before chunking.
+
+  Ingesting sample_contract.pdf ...  8 chunks  3 pages  type=contract
+  Ingesting sample_invoice.pdf ...  2 chunks  1 pages  type=invoice
+  Ingesting sample_research.pdf ...  7 chunks  3 pages  type=research_paper
+  Ingesting sample_policy.pdf ...  14 chunks  8 pages  type=policy
+
+  Total chunks in store: 31
+
+------------------------------------------------------------------------
+Step 3 -- KeywordClassifier results
+------------------------------------------------------------------------
+
+  Scored the first 500 words of each PDF against signal phrase sets.
+  Confidence = fraction of signal phrases matched.
+
+  PDF                           document_type       confidence  chunks
+  ----------------------------  ------------------  ----------  ------
+  sample_contract.pdf           contract            0.7778      8
+  sample_invoice.pdf            invoice             0.8000      2
+  sample_research.pdf           research_paper      0.5333      7
+  sample_policy.pdf             policy              0.6429      14
+
+------------------------------------------------------------------------
+Step 4 -- document_type on every chunk
+------------------------------------------------------------------------
+
+  Every chunk produced from the PDF carries the classified type.
+  Accessible at two locations:
+
+  chunk['document_type']             = 'contract'
+  chunk['metadata']['document_type'] = 'contract'
+  chunk['document_id']               = 'doc_50407085c00a7db3'
+  chunk['page_start']                = 1
+
+  All chunks from one PDF share the same document_type:
+
+  sample_contract.pdf           8 chunks  -> document_type={'contract'}
+  sample_invoice.pdf            2 chunks  -> document_type={'invoice'}
+  sample_research.pdf           7 chunks  -> document_type={'research_paper'}
+  sample_policy.pdf             14 chunks  -> document_type={'policy'}
+
+------------------------------------------------------------------------
+Step 5 -- Schema record per document
+------------------------------------------------------------------------
+
+  pipeline.get_schema(document_id) retrieves the schema stored at
+  ingest time. No re-read of the PDF needed.
+
+  [sample_contract.pdf]
+    document_id   : doc_50407085c00a7db3
+    document_type : contract
+    confidence    : 0.7778  (classifier=keyword)
+    fields: (set OPENAI_API_KEY to enable LLM field extraction)
+
+  [sample_invoice.pdf]
+    document_id   : doc_2fc16c04f2141bc6
+    document_type : invoice
+    confidence    : 0.8000  (classifier=keyword)
+    fields: (set OPENAI_API_KEY to enable LLM field extraction)
+
+  [sample_research.pdf]
+    document_id   : doc_0f196c538d60304a
+    document_type : research_paper
+    confidence    : 0.5333  (classifier=keyword)
+    fields: (set OPENAI_API_KEY to enable LLM field extraction)
+
+  [sample_policy.pdf]
+    document_id   : doc_6b20ed6b01efe68a
+    document_type : policy
+    confidence    : 0.6429  (classifier=keyword)
+    fields: (set OPENAI_API_KEY to enable LLM field extraction)
+
+
+------------------------------------------------------------------------
+Step 6 -- document_type in search results
+------------------------------------------------------------------------
+
+  Searching across all four PDFs. Each result carries document_type
+  so the UI can group, badge, or filter results by document category.
+
+  Query: 'termination obligations liability'  ->  5 result(s)
+
+  document_type       file                          pg  text preview
+  ------------------  ----------------------------  --  ------------------------------
+  policy              sample_policy.pdf             7   18 months. COBRA election must be made within...
+  policy              sample_policy.pdf             4   3.1 General Exclusions This policy does not c...
+  invoice             sample_invoice.pdf            1   Invoice Number: INV-2026-0891 Invoice Date: A...
+  policy              sample_policy.pdf             1   Policy Number: BSH-2024-004521 Effective Date...
+  research_paper      sample_research.pdf           3   References [1] Karpukhin et al. (2020). Dense...
+
+------------------------------------------------------------------------
+Step 7 -- DOCUMENT.GET_SCHEMA via DocumentDataSource
+------------------------------------------------------------------------
+
+  When using DocumentDataSource (MCP / registry / API), the same
+  schema is available as a structured op:
+
+    schema = source.execute_query({
+        'op': 'DOCUMENT.GET_SCHEMA',
+        'document_id': document_id,
+    })
+
+  Example response for sample_invoice.pdf:
+    document_type : invoice
+    confidence    : 0.8000
+    chunk_id      : doc_2fc16c04f2141bc6_schema
+    fields: {}  (add LLMSchemaExtractor to populate)
+
+========================================================================
+Summary
+========================================================================
+
+  Two-layer schema inference:
+
+    Layer 1 -- type detection (no API cost, no extra deps):
+      classifier=KeywordClassifier()
+      -> chunk['document_type']  and  schema['confidence']
+
+    Layer 2 -- field extraction (one API call per document):
+      schema_extractor=LLMSchemaExtractor()  # needs OPENAI_API_KEY
+      -> schema['fields']  e.g. parties, effective_date, total_due, ...
+
+  Ingest any PDF:
+    records = pipeline.ingest('contract.pdf')  # page-by-page parsing
+    records[0]['document_type']  # -> 'contract'
+    records[0]['page_start']     # -> 1  (page number from PDF)
+
+  Schema retrieval without re-reading:
+    doc_id = records[0]['document_id']
+    schema = pipeline.get_schema(doc_id)
+    # {'document_type': 'contract', 'confidence': 0.83, 'fields': {...}}
+
+  Supported document types (KeywordClassifier):
+    * contract
+    * invoice
+    * policy
+    * research_paper
+    * financial_report
+    * unknown
+
+  To enable LLM field extraction:
+    OPENAI_API_KEY=sk-... python3 examples/feature-demos/schema_inference_demo.py
+
