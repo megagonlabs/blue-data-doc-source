@@ -33,7 +33,7 @@ DocumentPipeline(
 | `ingest(path, collection=None)` | `list[dict]` | Parse, chunk, enrich, and embed a `.txt`, `.pdf`, or `.docx` file; upsert when `embedding_model` and `vector_source` are set |
 | `ingest_text(text, file_name, mime_type, collection=None)` | `list[dict]` | Bypass file parsing — chunk, enrich, and embed pre-extracted text |
 | `ingest_pages(pages, file_name, mime_type, collection=None)` | `list[dict]` | Bypass file parsing — chunk, enrich, and embed pre-extracted page dicts (`{"page_num": int, "text": str}`) |
-| `search(query, k=5, collection=None)` | `list[dict]` | Embed query and run KNN; raises if `embedding_model` or `vector_source` is not set |
+| `search(query, k=5, collection=None, filters=None)` | `list[dict]` | Embed query and run KNN; raises if `embedding_model` or `vector_source` is not set |
 | `ensure_index(collection=None)` | `None` | Create vector index for the collection; idempotent — safe to call multiple times |
 | `delete(path=None, document_id=None, chunk_count=None, collection=None)` | `int` | Delete all chunks for a document; returns count of successful delete calls |
 
@@ -69,7 +69,7 @@ DocumentDataSource(
 | Op | Required fields | Optional fields | Returns |
 |----|-----------------|-----------------|---------|
 | `DOCUMENT.INGEST` | `path` | `collection` | `list[dict]` — one dict per chunk |
-| `DOCUMENT.SEARCH` | `query` | `collection`, `k` (default 5) | `list[dict]` — ranked chunks |
+| `DOCUMENT.SEARCH` | `query` | `collection`, `k` (default 5), `filter` (dict) | `list[dict]` — ranked chunks |
 | `DOCUMENT.ENSURE_INDEX` | — | `collection` | `None` |
 | `DOCUMENT.DELETE` | `path` OR (`document_id` + `chunk_count`) | `collection` | `int` — deleted chunk count |
 

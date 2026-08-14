@@ -217,6 +217,76 @@ for r in results:
 
 `DocumentDataSource.execute_query` with `DOCUMENT.SEARCH` delegates to the same path.
 
+### Pre-filtering
+
+Pass a `filters` dict to scope the KNN search before it runs. Pre-filtering is applied at the vector store level — only the matching subset of chunks is scored.
+
+```python
+# Scope to a single document
+results = pipeline.search(
+    "termination clause",
+    filters={"document_id": "doc_3a7f1c2e"},
+)
+
+# Scope to a file type
+results = pipeline.search(
+    "revenue figures",
+    filters={"mime_type": "application/pdf"},
+)
+
+# Scope to a specific file
+results = pipeline.search(
+    "eligibility",
+    filters={"file_name": "policy_2024.pdf"},
+)
+
+# Scope to a section
+results = pipeline.search(
+    "notice period",
+    filters={"section_title": "Termination"},
+)
+
+# Page range (PDFs only — chunks without page_start are excluded)
+results = pipeline.search(
+    "definitions",
+    filters={"page_start": {"gte": 1, "lte": 10}},
+)
+
+# Exact page
+results = pipeline.search("liability cap", filters={"page_start": 5})
+
+# Combine filters (AND)
+results = pipeline.search(
+    "payment terms",
+    filters={"file_name": "contract_a.pdf", "section_title": "Pricing"},
+)
+```
+
+Via the op interface:
+
+```python
+source.execute_query({
+    "op": "DOCUMENT.SEARCH",
+    "query": "termination clause",
+    "collection": "contracts",
+    "filter": {"document_id": "doc_3a7f1c2e"},
+})
+```
+
+**Supported filter keys:**
+
+| Key | Type | Match |
+|-----|------|-------|
+| `document_id` | str | Exact — scope to one document |
+| `file_name` | str | Exact — scope to one file |
+| `section_title` | str | Exact — scope to one section heading |
+| `mime_type` | str | Exact — scope to a file type |
+| `page_start` | int or `{"gte": N, "lte": M}` | Numeric range — PDF chunks only |
+
+All filters are combined with AND. `None` values are ignored. Chunks where an optional field is absent (e.g. `page_start` on a TXT chunk) are excluded when that field is filtered.
+
+**Index requirement:** pre-filtering requires an index created after this feature was added. Existing Redis indexes without the filterable fields must be dropped and recreated with `ensure_index()`.
+
 ---
 
 ## Natural language queries
