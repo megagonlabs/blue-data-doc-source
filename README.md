@@ -17,7 +17,7 @@ Its core capabilities include:
 - **Pluggable parsers** — `Parser` ABC for external processors (LlamaIndex, vision models, cloud OCR); bypass via `ingest_text` / `ingest_pages`
 - **MCP server** — `platform/document-mcp` exposes all ops as tools callable from Claude Desktop
 
-→ **[Full feature list](docs/features.md)** · **[Installation](docs/installation.md)** · **[Examples](examples/README.md)** · **[MCP server](docs/mcp.md)** · **[Quick start](#quick-start)**
+→ **[Full feature list](docs/features.md)** · **[Installation](docs/installation.md)** · **[Guide](docs/guide.md)** · **[Extending](docs/extending.md)** · **[Examples](examples/README.md)** · **[MCP server](docs/mcp.md)**
 
 ## Repository layout
 
