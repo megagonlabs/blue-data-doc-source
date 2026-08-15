@@ -68,23 +68,24 @@ Key methods:
 
 ### Parser
 
-`Parser` is an ABC with a single method:
+`Parser` is an ABC with two methods:
 
 ```python
 class Parser(ABC):
-    def parse(self, path: str) -> List[Dict[str, Any]]:
-        ...
+    def parse(self, path: str) -> List[Dict[str, Any]]: ...
+    def parse_blocks(self, path: str) -> List[Dict[str, Any]]: ...
 ```
 
-The return value must be a list of dicts, each with `"text": str`. Include `"page_num": int` (1-based) to propagate page provenance to `ChunkRecord.page_start` / `page_end`.
+`parse()` returns a list of page dicts — `{"text": str}` at minimum, with `"page_num": int` (1-based) for page-aware formats. `parse_blocks()` returns typed content blocks: each dict carries `"type": "text"|"table"`, `"text"`, and optionally `"page_num"` and `"table": {"headers": list[str], "rows": list[list[str]]}`. The default `parse_blocks()` wraps `parse()` adding `type="text"` — override it to return real table blocks.
 
 Built-in implementations:
 
-| Class | Input | Output |
+| Class | Input | Notes |
 |---|---|---|
-| `TextParser` | `.txt` | `[{"text": full_file_text}]` |
-| `PDFParser` | `.pdf` | `[{"page_num": N, "text": ..., "ocr": True, "ocr_confidence": float}, ...]` |
-| `DocxParser` | `.docx` | `[{"text": markdown_formatted_text}]` |
+| `TextParser` | `.txt` | Single page dict; no `page_num` |
+| `PDFParser` | `.pdf` | One dict per page; `page_num` set; OCR fallback via Tesseract |
+| `DocxParser` | `.docx` | Single page dict; headings → markdown `#` prefixes; tables → pipe-delimited rows |
+| `PlumberPDFParser` | `.pdf` | Typed blocks via pdfplumber; text outside tables → `type="text"`; each table → `type="table"` with structured `table` dict; `parse()` flattens to page dicts for backward compat |
 
 `DocxParser` converts heading styles to markdown (`# Heading 1`, `## Heading 2`, ...) and tables to pipe-delimited rows, so `SectionChunker` can detect structure from Word documents the same way it does from plain markdown.
 
@@ -164,15 +165,19 @@ class ChunkRecord:
     page_start: Optional[int] = None   # PDF/page-aware only
     page_end: Optional[int] = None     # same as page_start in V1
     section_title: Optional[str] = None
+    content_type: Optional[str] = None # "text" or "table" (block-aware parsers only)
+    table: Optional[Dict] = None       # {"headers": [...], "rows": [[...]]} when content_type == "table"
     entities: List[Dict] = ...
     semantic_hints: Dict = ...
     metadata: Dict = ...
     embedding: Optional[List[float]] = None
 ```
 
-`to_dict()` serialises the record and **omits** `None` optional fields — `page_start`, `page_end`, `section_title`, and `embedding` are absent from the dict when `None`, not serialised as `null`. Downstream consumers should check field presence.
+`to_dict()` serialises the record and **omits** `None` optional fields — `page_start`, `page_end`, `section_title`, `content_type`, `table`, and `embedding` are absent from the dict when `None`, not serialised as `null`. Downstream consumers should check field presence.
 
-`metadata` always contains: `source_path`, `chunk_index`, `chunk_size`, `overlap`, `ingested_at`, `embedding_model`. OCR pages additionally carry `"ocr": True` and `"ocr_confidence": float`.
+`content_type` and `table` are set when the pipeline uses a block-aware parser such as `PlumberPDFParser`. Table blocks bypass the chunker — one table becomes one chunk.
+
+`metadata` always contains: `source_path`, `chunk_index`, `chunk_size`, `overlap`, `ingested_at`, `embedding_model`. OCR pages additionally carry `"ocr": True` and `"ocr_confidence": float`. When `content_type` is set, it is also mirrored into `metadata["content_type"]` for vector-store filtering.
 
 ### VectorSource
 

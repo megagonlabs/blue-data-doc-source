@@ -1,0 +1,212 @@
+
+========================================================================
+  Parsers Demo — raw parser output before the pipeline
+========================================================================
+
+------------------------------------------------------------------------
+  Step 1 -- TextParser  (.txt)  —  one string, no pages
+------------------------------------------------------------------------
+
+  File: sample_policy.txt
+  Returns: str  (1116 words, 174 lines)
+
+  TextParser.parse(path) ->
+    "BLUE SHIELD HEALTH INSURANCE POLICY ↵ Policy Number: BSH-2024-004521 ↵ Effective Date: January 1, 2024 ↵ Policyholder: Jane Doe ↵  ↵ ================================================================================ ↵  ↵ 1. ELIGIBILITY ↵  ↵ 1.1 Who Is Eligible ↵ Coverage under this policy is available..."
+
+  Key behaviour:
+    - Reads the entire file as UTF-8
+    - Returns a plain string — no page structure, no metadata
+    - Pipeline wraps it as [{"text": full_content}]
+    - page_start / page_end will be None on every chunk
+
+------------------------------------------------------------------------
+  Step 2 -- PDFParser  (.pdf)  —  list of page dicts, flat text
+------------------------------------------------------------------------
+
+  File: sample_contract.pdf
+  Returns: list[dict]  (3 pages)
+
+  PDFParser().parse_pages(path) ->
+    [{'page_num': 1, 'text': 'SOFTWARE CONSULTING AGREEMENT ↵ Between TechCorp Inc. and BuildRight Solutions LLC ↵ Effective Date: September 1, 2026 ↵...'
+       words=20}]
+    [{'page_num': 2, 'text': 'RECITALS ↵ WHEREAS TechCorp Inc. ("Company") wishes to engage BuildRight Solutions LLC ("Vendor") for software ↵ consult...'
+       words=277}]
+    [{'page_num': 3, 'text': '4. INDEMNIFICATION AND LIABILITY ↵ 4.1 Indemnification. Each party (the "Indemnifying Party") shall indemnify, defend, a...'
+       words=303}]
+
+  Key behaviour:
+    - Uses pypdf; one dict per page with 'page_num' (1-based)
+    - Blank pages (no text layer) are silently skipped
+    - Tables extracted as flat prose — row/column structure is LOST
+    - Images embedded in the PDF produce zero text (silently skipped)
+
+------------------------------------------------------------------------
+  Step 3 -- PDFParser  (.pdf)  —  table lost as flat text
+------------------------------------------------------------------------
+
+  File: sample_table_invoice.pdf (contains a structured table of line items)
+  Returns: list[dict]  (1 pages)
+
+  PDFParser().parse_pages(path) ->
+    page 1: 'INVOICE ↵ Invoice No: INV-2026-0042 ↵ Date: August 15, 2026 ↵ Bill To: Acme Corp, 123 Main St, Springfield ↵ From:   BlueTech Services LLC ↵ Description Qty Unit Price Total ↵ Data pipeline consulting 10 $250.00 $2,500.00 ↵ Vector store setup 1 $800....'
+
+  The table rows appear as flat prose — no | delimiters, no structure.
+  Use PlumberPDFParser (Step 5) to preserve table structure.
+
+------------------------------------------------------------------------
+  Step 4 -- PDFParser  (.pdf, scanned)  —  OCR fallback
+------------------------------------------------------------------------
+
+  File: sample_scanned_minutes.pdf (image-only PDF — no text layer)
+
+  Without OCR (default):
+    PDFParser().parse_pages(path) -> []
+    Empty list — all pages blank, all skipped.
+
+  With OCR fallback:
+    PDFParser(ocr_fallback=True).parse_pages(path) -> 2 page(s)
+
+    [{
+      'page_num':       1,
+      'text':           'MEETING MINUTES Board of Directors -- BlueTech Inc. Date: March 14, 2026 Attendees: J. Smith (Chair), A. Patel, R. Chen, M. Torres, L. Kim 1. Call to ...',
+      'ocr':            True,
+      'ocr_confidence': 93.9   # mean Tesseract word confidence 0-100
+    }]
+    [{
+      'page_num':       2,
+      'text':           'MEETING MINUTES (continued) Board of Directors -- BlueTech Inc. Date: March 14, 2026 | Page 2 6. Legal Update Counsel L. Kim confirmed IP filings for ...',
+      'ocr':            True,
+      'ocr_confidence': 93.9   # mean Tesseract word confidence 0-100
+    }]
+
+  Key behaviour:
+    - Page images preprocessed: grayscale -> contrast 2x -> binarise
+    - ocr=True marks Tesseract-extracted pages in chunk metadata
+    - ocr_confidence propagates to ChunkRecord.metadata['ocr_confidence']
+
+------------------------------------------------------------------------
+  Step 5 -- DocxParser  (.docx)  —  headings to markdown, tables to pipes
+------------------------------------------------------------------------
+
+  File: sample_policy.docx
+  Returns: str  (411 words, 31 blocks)
+
+  DocxParser().parse(path) -> (first 12 blocks shown)
+
+  [00] # Blue Shield Health Insurance Policy
+  [01] Policy Number: BSH-2024-004521
+  [02] Effective Date: January 1, 2024
+  [03] Policyholder: Jane Doe
+  [04] ## 1. Eligibility
+  [05] ### 1.1 Who Is Eligible
+  [06] Coverage under this policy is available to individuals who meet all of the following criteria: are b
+  [07] ### 1.2 Dependents
+  [08] Eligible policyholders may enroll their spouse or domestic partner and dependent children under the 
+  [09] ## 2. Coverage Benefits
+  [10] This policy provides the following categories of coverage. Benefit limits and cost-sharing amounts a
+  [11] | Benefit | Annual Limit | Deductible | Copay |
+
+  Heading conversion:
+    # Blue Shield Health Insurance Policy
+    ## 1. Eligibility
+    ### 1.1 Who Is Eligible
+    ### 1.2 Dependents
+    ## 2. Coverage Benefits
+    ## 3. Exclusions
+    ## 4. Premiums and Payment
+    ### 4.1 Monthly Premium
+    ### 4.2 Premium Schedule
+    ## 5. Claims
+
+  Table rendering (first table found):
+    | Benefit | Annual Limit | Deductible | Copay |
+    | Preventive Care | Unlimited | $0 | $0 |
+    | Primary Care Visit | Unlimited | $500 | $25 |
+    | Specialist Visit | Unlimited | $500 | $50 |
+    | Emergency Room | Unlimited | $500 | $150 |
+    | Prescription Drugs | $10,000 | $250 | $15–$45 |
+    ... (6 more rows)
+
+  Key behaviour:
+    - Iterates doc.element.body XML to preserve paragraph+table order
+    - Heading 1 -> #, Heading 2 -> ##, Heading 3 -> ###, etc.
+    - Tables rendered as | cell | cell | rows (not structured dicts)
+    - Returns one string — no page_num — pipeline treats as single page
+    - SectionChunker detects the # headers and assigns section_title
+
+------------------------------------------------------------------------
+  Step 6 -- PlumberPDFParser  (.pdf)  —  typed blocks: text + structured tables
+------------------------------------------------------------------------
+
+  File: sample_table_invoice.pdf (same invoice used in Step 3)
+  Returns: list[dict]  (2 blocks: 1 text, 1 table)
+
+  PlumberPDFParser().parse_blocks(path) ->
+
+  {
+    'type':     'text',
+    'page_num': 1,
+    'text':     'INVOICE ↵ Invoice No: INV-2026-0042 ↵ Date: August 15, 2026 ↵ Bill To: Acme Corp, 123 Main St, Springfield ↵ From: BlueT...'
+  }
+
+  {
+    'type':     'table',
+    'page_num': 1,
+    'text':     '| Description | Qty | Unit Price | Total | ↵ | --- | --- | --- | --- | ↵ | Data pipeline consulting | 10 | $250.00 | $2,...',
+    'table': {
+      'headers': ['Description', 'Qty', 'Unit Price', 'Total'],
+      'rows': [
+        ['Data pipeline consulting', '10', '$250.00', '$2,500.00'],
+        ['Vector store setup', '1', '$800.00', '$800.00'],
+        ['Document ingestion module', '1', '$1,200.00', '$1,200.00'],
+        ['API integration (hours)', '5', '$150.00', '$750.00'],
+        ['Testing and QA', '8', '$120.00', '$960.00'],
+        ['Subtotal', '', '', '$6,210.00'],
+        ['Tax (8%)', '', '', '$496.80'],
+        ['TOTAL DUE', '', '', '$6,706.80'],
+      ]
+    }
+  }
+
+  Contrast with Step 3 (PDFParser): the table is now structured.
+  In the pipeline:
+    - text blocks  -> chunker -> one or more ChunkRecord(content_type='text')
+    - table blocks -> bypass chunker -> one ChunkRecord(content_type='table')
+    - content_type is indexed as TAG -> filterable in search
+
+------------------------------------------------------------------------
+  Step 7 -- PlumberPDFParser  —  parse() flattens blocks to page dicts
+------------------------------------------------------------------------
+
+  PlumberPDFParser().parse(path) -> (backward-compat; merges all blocks per page)
+
+    [{
+      'page_num': 1,
+      'text':     'INVOICE ↵ Invoice No: INV-2026-0042 ↵ Date: August 15, 2026 ↵ Bill To: Acme Corp, 123 Main St, Springfield ↵ From: BlueTech Services LLC ↵ Payment due within 30 days. Bank transfer...',
+      words=135
+    }]
+
+  Same interface as PDFParser.parse_pages() — drop-in replacement
+  when you don't need block-level content_type on chunks.
+
+========================================================================
+  Summary — parser return types
+========================================================================
+
+  Parser              Input    Returns            Page-aware  Tables
+  --------------------------------------------------------------------
+  TextParser          .txt     str                no          flat text
+  PDFParser           .pdf     list[page dict]    yes         flat text
+  PDFParser + OCR     .pdf     list[page dict]    yes         flat text
+  DocxParser          .docx    str                no          pipe rows
+  PlumberPDFParser    .pdf     list[block dict]   yes         structured
+
+  All parsers feed into DocumentPipeline.ingest() transparently.
+  The chunker, enricher, and embedder see the same interface regardless
+  of which parser was used.
+
+  PlumberPDFParser is the only parser that returns typed blocks.
+  Use it when you need:
+    - table.headers / table.rows for downstream processing
+    - content_type filtering in vector search
+    - one-chunk-per-table guarantee (tables bypass the chunker)

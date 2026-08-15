@@ -47,7 +47,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "blue-doc-source": {
+    "blue-data-doc-source": {
       "command": "python3",
       "args": ["/path/to/blue-data-doc-source/platform/document-mcp/src/server.py"],
       "env": {
@@ -71,7 +71,7 @@ Add to your project's `.mcp.json` or `~/.claude.json`:
 ```json
 {
   "mcpServers": {
-    "blue-doc-source": {
+    "blue-data-doc-source": {
       "command": "python3",
       "args": ["platform/document-mcp/src/server.py"],
       "env": {

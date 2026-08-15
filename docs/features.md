@@ -9,7 +9,7 @@ Ingest PDF, plain text, and DOCX files through a single unified interface. The p
 - **DOCX** — structure-preserving conversion via python-docx; headings and paragraphs mapped to markdown for section detection
 
 ```python
-from blue_doc_source import DocumentPipeline
+from blue_data_doc_source import DocumentPipeline
 
 pipeline = DocumentPipeline(chunk_size=500, overlap=100)
 
@@ -34,7 +34,7 @@ Recognised header patterns:
 - Underlined: `Title\n======`
 
 ```python
-from blue_doc_source.source.document.chunkers import SectionChunker, WindowChunker
+from blue_data_doc_source.source.document.chunkers import SectionChunker, WindowChunker
 
 # Default — detects headers, chunks within each section
 section_chunker = SectionChunker(chunk_size=1000, overlap=150)
@@ -61,7 +61,7 @@ Both chunkers operate on **word count**, not character count. PDF chunks never s
 Every `ChunkRecord` carries a `document_id` derived from a SHA-256 hash of the source file's bytes. The same file always produces the same `document_id` and the same `chunk_id` values — re-ingesting is a safe upsert that overwrites rather than appends.
 
 ```python
-from blue_doc_source import DocumentPipeline
+from blue_data_doc_source import DocumentPipeline
 
 pipeline = DocumentPipeline()
 records_first  = pipeline.ingest("policy.pdf")
@@ -108,7 +108,7 @@ Extracted entity types:
 - **PROPER_NOUN** — capitalised multi-word phrases
 
 ```python
-from blue_doc_source.source.document.enrichment import BasicEnricher
+from blue_data_doc_source.source.document.enrichment import BasicEnricher
 
 enricher = BasicEnricher()
 result = enricher.enrich(
@@ -134,7 +134,7 @@ Pass `enricher=BasicEnricher()` to `DocumentDataSource` to attach enrichment to 
 `EmbeddingModel` is an ABC with a single `embed_text(text) -> list[float]` method and a `dim` property. Swap implementations without changing the pipeline.
 
 ```python
-from blue_doc_source import OpenAIEmbeddingModel, DummyEmbeddingModel
+from blue_data_doc_source import OpenAIEmbeddingModel, DummyEmbeddingModel
 
 # Production — calls OpenAI text-embedding-3-small (1536-dim)
 openai_model = OpenAIEmbeddingModel(model="text-embedding-3-small")
@@ -148,7 +148,7 @@ print(dummy_model.dim)    # 8
 Bring your own model by subclassing `EmbeddingModel`:
 
 ```python
-from blue_doc_source.source.document.embeddings import EmbeddingModel
+from blue_data_doc_source.source.document.embeddings import EmbeddingModel
 
 class MyEmbeddingModel(EmbeddingModel):
     @property
@@ -170,7 +170,7 @@ Supported OpenAI models: `text-embedding-3-small` (1536), `text-embedding-3-larg
 ```python
 from blue_data.source.vector.memory_vector_source import MemoryVectorSource
 from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
-from blue_doc_source import DocumentDataSource, OpenAIEmbeddingModel
+from blue_data_doc_source import DocumentDataSource, OpenAIEmbeddingModel
 
 # Dev / test — in-process, no external services
 source = DocumentDataSource(
@@ -201,7 +201,7 @@ source.execute_query({"op": "DOCUMENT.ENSURE_INDEX", "collection": "reports"})
 `NLQueryParser` translates plain-English instructions into `DOCUMENT.*` op dicts using an LLM, then dispatches the resulting op automatically.
 
 ```python
-from blue_doc_source import DocumentDataSource, NLQueryParser, OpenAIEmbeddingModel
+from blue_data_doc_source import DocumentDataSource, NLQueryParser, OpenAIEmbeddingModel
 
 source = DocumentDataSource(
     embedding_model=OpenAIEmbeddingModel(),
@@ -235,7 +235,7 @@ parser = NLQueryParser(parse_fn=_regex_parse)
 By default, `PDFParser` reads the embedded text layer. Pages with no text — scanned documents, photographed pages — are silently skipped. Pass `ocr_fallback=True` to run Tesseract on any blank page instead.
 
 ```python
-from blue_doc_source.source.document.parsers import PDFParser
+from blue_data_doc_source.source.document.parsers import PDFParser
 
 parser = PDFParser(ocr_fallback=True)
 pages = parser.parse_pages("scanned_contract.pdf")
@@ -262,7 +262,7 @@ A clear `ImportError` is raised if OCR is requested but dependencies are missing
 The built-in parsers cover standard digitally-created files. To use an external document processor — LlamaIndex, a vision model, a cloud OCR API — implement the `Parser` ABC and pass it to `DocumentPipeline`. All downstream stages (chunking, enrichment, embedding, storage) are unchanged.
 
 ```python
-from blue_doc_source import DocumentPipeline, Parser
+from blue_data_doc_source import DocumentPipeline, Parser
 
 class LlamaIndexParser(Parser):
     def parse(self, path: str):
@@ -289,6 +289,68 @@ pipeline.ingest_pages(
     mime_type="application/pdf",
 )
 ```
+
+---
+
+## Document schema inference
+
+Two-layer classification runs once per document at ingest time, before the chunk loop.
+
+**Layer 1 — `KeywordClassifier`** does the type detection using no API, no ML. It takes the first 500 words of the document, lowercases them, and scores each candidate type by counting how many of its signal phrases appear in that sample. Score = `matches / total_signals`. The type with the highest score wins; if it's below `min_confidence` (default 0.15), `"unknown"` is returned.
+
+Signal phrases per type (sample):
+
+| Type | Signals |
+|---|---|
+| `contract` | agreement, parties, governing law, indemnification, warranties, breach, arbitration |
+| `invoice` | invoice, due date, amount due, bill to, line item, subtotal, vendor, unit price |
+| `policy` | policy, eligibility, coverage, deductible, premium, exclusion, insured, claim |
+| `research_paper` | abstract, methodology, references, conclusion, hypothesis, doi, we propose |
+| `financial_report` | revenue, net income, balance sheet, earnings per share, fiscal year, ebitda |
+
+**Layer 2 — `LLMSchemaExtractor`** (optional) runs after the type is known. It sends the first 4000 characters of the document to GPT-4o-mini with a type-specific field prompt and parses the JSON response into a `fields` dict. One API call per document, not per chunk.
+
+```python
+from blue_data_doc_source import DocumentPipeline, KeywordClassifier, LLMSchemaExtractor
+
+pipeline = DocumentPipeline(
+    classifier=KeywordClassifier(),
+    schema_extractor=LLMSchemaExtractor(),  # optional — requires OPENAI_API_KEY
+    embedding_model=...,
+    vector_source=...,
+)
+
+records = pipeline.ingest("invoice.pdf")
+
+# document_type is on every chunk
+print(records[0]["document_type"])   # "invoice"
+
+# full schema (type + extracted fields) via GET_SCHEMA
+schema = pipeline.get_schema(records[0]["document_id"])
+# {
+#   "document_id": "doc_abc123",
+#   "document_type": "invoice",
+#   "confidence": 0.80,
+#   "classifier": "llm",
+#   "fields": {
+#     "invoice_number": "INV-2026-004",
+#     "vendor": "Acme Corp",
+#     "total_due": "$1,250.00",
+#     ...
+#   }
+# }
+```
+
+`KeywordClassifier` alone (without `schema_extractor`) costs nothing — no API key, no extra deps. You still get `document_type` on every chunk and can filter search results by type:
+
+```python
+pipeline = DocumentPipeline(classifier=KeywordClassifier(), ...)
+pipeline.ingest("contract.pdf")
+
+results = pipeline.search("termination clause", filters={"document_type": "contract"})
+```
+
+The schema record is in-process only — it is not upserted to the vector store. Retrieve it during the same process via `pipeline.get_schema(document_id)` or from the `"schema"` key in the ingest response. If you need it after restart, save the `fields` dict yourself.
 
 ---
 

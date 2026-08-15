@@ -32,7 +32,7 @@ The return value is a list of `(section_title, chunk_text)` pairs. `section_titl
 When no headers are found, `SectionChunker` falls back to plain window chunking and returns `section_title=None` on all chunks — identical to `WindowChunker`.
 
 ```python
-from blue_doc_source import SectionChunker
+from blue_data_doc_source import SectionChunker
 
 chunker = SectionChunker(chunk_size=1000, overlap=150)
 chunks = chunker.chunk_with_titles(text)
@@ -50,7 +50,7 @@ chunks = chunker.chunk_with_titles(text)
 Chunk boundaries are word-aligned, so `chunk_size` is exact in words but variable in characters.
 
 ```python
-from blue_doc_source import WindowChunker
+from blue_data_doc_source import WindowChunker
 
 chunker = WindowChunker(chunk_size=200, overlap=40)
 chunks = chunker.chunk_with_titles(text)
@@ -70,7 +70,7 @@ Overlap is built by carrying trailing sentences from the previous chunk until th
 **Sentence detection:** Uses `nltk.sent_tokenize` when available (install the `[nlp]` extra and run `nltk.download('punkt_tab')`). Falls back to a regex splitter on `.`, `!`, `?` boundaries when nltk is absent. When no sentence boundaries are detected at all (e.g. raw tokens without punctuation), degrades gracefully to word-count splitting.
 
 ```python
-from blue_doc_source import SentenceChunker
+from blue_data_doc_source import SentenceChunker
 
 chunker = SentenceChunker(chunk_size=300, overlap=50)
 chunks = chunker.chunk_with_titles(text)
@@ -113,7 +113,7 @@ Rough starting points:
 Pass any `Chunker` subclass as `chunker=` on `DocumentPipeline`:
 
 ```python
-from blue_doc_source import DocumentPipeline, SentenceChunker
+from blue_data_doc_source import DocumentPipeline, SentenceChunker
 
 pipeline = DocumentPipeline(
     chunker=SentenceChunker(chunk_size=300, overlap=60),
@@ -128,7 +128,7 @@ pipeline = DocumentPipeline(
 Subclass `Chunker` and implement `chunk_with_titles`:
 
 ```python
-from blue_doc_source import Chunker
+from blue_data_doc_source import Chunker
 from typing import List, Optional, Tuple
 
 class ParagraphChunker(Chunker):

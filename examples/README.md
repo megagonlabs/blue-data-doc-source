@@ -56,6 +56,7 @@ OPENAI_API_KEY=sk-... python3 examples/scenario-demos/semantic_search_demo.py
 | `feature-demos/enrichment_demo.py` | BasicEnricher entity types + semantic hints; live document enrichment | none |
 | `feature-demos/content_addressing_demo.py` | SHA-256 content-addressed IDs; dedup; stale-chunk detection | none |
 | `feature-demos/nl_query_demo.py` | NLQueryParser: search/ingest/delete intent parsing; live execute_query_nl | none |
+| `feature-demos/parsers_demo.py` | Raw output of all four parsers (TextParser, PDFParser, DocxParser, PlumberPDFParser) before the pipeline; shows exactly what each parser returns — page dicts, typed blocks, markdown headings, OCR fields | none (OCR: tesseract + poppler; pdfplumber optional) |
 | `feature-demos/schema_inference_demo.py` | KeywordClassifier type detection + LLMSchemaExtractor field extraction on four real PDFs; document_type on chunks; DOCUMENT.GET_SCHEMA | none (OpenAI optional) |
 | `feature-demos/pdf_formats_demo.py` | PlumberPDFParser structured table extraction vs pypdf flat text; embedded images silently skipped; multi-page docs; real arXiv + Berkshire annual report PDFs; scanned image-only PDFs via Tesseract OCR | pdfplumber (OCR: tesseract + poppler) |
 
@@ -64,6 +65,11 @@ python3 examples/feature-demos/chunking_demo.py
 python3 examples/feature-demos/enrichment_demo.py
 python3 examples/feature-demos/content_addressing_demo.py
 python3 examples/feature-demos/nl_query_demo.py
+
+# Parser raw output — all four parsers, no API key needed:
+python3 examples/feature-demos/parsers_demo.py
+# With OCR step (requires: pip install blue-data-doc-source[ocr] && brew install tesseract poppler):
+python3 examples/feature-demos/parsers_demo.py
 
 # Schema inference — keyword classification only (no API key needed):
 python3 examples/feature-demos/schema_inference_demo.py

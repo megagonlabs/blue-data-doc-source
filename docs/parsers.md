@@ -21,7 +21,7 @@ The return value is a list of dicts. Each dict must contain `"text": str`. Inclu
 Reads a UTF-8 `.txt` file and returns a single page dict with the full file text.
 
 ```python
-from blue_doc_source import TextParser
+from blue_data_doc_source import TextParser
 
 text = TextParser().parse("report.txt")
 # [{"text": "Full file content..."}]
@@ -36,7 +36,7 @@ No external dependencies.
 Reads a `.pdf` file page by page using pypdf. Returns one dict per page with `page_num` set.
 
 ```python
-from blue_doc_source.source.document.parsers import PDFParser
+from blue_data_doc_source.source.document.parsers import PDFParser
 
 pages = PDFParser().parse_pages("contract.pdf")
 # [{"page_num": 1, "text": "..."}, {"page_num": 2, "text": "..."}, ...]
@@ -82,7 +82,7 @@ A clear `ImportError` is raised if `ocr_fallback=True` is used without the depen
 Reads a `.docx` file using python-docx, preserving heading hierarchy and table structure. Returns a single page dict with markdown-formatted text.
 
 ```python
-from blue_doc_source import DocxParser
+from blue_data_doc_source import DocxParser
 
 text = DocxParser().parse("policy.docx")
 # [{"text": "# Introduction\n\nThis policy...\n\n## Eligibility\n\n| Month | Amount |\n..."}]
@@ -111,6 +111,56 @@ Because `DocxParser` outputs markdown-formatted text, `SectionChunker` detects t
 
 ---
 
+### PlumberPDFParser
+
+`PlumberPDFParser` is a block-aware PDF parser built on [pdfplumber](https://github.com/jsvine/pdfplumber). Unlike `PDFParser` (which extracts a flat text string per page), `PlumberPDFParser` separates tables from prose and returns typed blocks.
+
+```python
+from blue_data_doc_source import PlumberPDFParser
+
+parser = PlumberPDFParser()
+blocks = parser.parse_blocks("invoice.pdf")
+
+for block in blocks:
+    if block["type"] == "table":
+        print("TABLE:", block["table"]["headers"])
+        for row in block["table"]["rows"]:
+            print(" ", row)
+    else:
+        print("TEXT:", block["text"][:80])
+```
+
+Each block in the returned list is one of:
+
+| `type` | Fields present | Notes |
+|---|---|---|
+| `"text"` | `type`, `text`, `page_num` | Text outside any table region |
+| `"table"` | `type`, `text`, `page_num`, `table` | `table = {"headers": list[str], "rows": list[list[str]]}` |
+
+The `text` field on a table block is a pipe-delimited representation of the full table (header + rows), suitable for embedding and search without additional processing.
+
+When used with `DocumentPipeline`, table blocks bypass the chunker — each table becomes exactly one `ChunkRecord` with `content_type="table"`. Text blocks are chunked normally. The `content_type` field is indexed as a filterable TAG, so you can filter search results to tables only:
+
+```python
+from blue_data_doc_source import DocumentPipeline, PlumberPDFParser
+
+pipeline = DocumentPipeline(
+    parser=PlumberPDFParser(),
+    embedding_model=...,
+    vector_source=...,
+)
+pipeline.ingest("invoice.pdf")
+
+# Only return table chunks
+results = pipeline.search("total amount", filters={"content_type": "table"})
+```
+
+`parse()` is also implemented for backward compatibility — it flattens all blocks into plain page dicts so `PlumberPDFParser` can be used anywhere `PDFParser` is accepted.
+
+**Install:** `pip install pdfplumber`
+
+---
+
 ## Using the pipeline with built-in parsers
 
 `DocumentPipeline.ingest()` auto-detects the parser by file extension:
@@ -135,7 +185,7 @@ pipeline.ingest("scanned.pdf")
 When the built-in parsers are insufficient — complex layouts, multi-column PDFs, vision-model output, cloud OCR services — implement the `Parser` ABC and inject it:
 
 ```python
-from blue_doc_source import DocumentPipeline, Parser
+from blue_data_doc_source import DocumentPipeline, Parser
 
 class LlamaIndexParser(Parser):
     def parse(self, path: str):
@@ -193,5 +243,6 @@ Each parser sets the `mime_type` field on every `ChunkRecord` it produces:
 | `TextParser` | `text/plain` |
 | `PDFParser` | `application/pdf` |
 | `DocxParser` | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` |
+| `PlumberPDFParser` | `application/pdf` |
 | Custom parser (`.pdf`) | `application/pdf` |
 | Custom parser (other) | `text/plain` |
