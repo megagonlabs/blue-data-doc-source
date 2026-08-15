@@ -1,0 +1,126 @@
+
+======================================================================
+  Step 1 — Invoice with table (sample_table_invoice.pdf)
+======================================================================
+PDF has a rendered table of line items. pypdf extracts cell text
+as flat prose — table structure (rows/columns) is NOT preserved.
+
+Chunks produced: 1
+----------------------------------------------------------------------
+  chunk unk_000000  page=1  words=80
+  text: 'Invoice No: INV-2026-0042 Date: August 15, 2026 Bill To: Acme Corp, 123 Main St, Springfield From: BlueTech Services LLC'
+
+Note: table rows appear as flat text, no row/column delimiters.
+
+======================================================================
+  Step 2 — Mixed text + image + table (sample_mixed_content.pdf)
+======================================================================
+PDF embeds a bar chart image alongside text and a table.
+pypdf silently ignores the image — only text is extracted.
+
+Chunks produced: 1
+----------------------------------------------------------------------
+  chunk unk_000000  words=127
+  'Q2 2026 Performance Report This report summarises the key performance indicators for Q2 2026. Revenue grew 18% year-over-year driven by stro'
+
+The bar chart (Apr/May/Jun revenue) produced zero text — image skipped.
+
+======================================================================
+  Step 3 — Multi-page technical report (sample_multipage_tables.pdf)
+======================================================================
+4-page PDF: cover, abstract+body, results table, references.
+Each page becomes a separate parse unit; SectionChunker detects headers.
+
+Pages parsed: 4   Chunks produced: 7
+----------------------------------------------------------------------
+  chunk unk_000000  page=1  section='(no section)'  words=19
+  chunk unk_000001  page=2  section='(no section)'  words=61
+  chunk unk_000002  page=2  section='1. Introduction'  words=50
+  chunk unk_000003  page=2  section='2. Methodology'  words=56
+  chunk unk_000004  page=3  section='3. Results'  words=60
+  chunk unk_000005  page=3  section='4. Conclusion'  words=44
+  chunk unk_000006  page=4  section='(no section)'  words=58
+
+======================================================================
+  Step 4 — Real arXiv paper: Attention Is All You Need (real_research_paper.pdf)
+======================================================================
+15-page research paper. Multi-column layout, equations, figure captions,
+references. pypdf merges columns into a single text stream per page.
+
+Pages parsed: 15   Chunks produced: 16   Total words: 6,119
+----------------------------------------------------------------------
+Sample chunks (first 3):
+
+  chunk unk_000000  page=1  words=396
+  'Provided proper attribution is provided, Google hereby grants permission to reproduce the tables and figures in this paper solely for use in journalistic or sch'
+
+  chunk unk_000001  page=2  words=624
+  '1 Introduction Recurrent neural networks, long short-term memory [13] and gated recurrent [7] neural networks in particular, have been firmly established as sta'
+
+  chunk unk_000002  page=3  words=292
+  'Figure 1: The Transformer - model architecture. The Transformer follows this overall architecture using stacked self-attention and point-wise, fully connected l'
+
+  ...
+
+  chunk unk_000015  page=15  (last chunk)
+  'Input-Input Layer5 The Law will never be perfect , but its application should be just - this is what we are missing , in my opinion . <EOS> <pad> The Law will n'
+
+======================================================================
+  Step 5 — Real annual report: Berkshire Hathaway 2023 (real_annual_report.pdf)
+======================================================================
+150-page financial report. Dense tables, footnotes, letter from Warren Buffett.
+Tests pipeline stability on a large real-world document.
+
+Pages parsed: 150   Chunks produced: 188   Total words: 84,507
+----------------------------------------------------------------------
+Sample: first chunk (shareholder letter)
+  page=1  words=4
+  'BERKSHIRE HATHAWAY INC. 2023'
+
+Sample: search for 'operating earnings'
+  page=10  score=0.0234
+  'Our goal is realistic. Berkshire’s strength comes from its Niagara of diverse earnings delivered after interest costs, t'
+  page=1  score=0.0311
+  'Provided proper attribution is provided, Google hereby grants permission to reproduce the tables and figures in this pap'
+
+======================================================================
+  Step 6 — Scanned board minutes: OCR fallback (sample_scanned_minutes.pdf)
+======================================================================
+Image-only PDF (no text layer) — simulates a document scanned on a photocopier.
+pypdf extracts zero text. OCR fallback runs Tesseract page by page.
+
+Without OCR: pages with extractable text = 0  (all blank, skipped)
+
+With OCR fallback enabled:
+Pages recovered: 2
+----------------------------------------------------------------------
+  page 1  ocr_confidence=93.9%  words=125
+  preview: 'MEETING MINUTES Board of Directors -- BlueTech Inc. Date: March 14, 2026 Attendees: J. Smith (Chair), A. Patel, R. Chen, M. Torres, L. Kim 1'
+
+  page 2  ocr_confidence=93.9%  words=99
+  preview: 'MEETING MINUTES (continued) Board of Directors -- BlueTech Inc. Date: March 14, 2026 | Page 2 6. Legal Update Counsel L. Kim confirmed IP fi'
+
+Ingesting through full pipeline (OCR mode):
+  Chunks produced: 2
+  chunk unk_000000  page=1  ocr=True  confidence=93.9
+  chunk unk_000001  page=2  ocr=True  confidence=93.9
+
+======================================================================
+  Step 7 — Summary: what pypdf extracts vs what it silently skips
+======================================================================
+Format                         Text layer     Images         Table structure
+----------------------------------------------------------------------
+  Invoice with table           yes (flat)     n/a            LOST — flat text
+  Mixed text+image+table       yes (flat)     SKIPPED        LOST — flat text
+  Multi-page report            yes            SKIPPED        LOST — flat text
+  ArXiv research paper         yes            SKIPPED        n/a
+  Berkshire annual report      yes            SKIPPED        LOST — flat text
+  Scanned minutes (OCR)        via OCR        n/a            n/a
+
+Key takeaways:
+  - pypdf extracts the text layer only; embedded images produce zero text
+  - Table cells are extracted as flat prose with no row/column delimiters
+  - Scanned (image-only) PDFs require OCR; set ocr_fallback=True on DocumentPipeline
+  - OCR pages carry ocr=True and ocr_confidence in their metadata
+  - Page provenance (page_start/page_end) is preserved on every chunk for all modes
+
