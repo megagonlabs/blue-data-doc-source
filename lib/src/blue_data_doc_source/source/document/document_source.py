@@ -98,11 +98,13 @@ class DocumentDataSource(DataSource):
             return self._delete(query, collection)
         elif op == "DOCUMENT.GET_SCHEMA":
             return self._get_schema(query)
+        elif op == "DOCUMENT.SEARCH_RICH":
+            return self._search_rich(query, collection)
         else:
             raise ValueError(
                 f"Unsupported op: {op!r}. "
                 "Expected DOCUMENT.INGEST, DOCUMENT.SEARCH, DOCUMENT.ENSURE_INDEX, "
-                "DOCUMENT.DELETE, or DOCUMENT.GET_SCHEMA"
+                "DOCUMENT.DELETE, DOCUMENT.GET_SCHEMA, or DOCUMENT.SEARCH_RICH"
             )
 
     def _ingest(self, request: Dict[str, Any], collection_override=None) -> List[Dict[str, Any]]:
@@ -153,6 +155,22 @@ class DocumentDataSource(DataSource):
             database=database,
             collection=collection,
             optional_properties=optional_properties,
+        )
+
+    def _search_rich(self, request: Dict[str, Any], collection_override=None) -> Dict[str, Any]:
+        query_text = request.get("query")
+        if not query_text:
+            raise ValueError("DOCUMENT.SEARCH_RICH requires a 'query' field")
+        collection = collection_override or request.get("collection")
+        k = request.get("k", 5)
+        filters = request.get("filter")
+        context_chunks = request.get("context_chunks", 1)
+        return self._pipeline.search_rich(
+            query_text,
+            k=k,
+            collection=collection,
+            filters=filters,
+            context_chunks=context_chunks,
         )
 
     def _get_schema(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:

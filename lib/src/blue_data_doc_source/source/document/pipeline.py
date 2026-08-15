@@ -136,6 +136,8 @@ class DocumentPipeline:
         self._index_created: Set[str] = set()
         # document_id → schema record — populated during ingest when classifier is set
         self._schema_registry: Dict[str, Dict[str, Any]] = {}
+        # chunk_id → chunk dict — populated during ingest; used for neighbor context lookup
+        self._chunk_index: Dict[str, Dict[str, Any]] = {}
 
     def ingest(self, path: str, collection: Optional[str] = None) -> List[Dict[str, Any]]:
         """Parse, chunk, enrich, and embed a file.
@@ -303,11 +305,10 @@ class DocumentPipeline:
         if self.vector_source is None:
             return
         for idx in range(old_count):
+            chunk_id = f"{old_doc_id}_chunk_{idx:06d}"
+            self._chunk_index.pop(chunk_id, None)
             try:
-                self.vector_source.delete(
-                    collection=old_collection,
-                    doc_id=f"{old_doc_id}_chunk_{idx:06d}",
-                )
+                self.vector_source.delete(collection=old_collection, doc_id=chunk_id)
             except Exception:
                 pass
 
@@ -442,6 +443,7 @@ class DocumentPipeline:
                 )
                 record_dict = record.to_dict()
                 records.append(record_dict)
+                self._chunk_index[chunk_id] = record_dict
                 self._upsert(chunk_id, record_dict, collection)
                 chunk_index += 1
 
@@ -561,6 +563,7 @@ class DocumentPipeline:
         deleted = 0
         for idx in range(count):
             chunk_id = f"{doc_id}_chunk_{idx:06d}"
+            self._chunk_index.pop(chunk_id, None)
             try:
                 self.vector_source.delete(collection=target, doc_id=chunk_id)
                 deleted += 1
@@ -610,3 +613,154 @@ class DocumentPipeline:
             k=k,
             filter_expr=_build_filter_expr(filters),
         )
+
+    # ------------------------------------------------------------------
+    # Rich search
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _chunk_idx_from_id(chunk_id: str) -> Optional[int]:
+        """Parse the numeric index from a chunk_id like ``doc_abc_chunk_000003``."""
+        parts = chunk_id.rsplit("_chunk_", 1)
+        if len(parts) == 2:
+            try:
+                return int(parts[1])
+            except ValueError:
+                pass
+        return None
+
+    def _neighbor_text(self, chunk_id: str, offset: int) -> Optional[str]:
+        """Return the text of the chunk ``offset`` positions from ``chunk_id``."""
+        idx = self._chunk_idx_from_id(chunk_id)
+        if idx is None:
+            return None
+        doc_prefix = chunk_id.rsplit("_chunk_", 1)[0]
+        neighbor_id = f"{doc_prefix}_chunk_{(idx + offset):06d}"
+        neighbor = self._chunk_index.get(neighbor_id)
+        return neighbor.get("text") if neighbor else None
+
+    def search_rich(
+        self,
+        query: str,
+        k: int = 5,
+        collection: Optional[str] = None,
+        filters: Optional[Dict[str, Any]] = None,
+        context_chunks: int = 1,
+    ) -> Dict[str, Any]:
+        """Embed a query and return an enriched response with citation, grouping,
+        and neighbor context.
+
+        Args:
+            query: Natural language query string.
+            k: Number of results to return.
+            collection: Override the instance-level collection for this call only.
+            filters: Same pre-filter dict accepted by ``search()``.
+            context_chunks: Number of adjacent chunks to include in
+                ``context.before`` / ``context.after`` for each result. Set to
+                ``0`` to omit context entirely. Neighbor chunks are looked up
+                from the in-process ``_chunk_index`` — only chunks ingested in
+                the current process are available.
+
+        Returns:
+            Dict with keys:
+
+            - ``query`` — the original query string
+            - ``result_count`` — number of matched chunks
+            - ``document_count`` — number of distinct documents in the results
+            - ``results`` — list of enriched result dicts (see below)
+            - ``by_document`` — results grouped by ``document_id``
+
+            Each result dict contains:
+
+            - ``rank``, ``score``, ``chunk_id``, ``text``
+            - ``citation`` — ``{document_id, file_name, chunk_index}`` plus
+              ``page`` (PDF only) and ``section`` (when detected)
+            - ``document_type`` — present when a classifier was set at ingest
+            - ``context`` — ``{before, after}`` with neighboring chunk text;
+              keys are omitted when no neighbor is available
+        """
+        raw = self.search(query, k=k, collection=collection, filters=filters)
+
+        results: List[Dict[str, Any]] = []
+        for rank, chunk in enumerate(raw, 1):
+            chunk_id = chunk.get("chunk_id") or chunk.get("id", "")
+            document_id = chunk.get("document_id", "")
+            idx = self._chunk_idx_from_id(chunk_id)
+
+            citation: Dict[str, Any] = {
+                "document_id": document_id,
+                "file_name": chunk.get("file_name", ""),
+                "chunk_id": chunk_id,
+            }
+            if idx is not None:
+                citation["chunk_index"] = idx
+            if chunk.get("page_start") is not None:
+                citation["page"] = chunk["page_start"]
+            if chunk.get("section_title"):
+                citation["section"] = chunk["section_title"]
+
+            result: Dict[str, Any] = {
+                "rank": rank,
+                "score": chunk.get("score"),
+                "chunk_id": chunk_id,
+                "text": chunk.get("text", ""),
+                "citation": citation,
+            }
+
+            doc_type = chunk.get("document_type")
+            if doc_type:
+                result["document_type"] = doc_type
+
+            if context_chunks > 0:
+                context: Dict[str, str] = {}
+                before_parts = [
+                    t for i in range(context_chunks, 0, -1)
+                    if (t := self._neighbor_text(chunk_id, -i)) is not None
+                ]
+                after_parts = [
+                    t for i in range(1, context_chunks + 1)
+                    if (t := self._neighbor_text(chunk_id, i)) is not None
+                ]
+                if before_parts:
+                    context["before"] = " ".join(before_parts)
+                if after_parts:
+                    context["after"] = " ".join(after_parts)
+                if context:
+                    result["context"] = context
+
+            results.append(result)
+
+        by_document: Dict[str, Dict[str, Any]] = {}
+        for r in results:
+            doc_id = r["citation"]["document_id"]
+            if doc_id not in by_document:
+                entry: Dict[str, Any] = {
+                    "document_id": doc_id,
+                    "file_name": r["citation"].get("file_name", ""),
+                    "match_count": 0,
+                    "matches": [],
+                }
+                if r.get("document_type"):
+                    entry["document_type"] = r["document_type"]
+                by_document[doc_id] = entry
+            by_document[doc_id]["match_count"] += 1
+            by_document[doc_id]["matches"].append(r)
+
+        for entry in by_document.values():
+            seen: set = set()
+            sections = []
+            for m in entry["matches"]:
+                sec = m["citation"].get("section")
+                if sec and sec not in seen:
+                    sections.append(sec)
+                    seen.add(sec)
+            if sections:
+                entry["top_sections"] = sections
+
+        return {
+            "query": query,
+            "result_count": len(results),
+            "document_count": len(by_document),
+            "results": results,
+            "by_document": by_document,
+        }
