@@ -56,12 +56,19 @@ OPENAI_API_KEY=sk-... python3 examples/scenario-demos/semantic_search_demo.py
 | `feature-demos/enrichment_demo.py` | BasicEnricher entity types + semantic hints; live document enrichment | none |
 | `feature-demos/content_addressing_demo.py` | SHA-256 content-addressed IDs; dedup; stale-chunk detection | none |
 | `feature-demos/nl_query_demo.py` | NLQueryParser: search/ingest/delete intent parsing; live execute_query_nl | none |
+| `feature-demos/schema_inference_demo.py` | KeywordClassifier type detection + LLMSchemaExtractor field extraction on four real PDFs; document_type on chunks; DOCUMENT.GET_SCHEMA | none (OpenAI optional) |
 
 ```bash
 python3 examples/feature-demos/chunking_demo.py
 python3 examples/feature-demos/enrichment_demo.py
 python3 examples/feature-demos/content_addressing_demo.py
 python3 examples/feature-demos/nl_query_demo.py
+
+# Schema inference — keyword classification only (no API key needed):
+python3 examples/feature-demos/schema_inference_demo.py
+
+# With LLM field extraction:
+OPENAI_API_KEY=sk-... python3 examples/feature-demos/schema_inference_demo.py
 ```
 
 ---
@@ -135,8 +142,9 @@ All operations are dispatched via `DocumentDataSource.execute_query(op_dict)`.
 |---|---|---|---|
 | `DOCUMENT.ENSURE_INDEX` | `collection` | — | `None` |
 | `DOCUMENT.INGEST` | `path` | `collection` | `list[dict]` (ChunkRecord) |
-| `DOCUMENT.SEARCH` | `query` | `collection`, `k` (default 5) | `list[dict]` |
+| `DOCUMENT.SEARCH` | `query` | `collection`, `k` (default 5), `filter` (dict) | `list[dict]` |
 | `DOCUMENT.DELETE` | `document_id`, `chunk_count` OR `path` | `collection` | `None` |
+| `DOCUMENT.GET_SCHEMA` | `document_id` | — | `dict` (schema record) |
 
 `execute_query_nl(nl_string, collection=...)` parses a natural-language string and dispatches the corresponding op. Requires `nl_parser=NLQueryParser()` at construction.
 
@@ -155,6 +163,7 @@ All operations are dispatched via `DocumentDataSource.execute_query(op_dict)`.
 | `page_start` | int\|None | ✓ (1-based) | None | First page of chunk |
 | `page_end` | int\|None | ✓ (== page_start) | None | Last page of chunk |
 | `section_title` | str\|None | ✓ (if detected) | ✓ (if detected) | Header above chunk |
+| `document_type` | str\|None | ✓ (if classifier set) | ✓ (if classifier set) | Classified type: contract, invoice, policy, research_paper, financial_report, unknown |
 | `entities` | list[dict] | ✓ | ✓ | BasicEnricher entity spans |
 | `semantic_hints` | dict | ✓ | ✓ | word_count, keywords, … |
 | `embedding` | list[float]\|None | omitted | omitted | Omitted by `to_dict()` |

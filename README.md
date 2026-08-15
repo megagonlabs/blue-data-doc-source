@@ -13,6 +13,8 @@ Its core capabilities include:
 - **Regex enrichment** — `BasicEnricher` extracts named entities (DATE, EMAIL, PERCENT, MONEY, PROPER_NOUN) and semantic hints with no ML dependency
 - **Pluggable embeddings** — `OpenAIEmbeddingModel`, `DummyEmbeddingModel`, or any custom `EmbeddingModel` subclass
 - **Pluggable vector storage** — any blue-data `VectorSource`; `MemoryVectorSource` for dev, `RedisVectorSource` for production
+- **Document schema inference** — `KeywordClassifier` identifies document type (contract, invoice, policy, research_paper, financial_report) from content at ingest time; `LLMSchemaExtractor` extracts typed fields per type via a single GPT-4o-mini call; `document_type` propagates to every chunk; `DOCUMENT.GET_SCHEMA` retrieves the schema without re-reading the file
+- **Metadata pre-filtering** — scope KNN search to a document, file, section, MIME type, or page range before scoring
 - **Natural language queries** — `NLQueryParser` maps plain-English instructions to `DOCUMENT.*` ops; `parse_fn` injection for keyless use
 - **Pluggable parsers** — `Parser` ABC for external processors (LlamaIndex, vision models, cloud OCR); bypass via `ingest_text` / `ingest_pages`
 - **MCP server** — `platform/document-mcp` exposes all ops as tools callable from Claude Desktop
@@ -227,6 +229,8 @@ DocumentDataSource (extends blue-data DataSource)  ← public entry point
        ├─ SectionChunker     ← detects headers, chunks within sections (default)
        │    └─ WindowChunker ← word-based sliding window fallback
        ├─ BasicEnricher      ← regex entity/keyword extraction (optional)
+       ├─ KeywordClassifier  ← document type detection (no API cost) (optional)
+       ├─ LLMSchemaExtractor ← typed field extraction via GPT-4o-mini (optional)
        ├─ OpenAIEmbeddingModel / DummyEmbeddingModel  (optional)
        ├─ ChunkRecord        ← canonical chunk schema with provenance fields
        └─ VectorSource       ← blue-data VectorSource injected by caller (optional)
@@ -249,8 +253,9 @@ Every ingested chunk becomes a `ChunkRecord`, serialised via `.to_dict()`. Optio
 | `section_title` | str \| omitted | Section heading detected by SectionChunker — omitted when no structure found |
 | `entities` | list | Extracted entities: `{text, type}` each |
 | `semantic_hints` | dict | `word_count`, `sentence_count`, `has_questions`, `has_numbers`, `keywords` |
+| `document_type` | str \| omitted | Classified document type (`contract`, `invoice`, `policy`, `research_paper`, `financial_report`, `unknown`) — present when a `classifier` is set |
 | `embedding` | list[float] \| omitted | Present only when an embedding model is set |
-| `metadata` | dict | `source_path`, `chunk_index`, `chunk_size`, `overlap`, `ingested_at`, `embedding_model` |
+| `metadata` | dict | `source_path`, `chunk_index`, `chunk_size`, `overlap`, `ingested_at`, `embedding_model`; includes `document_type` when a classifier is set |
 
 ### Chunking
 
@@ -270,6 +275,55 @@ pipeline = DocumentPipeline(chunker=WindowChunker(chunk_size=500, overlap=50))
 `BasicEnricher` is regex-based (no ML dependency). It extracts:
 - **Entities:** `DATE`, `EMAIL`, `PERCENT`, `MONEY`, `PROPER_NOUN`
 - **Semantic hints:** word/sentence count, top keywords (stopword-filtered), boolean flags
+
+### Document schema inference
+
+Two-layer classification runs once per document at ingest time, before the chunk loop:
+
+**Layer 1 — `KeywordClassifier`** (no API cost, no extra deps): scores the first 500 words against signal phrase sets for each document type and returns `(document_type, confidence)`.
+
+**Layer 2 — `LLMSchemaExtractor`** (optional, one GPT-4o-mini call per document): extracts typed fields — `parties`, `effective_date`, `invoice_number`, `policy_number`, `keywords`, etc. — from the document text given its classified type.
+
+```python
+from blue_data_doc_source import DocumentPipeline, KeywordClassifier, LLMSchemaExtractor
+
+pipeline = DocumentPipeline(
+    classifier=KeywordClassifier(),
+    schema_extractor=LLMSchemaExtractor(),  # optional; requires OPENAI_API_KEY
+    embedding_model=...,
+    vector_source=...,
+)
+
+records = pipeline.ingest("contract.pdf")
+
+# document_type on every chunk
+records[0]["document_type"]             # → "contract"
+records[0]["metadata"]["document_type"] # → "contract"
+
+# schema stored at ingest — no re-read needed
+doc_id = records[0]["document_id"]
+schema = pipeline.get_schema(doc_id)
+# {
+#   "document_id": "doc_abc123",
+#   "document_type": "contract",
+#   "confidence": 0.78,
+#   "classifier": "llm",
+#   "fields": {"parties": ["TechCorp Inc.", "BuildRight LLC"], "governing_law": "Delaware", ...}
+# }
+```
+
+Via `DocumentDataSource`:
+
+```python
+schema = source.execute_query({
+    "op": "DOCUMENT.GET_SCHEMA",
+    "document_id": doc_id,
+})
+```
+
+Supported types: `contract`, `invoice`, `policy`, `research_paper`, `financial_report`, `unknown`.
+
+See the runnable demo: `python3 examples/feature-demos/schema_inference_demo.py`
 
 ### Embeddings
 

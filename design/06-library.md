@@ -19,12 +19,16 @@ DocumentPipeline(
     enricher: Enricher | None = None,
     collection: str = "documents",
     ocr_fallback: bool = False,
+    classifier: DocumentClassifier | None = None,
+    schema_extractor: SchemaExtractor | None = None,
 )
 ```
 
 - `chunker` — defaults to `SectionChunker(chunk_size, overlap)` when omitted
 - `parser` — when provided, overrides built-in extension detection; all extensions are routed through the custom parser
 - `ocr_fallback` — passes `ocr_fallback=True` to the built-in `PDFParser`; has no effect when a custom `parser` is set
+- `classifier` — when set, classifies the document type once per ingest (before the chunk loop) and propagates `document_type` to every `ChunkRecord`; defaults to `None` (no classification)
+- `schema_extractor` — when set alongside `classifier`, extracts typed fields from the document text via a single call per ingest; result stored in `_schema_registry`; defaults to `None`
 
 ### Methods
 
@@ -36,6 +40,7 @@ DocumentPipeline(
 | `search(query, k=5, collection=None, filters=None)` | `list[dict]` | Embed query and run KNN; raises if `embedding_model` or `vector_source` is not set |
 | `ensure_index(collection=None)` | `None` | Create vector index for the collection; idempotent — safe to call multiple times |
 | `delete(path=None, document_id=None, chunk_count=None, collection=None)` | `int` | Delete all chunks for a document; returns count of successful delete calls |
+| `get_schema(document_id)` | `dict \| None` | Return the schema record stored during ingest; `None` if no `classifier` was set or the document is unknown |
 
 ### Document identity and deduplication
 
@@ -61,6 +66,8 @@ DocumentDataSource(
     nl_parser: NLQueryParser | None = None,
     properties: dict | None = None,
     ocr_fallback: bool = False,
+    classifier: DocumentClassifier | None = None,
+    schema_extractor: SchemaExtractor | None = None,
 )
 ```
 
@@ -72,6 +79,7 @@ DocumentDataSource(
 | `DOCUMENT.SEARCH` | `query` | `collection`, `k` (default 5), `filter` (dict) | `list[dict]` — ranked chunks |
 | `DOCUMENT.ENSURE_INDEX` | — | `collection` | `None` |
 | `DOCUMENT.DELETE` | `path` OR (`document_id` + `chunk_count`) | `collection` | `int` — deleted chunk count |
+| `DOCUMENT.GET_SCHEMA` | `document_id` | — | `dict` — schema record; raises if unknown |
 
 ### Methods
 
@@ -201,10 +209,11 @@ Canonical chunk schema. Constructed by `DocumentPipeline._make_record` and seria
 | `page_start` | int \| omitted | 1-based page number (PDF only) |
 | `page_end` | int \| omitted | Same as `page_start` in V1 |
 | `section_title` | str \| omitted | Section heading from `SectionChunker`; omitted when no structure detected |
+| `document_type` | str \| omitted | Classified type (`contract`, `invoice`, `policy`, `research_paper`, `financial_report`, `unknown`); present when `classifier` is set |
 | `entities` | list | `[{"text": str, "type": str}, ...]` from enricher; empty list when no enricher |
 | `semantic_hints` | dict | Scalar metadata from enricher; empty dict when no enricher |
 | `embedding` | list[float] \| omitted | Present only when an embedding model is set |
-| `metadata` | dict | `source_path`, `chunk_index`, `chunk_size`, `overlap`, `ingested_at`, `embedding_model`; OCR pages add `ocr: True` and `ocr_confidence` |
+| `metadata` | dict | `source_path`, `chunk_index`, `chunk_size`, `overlap`, `ingested_at`, `embedding_model`; OCR pages add `ocr: True` and `ocr_confidence`; includes `document_type` when a classifier is set |
 
 ---
 
@@ -236,3 +245,86 @@ parser = NLQueryParser(parse_fn=lambda text: my_llm_call(text))
 ```
 
 The parsed op dict is passed directly to `DocumentDataSource.execute_query`, so the return type and error behaviour are identical to a direct op call.
+
+---
+
+## DocumentClassifier (ABC)
+
+Identifies the document type from its text content. Called once per document during ingest, before the chunk loop.
+
+```python
+class DocumentClassifier(ABC):
+    def classify(self, text: str) -> tuple[str, float]: ...
+    # Returns: (document_type, confidence)  where confidence ∈ [0, 1]
+    # Return ("unknown", 0.0) when no type can be determined.
+```
+
+### Built-in classifier
+
+**`KeywordClassifier`** — no API cost, no extra dependencies.
+
+Scores the first `sample_words` words (default 500) of the document against signal phrase sets for each type. Confidence is the fraction of signal phrases matched. Returns `"unknown"` when confidence falls below `min_confidence` (default 0.15).
+
+```python
+KeywordClassifier(
+    min_confidence: float = 0.15,
+    sample_words: int = 500,
+)
+```
+
+Supported document types and representative signals:
+
+| Type | Signal phrases (sample) |
+|------|------------------------|
+| `contract` | agreement, parties, governing law, termination, indemnification, warranties |
+| `invoice` | invoice, due date, amount due, bill to, line item, purchase order |
+| `policy` | policy, eligibility, coverage, effective date, deductible, premium |
+| `research_paper` | abstract, methodology, references, conclusion, hypothesis, doi |
+| `financial_report` | revenue, net income, balance sheet, earnings per share, fiscal year |
+
+---
+
+## SchemaExtractor (ABC)
+
+Extracts typed fields from a document given its classified type. Called once per document during ingest when both `classifier` and `schema_extractor` are set.
+
+```python
+class SchemaExtractor(ABC):
+    def extract(self, text: str, document_type: str) -> dict: ...
+    # Returns a plain dict of type-specific field names → values.
+    # Omit fields that cannot be determined; do not set them to None.
+```
+
+### Built-in extractor
+
+**`LLMSchemaExtractor`** — one GPT-4o-mini call per document. Requires `openai>=1.0` and `OPENAI_API_KEY`.
+
+```python
+LLMSchemaExtractor(
+    model: str = "gpt-4o-mini",
+    sample_chars: int = 4000,   # truncates input sent to the LLM
+)
+```
+
+Builds a type-specific prompt from the document text and returns a JSON dict of extracted fields. Falls back to `{"raw_response": "..."}` if the LLM returns malformed JSON.
+
+### Schema record format
+
+The schema stored in `pipeline._schema_registry` (and returned by `get_schema` / `DOCUMENT.GET_SCHEMA`) has the following shape:
+
+```python
+{
+    "document_id":   "doc_abc123",
+    "chunk_id":      "doc_abc123_schema",   # keyed but not upserted to vector store
+    "document_type": "contract",
+    "confidence":    0.78,
+    "classifier":    "keyword",             # "llm" when schema_extractor is set
+    "fields":        {                      # {} when no schema_extractor
+        "parties":       ["TechCorp Inc.", "BuildRight Solutions LLC"],
+        "governing_law": "Delaware",
+        "effective_date": "September 1, 2026",
+    },
+}
+```
+
+Schema is stored in-process only. Cross-process retrieval is not supported — store the schema dict from the ingest response if persistence is required.

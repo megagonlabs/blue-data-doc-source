@@ -289,6 +289,123 @@ All filters are combined with AND. `None` values are ignored. Chunks where an op
 
 ---
 
+## Document schema inference
+
+`KeywordClassifier` and `LLMSchemaExtractor` run once per document at ingest time to identify its type and extract typed fields. `document_type` is then propagated to every chunk produced from that document.
+
+### Layer 1 — KeywordClassifier (no API cost)
+
+Scores the first 500 words against signal phrase sets for five document types. Zero extra dependencies.
+
+```python
+from blue_data_doc_source import DocumentPipeline, KeywordClassifier
+
+pipeline = DocumentPipeline(
+    classifier=KeywordClassifier(),
+    embedding_model=...,
+    vector_source=...,
+)
+
+records = pipeline.ingest("contract.pdf")
+
+records[0]["document_type"]             # → "contract"
+records[0]["metadata"]["document_type"] # → "contract"  (same value in metadata)
+```
+
+Supported types: `contract`, `invoice`, `policy`, `research_paper`, `financial_report`, `unknown`.
+
+Confidence threshold defaults to `0.15` — below this the type is `"unknown"`. Tune it:
+
+```python
+KeywordClassifier(min_confidence=0.25)   # stricter — more unknowns
+KeywordClassifier(sample_words=200)      # faster — score fewer words
+```
+
+### Layer 2 — LLMSchemaExtractor (optional, one call per document)
+
+Calls GPT-4o-mini with a type-specific prompt to extract typed fields from the document. Requires `OPENAI_API_KEY`.
+
+```python
+from blue_data_doc_source import LLMSchemaExtractor
+
+pipeline = DocumentPipeline(
+    classifier=KeywordClassifier(),
+    schema_extractor=LLMSchemaExtractor(),  # one API call per document
+    ...
+)
+```
+
+Fields extracted per type:
+
+| Type | Fields |
+|------|--------|
+| `contract` | `parties`, `effective_date`, `expiration_date`, `governing_law`, `contract_value`, `key_obligations` |
+| `invoice` | `invoice_number`, `invoice_date`, `due_date`, `vendor`, `bill_to`, `line_items`, `subtotal`, `tax`, `total_due` |
+| `policy` | `policy_number`, `effective_date`, `expiration_date`, `insured`, `coverage_types`, `deductible`, `premium`, `exclusions` |
+| `research_paper` | `title`, `authors`, `abstract`, `keywords`, `methodology`, `findings`, `doi` |
+| `financial_report` | `company`, `fiscal_period`, `revenue`, `net_income`, `earnings_per_share`, `total_assets`, `total_liabilities`, `highlights` |
+
+### Schema retrieval
+
+The schema is stored in-process at ingest time. Retrieve it without re-reading the document:
+
+```python
+doc_id = records[0]["document_id"]
+schema = pipeline.get_schema(doc_id)
+```
+
+Schema record format:
+
+```python
+{
+    "document_id": "doc_abc123",
+    "chunk_id":    "doc_abc123_schema",
+    "document_type": "contract",
+    "confidence":    0.78,
+    "classifier":    "llm",       # "keyword" when no schema_extractor is set
+    "fields": {
+        "parties":       ["TechCorp Inc.", "BuildRight Solutions LLC"],
+        "governing_law": "Delaware",
+        "effective_date": "September 1, 2026",
+    },
+}
+```
+
+Via `DocumentDataSource`:
+
+```python
+schema = source.execute_query({
+    "op": "DOCUMENT.GET_SCHEMA",
+    "document_id": "doc_abc123",
+})
+```
+
+### Custom classifier or extractor
+
+Implement either ABC to replace the built-in logic:
+
+```python
+from blue_data_doc_source import DocumentClassifier, SchemaExtractor
+
+class MyClassifier(DocumentClassifier):
+    def classify(self, text: str) -> tuple[str, float]:
+        # return (document_type, confidence)
+        ...
+
+class MyExtractor(SchemaExtractor):
+    def extract(self, text: str, document_type: str) -> dict:
+        # return a dict of typed fields
+        ...
+
+pipeline = DocumentPipeline(
+    classifier=MyClassifier(),
+    schema_extractor=MyExtractor(),
+    ...
+)
+```
+
+---
+
 ## Natural language queries
 
 `NLQueryParser` uses an LLM to translate plain-English instructions into `DOCUMENT.*` op dicts, then executes them via `execute_query`.
