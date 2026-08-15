@@ -41,6 +41,7 @@ DocumentPipeline(
 | `ensure_index(collection=None)` | `None` | Create vector index for the collection; idempotent — safe to call multiple times |
 | `delete(path=None, document_id=None, chunk_count=None, collection=None)` | `int` | Delete all chunks for a document; returns count of successful delete calls |
 | `get_schema(document_id)` | `dict \| None` | Return the schema record stored during ingest; `None` if no `classifier` was set or the document is unknown |
+| `search_rich(query, k=5, collection=None, filters=None, context_chunks=1)` | `dict` | Enriched search response: ranked results with citation, neighbor context, and `by_document` grouping |
 
 ### Document identity and deduplication
 
@@ -80,6 +81,7 @@ DocumentDataSource(
 | `DOCUMENT.ENSURE_INDEX` | — | `collection` | `None` |
 | `DOCUMENT.DELETE` | `path` OR (`document_id` + `chunk_count`) | `collection` | `int` — deleted chunk count |
 | `DOCUMENT.GET_SCHEMA` | `document_id` | — | `dict` — schema record; raises if unknown |
+| `DOCUMENT.SEARCH_RICH` | `query` | `collection`, `k` (default 5), `filter` (dict), `context_chunks` (int, default 1) | `dict` — enriched results with citation, neighbor context, and `by_document` grouping |
 
 ### Methods
 
@@ -97,6 +99,10 @@ Extracts raw text from a source file. Each implementation returns a list of page
 ```python
 class Parser(ABC):
     def parse(self, path: str) -> list[dict]: ...
+    def parse_blocks(self, path: str) -> list[dict]: ...
+    # Default parse_blocks() wraps parse() adding type="text" to every block.
+    # Override to return typed blocks: {"type": "text"|"table", "text": str,
+    #   "page_num"?: int, "table"?: {"headers": list[str], "rows": list[list[str]]}}
 ```
 
 ### Built-in parsers
@@ -106,6 +112,7 @@ class Parser(ABC):
 | `TextParser` | `.txt` | Single page dict; no page_num |
 | `PDFParser` | `.pdf` | One dict per page; `page_num` set; OCR fallback via Tesseract |
 | `DocxParser` | `.docx` | Single page dict; headings converted to markdown `#` prefixes; tables to pipe-delimited rows |
+| `PlumberPDFParser` | `.pdf` | Typed blocks via pdfplumber; text outside tables → `type="text"`; each table → `type="table"` with structured `table` dict; `parse()` flattens to page dicts for backward compat |
 
 `DocumentPipeline.ingest()` auto-detects which parser to use from the file extension. Pass `parser=` to override.
 
@@ -210,6 +217,8 @@ Canonical chunk schema. Constructed by `DocumentPipeline._make_record` and seria
 | `page_end` | int \| omitted | Same as `page_start` in V1 |
 | `section_title` | str \| omitted | Section heading from `SectionChunker`; omitted when no structure detected |
 | `document_type` | str \| omitted | Classified type (`contract`, `invoice`, `policy`, `research_paper`, `financial_report`, `unknown`); present when `classifier` is set |
+| `content_type` | str \| omitted | Content block type: `"text"` or `"table"`; present when using `PlumberPDFParser` or any block-aware parser |
+| `table` | dict \| omitted | `{"headers": list[str], "rows": list[list[str]]}`; present only when `content_type == "table"` |
 | `entities` | list | `[{"text": str, "type": str}, ...]` from enricher; empty list when no enricher |
 | `semantic_hints` | dict | Scalar metadata from enricher; empty dict when no enricher |
 | `embedding` | list[float] \| omitted | Present only when an embedding model is set |

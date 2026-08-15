@@ -96,8 +96,10 @@ results = source.execute_query({
 |---|---|---|
 | `DOCUMENT.INGEST` | `path` | `list[dict]` — one dict per chunk |
 | `DOCUMENT.SEARCH` | `query` | `list[dict]` — ranked matching chunks |
+| `DOCUMENT.SEARCH_RICH` | `query` | `dict` — ranked results with citation, context, and grouping |
 | `DOCUMENT.ENSURE_INDEX` | — | `None` |
 | `DOCUMENT.DELETE` | `path` OR (`document_id` + `chunk_count`) | `int` — deleted chunk count |
+| `DOCUMENT.GET_SCHEMA` | `document_id` | `dict` — schema record; raises if unknown |
 
 ---
 
@@ -281,11 +283,126 @@ source.execute_query({
 | `file_name` | str | Exact — scope to one file |
 | `section_title` | str | Exact — scope to one section heading |
 | `mime_type` | str | Exact — scope to a file type |
+| `content_type` | str | Exact — scope to `"text"` or `"table"` chunks |
 | `page_start` | int or `{"gte": N, "lte": M}` | Numeric range — PDF chunks only |
 
 All filters are combined with AND. `None` values are ignored. Chunks where an optional field is absent (e.g. `page_start` on a TXT chunk) are excluded when that field is filtered.
 
 **Index requirement:** pre-filtering requires an index created after this feature was added. Existing Redis indexes without the filterable fields must be dropped and recreated with `ensure_index()`.
+
+---
+
+## Rich search
+
+`search_rich()` returns an enriched response in a single call — ranked chunks with per-chunk citation, neighbor context, and results grouped by document.
+
+```python
+response = pipeline.search_rich("termination clause", k=5, context_chunks=1)
+
+response["query"]           # original query string
+response["result_count"]    # number of matched chunks
+response["document_count"]  # number of distinct documents
+response["results"]         # ranked list of enriched result dicts
+response["by_document"]     # results grouped by document_id
+```
+
+Each result carries:
+- `rank`, `score`, `chunk_id`, `text`
+- `citation` — `{document_id, file_name, chunk_id, chunk_index}` plus `page` (PDF) and `section` (when detected)
+- `document_type` — present when a classifier was set at ingest
+- `context` — `{before, after}` with neighboring chunk text; keys omitted when no neighbor exists
+
+```python
+for r in response["results"]:
+    print(r["rank"], r["citation"]["file_name"], r["citation"].get("page"))
+    print(r["text"][:120])
+    if "context" in r:
+        print("  before:", r["context"].get("before", "")[:60])
+        print("  after: ", r["context"].get("after",  "")[:60])
+```
+
+`by_document` groups matches per source document:
+
+```python
+for doc_id, group in response["by_document"].items():
+    print(group["file_name"], group["match_count"])
+    if "top_sections" in group:
+        print("  sections:", group["top_sections"])
+```
+
+Via `DocumentDataSource`:
+
+```python
+response = source.execute_query({
+    "op": "DOCUMENT.SEARCH_RICH",
+    "query": "termination clause",
+    "collection": "contracts",
+    "k": 5,
+    "context_chunks": 1,          # neighbors before/after each result
+    "filter": {"document_id": "doc_abc123"},
+})
+```
+
+Set `context_chunks=0` to omit neighbor context entirely. Neighbor lookup is in-process only — chunks ingested in a previous process run are not available as neighbors.
+
+---
+
+## Table extraction (PlumberPDFParser)
+
+`PDFParser` extracts the raw text layer — table cells become flat prose with no row/column structure, which reduces LLM reasoning accuracy on tabular data. Use `PlumberPDFParser` when documents contain tables that agents need to query.
+
+```python
+from blue_data_doc_source import DocumentPipeline, PlumberPDFParser
+
+pipeline = DocumentPipeline(
+    parser=PlumberPDFParser(),
+    embedding_model=...,
+    vector_source=...,
+)
+records = pipeline.ingest("invoice.pdf")
+```
+
+`PlumberPDFParser` uses pdfplumber to detect table bounding boxes on each page, then returns typed content blocks:
+
+- Text outside tables → `content_type="text"` chunks, processed by the chunker normally
+- Each table → `content_type="table"` chunk (atomic, bypasses the chunker)
+
+Table chunks carry both forms of the table:
+- `text` — pipe-delimited markdown (for LLM consumption, consistent with all other chunks)
+- `table` — structured dict (for machine-readable use)
+
+```python
+for r in records:
+    if r.get("content_type") == "table":
+        headers = r["table"]["headers"]   # ["Description", "Qty", "Unit Price", "Total"]
+        rows    = r["table"]["rows"]      # [["Widget", "5", "$10.00", "$50.00"], ...]
+        print(r["text"])                  # | Description | Qty | Unit Price | Total |
+                                          # | ---         | --- | ---        | ---   |
+                                          # | Widget      | 5   | $10.00     | $50.00|
+```
+
+`content_type` is indexed as a filterable TAG — scope search to table chunks only:
+
+```python
+results = pipeline.search("unit price", filters={"content_type": "table"})
+```
+
+**Install:** `pip install pdfplumber`
+
+### Parser ABC — parse_blocks()
+
+`PlumberPDFParser` extends the `Parser` ABC's new `parse_blocks()` method, which returns a flat list of typed block dicts:
+
+```python
+blocks = PlumberPDFParser().parse_blocks("invoice.pdf")
+# [
+#   {"type": "text",  "page_num": 1, "text": "Invoice header..."},
+#   {"type": "table", "page_num": 1, "text": "| Desc | ... |", "table": {...}},
+#   {"type": "text",  "page_num": 1, "text": "Payment terms..."},
+# ]
+```
+
+All `Parser` subclasses inherit a default `parse_blocks()` that wraps `parse()` and marks every block `type="text"`. Override it to add block-aware extraction.
 
 ---
 

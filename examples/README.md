@@ -57,7 +57,7 @@ OPENAI_API_KEY=sk-... python3 examples/scenario-demos/semantic_search_demo.py
 | `feature-demos/content_addressing_demo.py` | SHA-256 content-addressed IDs; dedup; stale-chunk detection | none |
 | `feature-demos/nl_query_demo.py` | NLQueryParser: search/ingest/delete intent parsing; live execute_query_nl | none |
 | `feature-demos/schema_inference_demo.py` | KeywordClassifier type detection + LLMSchemaExtractor field extraction on four real PDFs; document_type on chunks; DOCUMENT.GET_SCHEMA | none (OpenAI optional) |
-| `feature-demos/pdf_formats_demo.py` | How pypdf handles tables (flat text), embedded images (silently skipped), multi-page docs, real arXiv/annual report PDFs, and scanned image-only PDFs via Tesseract OCR | none (OCR: tesseract + poppler) |
+| `feature-demos/pdf_formats_demo.py` | PlumberPDFParser structured table extraction vs pypdf flat text; embedded images silently skipped; multi-page docs; real arXiv + Berkshire annual report PDFs; scanned image-only PDFs via Tesseract OCR | pdfplumber (OCR: tesseract + poppler) |
 
 ```bash
 python3 examples/feature-demos/chunking_demo.py
@@ -151,6 +151,7 @@ All operations are dispatched via `DocumentDataSource.execute_query(op_dict)`.
 | `DOCUMENT.SEARCH` | `query` | `collection`, `k` (default 5), `filter` (dict) | `list[dict]` |
 | `DOCUMENT.DELETE` | `document_id`, `chunk_count` OR `path` | `collection` | `None` |
 | `DOCUMENT.GET_SCHEMA` | `document_id` | — | `dict` (schema record) |
+| `DOCUMENT.SEARCH_RICH` | `query` | `collection`, `k` (default 5), `filter` (dict), `context_chunks` (int, default 1) | `dict` (enriched results with citation, context, grouping) |
 
 `execute_query_nl(nl_string, collection=...)` parses a natural-language string and dispatches the corresponding op. Requires `nl_parser=NLQueryParser()` at construction.
 
@@ -170,11 +171,15 @@ All operations are dispatched via `DocumentDataSource.execute_query(op_dict)`.
 | `page_end` | int\|None | ✓ (== page_start) | None | Last page of chunk |
 | `section_title` | str\|None | ✓ (if detected) | ✓ (if detected) | Header above chunk |
 | `document_type` | str\|None | ✓ (if classifier set) | ✓ (if classifier set) | Classified type: contract, invoice, policy, research_paper, financial_report, unknown |
+| `content_type` | str\|None | ✓ (if PlumberPDFParser) | ✓ (if PlumberPDFParser) | Content block type: `"text"` or `"table"` |
+| `table` | dict\|None | ✓ (if table block) | — | `{"headers": list[str], "rows": list[list[str]]}` — only when `content_type == "table"` |
 | `entities` | list[dict] | ✓ | ✓ | BasicEnricher entity spans |
 | `semantic_hints` | dict | ✓ | ✓ | word_count, keywords, … |
 | `embedding` | list[float]\|None | omitted | omitted | Omitted by `to_dict()` |
 
 `ChunkRecord.to_dict()` omits fields with `None` values — check key presence, not value.
+
+*`pdfplumber` required for `pdf_formats_demo.py` table extraction steps (`pip install pdfplumber`).
 
 ---
 
@@ -183,7 +188,7 @@ All operations are dispatched via `DocumentDataSource.execute_query(op_dict)`.
 | Category | numpy | pdfplumber | python-docx | redis-py | openai | langgraph | mcp |
 |---|---|---|---|---|---|---|---|
 | scenario-demos (no-openai) | ✓ | — | — | — | — | — | — |
-| feature-demos | ✓ | — | — | — | — | — | — |
+| feature-demos | ✓ | optional* | — | — | — | — | — |
 | integration-demos | ✓ | optional | — | — | — | — | — |
 | framework-demos/langgraph | ✓ | — | — | — | ✓ | ✓ | — |
 | framework-demos/mcp | ✓ | — | — | — | ✓ | ✓ | ✓ |

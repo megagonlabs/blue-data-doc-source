@@ -6,10 +6,11 @@ It handles the full pipeline from raw file to queryable vector index: parsing te
 
 Its core capabilities include:
 
-- **Multi-format parsing** — PDF (text layer + optional Tesseract OCR), plain text, and DOCX through a single interface
+- **Multi-format parsing** — PDF (text layer + optional Tesseract OCR), plain text, and DOCX through a single interface; `PlumberPDFParser` adds structure-aware table extraction
 - **Section-aware chunking** — detects markdown, numbered, ALL-CAPS, and underlined headers; keeps chunks within section boundaries; preserves section heading on every chunk
 - **Content-addressed deduplication** — SHA-256 hash of file bytes; same file always produces the same chunk IDs; re-ingest is a safe upsert
-- **Full provenance** — every chunk carries `file_name`, `page_start`, `page_end`, and `section_title`; results are always citable
+- **Full provenance** — every chunk carries `file_name`, `page_start`, `page_end`, `section_title`, and `content_type`; results are always citable
+- **Rich search** — `search_rich()` / `DOCUMENT.SEARCH_RICH` returns ranked results with per-chunk citation, neighbor context, and `by_document` grouping in a single call
 - **Regex enrichment** — `BasicEnricher` extracts named entities (DATE, EMAIL, PERCENT, MONEY, PROPER_NOUN) and semantic hints with no ML dependency
 - **Pluggable embeddings** — `OpenAIEmbeddingModel`, `DummyEmbeddingModel`, or any custom `EmbeddingModel` subclass
 - **Pluggable vector storage** — any blue-data `VectorSource`; `MemoryVectorSource` for dev, `RedisVectorSource` for production
@@ -225,6 +226,7 @@ DocumentDataSource (extends blue-data DataSource)  ← public entry point
   └─ DocumentPipeline       ← orchestrates all layers; auto-detects .txt vs .pdf
        ├─ TextParser         ← reads .txt → raw string
        ├─ PDFParser          ← reads .pdf → [{page_num, text}, ...] via pypdf; OCR fallback via Tesseract
+       ├─ PlumberPDFParser   ← reads .pdf → typed blocks via pdfplumber; tables as {headers, rows}
        ├─ DocxParser         ← reads .docx → markdown-formatted string via python-docx
        ├─ SectionChunker     ← detects headers, chunks within sections (default)
        │    └─ WindowChunker ← word-based sliding window fallback
@@ -254,8 +256,10 @@ Every ingested chunk becomes a `ChunkRecord`, serialised via `.to_dict()`. Optio
 | `entities` | list | Extracted entities: `{text, type}` each |
 | `semantic_hints` | dict | `word_count`, `sentence_count`, `has_questions`, `has_numbers`, `keywords` |
 | `document_type` | str \| omitted | Classified document type (`contract`, `invoice`, `policy`, `research_paper`, `financial_report`, `unknown`) — present when a `classifier` is set |
+| `content_type` | str \| omitted | Content block type: `"text"` or `"table"` — present when using `PlumberPDFParser` or any block-aware parser |
+| `table` | dict \| omitted | Structured table data `{"headers": list[str], "rows": list[list[str]]}` — present only when `content_type == "table"` |
 | `embedding` | list[float] \| omitted | Present only when an embedding model is set |
-| `metadata` | dict | `source_path`, `chunk_index`, `chunk_size`, `overlap`, `ingested_at`, `embedding_model`; includes `document_type` when a classifier is set |
+| `metadata` | dict | `source_path`, `chunk_index`, `chunk_size`, `overlap`, `ingested_at`, `embedding_model`; includes `document_type` and `content_type` when set |
 
 ### Chunking
 
@@ -395,6 +399,33 @@ brew install tesseract                   # macOS — Tesseract must be on PATH
 > `pdf2image` also requires [Poppler](https://poppler.freedesktop.org/). On macOS: `brew install poppler`. On Ubuntu: `apt-get install poppler-utils`.
 
 A clear `ImportError` is raised if OCR is requested but the dependencies are not installed.
+
+### Table extraction (PlumberPDFParser)
+
+`PDFParser` extracts the raw text layer — table cells become flat prose with no row/column structure. For agentic reasoning over tabular data, use `PlumberPDFParser` instead. It uses `pdfplumber` to detect table boundaries, extract headers and rows as structured data, and return typed blocks.
+
+```python
+from blue_data_doc_source import DocumentPipeline, PlumberPDFParser
+
+pipeline = DocumentPipeline(
+    parser=PlumberPDFParser(),
+    embedding_model=...,
+    vector_source=...,
+)
+records = pipeline.ingest("invoice.pdf")
+
+# Table chunks carry structured data
+for r in records:
+    if r.get("content_type") == "table":
+        print(r["table"]["headers"])  # ["Description", "Qty", "Unit Price", "Total"]
+        print(r["table"]["rows"])     # [["Widget", "5", "$10", "$50"], ...]
+        print(r["text"])              # pipe-delimited markdown — for LLM consumption
+
+# Filter search to table chunks only
+results = pipeline.search("unit price", filters={"content_type": "table"})
+```
+
+`content_type` is a filterable TAG field — scope KNN search to `"text"` or `"table"` chunks before scoring. Requires `pip install pdfplumber`.
 
 ### Vector source and index creation
 
