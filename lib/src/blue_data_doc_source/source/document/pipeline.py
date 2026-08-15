@@ -17,7 +17,7 @@ from .schema.base import DocumentClassifier, SchemaExtractor
 _TAG_SPECIAL_RE = re.compile(r'([,.<>{}\[\]"\'`:;!@#$%^&*\-+=~|/ ])')
 
 # Fields indexed as TAG in the vector index — used for pre-filtering.
-_FILTER_TAG_FIELDS = ("document_id", "file_name", "section_title", "mime_type")
+_FILTER_TAG_FIELDS = ("document_id", "file_name", "section_title", "mime_type", "content_type")
 
 # Extra fields passed to create_index so Redis Search can filter on them.
 _INDEX_EXTRA_FIELDS = [
@@ -26,6 +26,7 @@ _INDEX_EXTRA_FIELDS = [
     {"path": "$.section_title", "name": "section_title", "field_type": "TAG"},
     {"path": "$.mime_type",     "name": "mime_type",     "field_type": "TAG"},
     {"path": "$.page_start",    "name": "page_start",    "field_type": "NUMERIC"},
+    {"path": "$.content_type",  "name": "content_type",  "field_type": "TAG"},
 ]
 
 
@@ -160,12 +161,12 @@ class DocumentPipeline:
         effective_collection = collection or self.collection
 
         if self.parser is not None:
-            pages = self.parser.parse(path)
+            blocks = self.parser.parse_blocks(path)
             mime_type = "application/pdf" if suffix == ".pdf" else "text/plain"
             document_id = self._file_document_id(file_path)
             self._cleanup_stale_chunks(file_path, document_id)
-            records = self._ingest_from_pages(
-                pages=pages,
+            records = self._ingest_from_blocks(
+                blocks=blocks,
                 file_name=file_path.name,
                 source_path=str(file_path),
                 mime_type=mime_type,
@@ -199,6 +200,8 @@ class DocumentPipeline:
         mime_type: str = "text/plain",
         page_ocr_meta: Optional[Dict[str, Any]] = None,
         document_type: Optional[str] = None,
+        content_type: Optional[str] = None,
+        table_data: Optional[Dict[str, Any]] = None,
     ) -> ChunkRecord:
         embedding = None
         if self.embedding_model is not None:
@@ -245,6 +248,8 @@ class DocumentPipeline:
             embedding=embedding,
             metadata=metadata,
             document_type=document_type,
+            content_type=content_type,
+            table=table_data,
         )
 
     @staticmethod
@@ -446,6 +451,95 @@ class DocumentPipeline:
                 self._chunk_index[chunk_id] = record_dict
                 self._upsert(chunk_id, record_dict, collection)
                 chunk_index += 1
+
+        return records
+
+    def _ingest_from_blocks(
+        self,
+        blocks: List[Dict[str, Any]],
+        file_name: str,
+        source_path: Optional[str],
+        mime_type: str,
+        document_id: str,
+        collection: str,
+    ) -> List[Dict[str, Any]]:
+        """Ingest typed content blocks, keeping table blocks atomic.
+
+        Text blocks are chunked normally by the configured chunker. Table
+        blocks bypass the chunker entirely — each table becomes exactly one
+        chunk with ``content_type="table"`` and a structured ``table`` field.
+        """
+        ingested_at = datetime.now(timezone.utc).isoformat()
+        records = []
+        chunk_index = 0
+
+        document_type: Optional[str] = None
+        if self.classifier is not None:
+            full_text = " ".join(b.get("text", "") for b in blocks)
+            document_type, confidence = self.classifier.classify(full_text)
+            extracted_fields: Dict[str, Any] = {}
+            if self.schema_extractor is not None:
+                extracted_fields = self.schema_extractor.extract(full_text, document_type)
+            classifier_name = "llm" if self.schema_extractor is not None else "keyword"
+            self._schema_registry[document_id] = {
+                "document_id": document_id,
+                "chunk_id": f"{document_id}_schema",
+                "document_type": document_type,
+                "fields": extracted_fields,
+                "classifier": classifier_name,
+                "confidence": confidence,
+            }
+
+        for block in blocks:
+            block_type = block.get("type", "text")
+            page_num = block.get("page_num")
+
+            if block_type == "table":
+                chunk_id = f"{document_id}_chunk_{chunk_index:06d}"
+                record = self._make_record(
+                    document_id=document_id,
+                    chunk_id=chunk_id,
+                    file_name=file_name,
+                    source_path=source_path,
+                    chunk_text=block.get("text", ""),
+                    chunk_index=chunk_index,
+                    ingested_at=ingested_at,
+                    page_start=page_num,
+                    page_end=page_num,
+                    mime_type=mime_type,
+                    document_type=document_type,
+                    content_type="table",
+                    table_data=block.get("table"),
+                )
+                record_dict = record.to_dict()
+                records.append(record_dict)
+                self._chunk_index[chunk_id] = record_dict
+                self._upsert(chunk_id, record_dict, collection)
+                chunk_index += 1
+            else:
+                chunks = self.chunker.chunk_with_titles(block.get("text", ""))
+                for section_title, chunk_text in chunks:
+                    chunk_id = f"{document_id}_chunk_{chunk_index:06d}"
+                    record = self._make_record(
+                        document_id=document_id,
+                        chunk_id=chunk_id,
+                        file_name=file_name,
+                        source_path=source_path,
+                        chunk_text=chunk_text,
+                        chunk_index=chunk_index,
+                        ingested_at=ingested_at,
+                        page_start=page_num,
+                        page_end=page_num,
+                        section_title=section_title,
+                        mime_type=mime_type,
+                        document_type=document_type,
+                        content_type="text",
+                    )
+                    record_dict = record.to_dict()
+                    records.append(record_dict)
+                    self._chunk_index[chunk_id] = record_dict
+                    self._upsert(chunk_id, record_dict, collection)
+                    chunk_index += 1
 
         return records
 

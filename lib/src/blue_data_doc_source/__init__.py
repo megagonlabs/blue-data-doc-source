@@ -5,7 +5,7 @@ from .source.document.nl_parser import NLQueryParser
 from .source.document.chunkers import Chunker, SectionChunker, SentenceChunker, WindowChunker
 from .source.document.embeddings import EmbeddingModel, DummyEmbeddingModel, OpenAIEmbeddingModel
 from .source.document.enrichment import Enricher, BasicEnricher
-from .source.document.parsers import Parser, TextParser, PDFParser, DocxParser
+from .source.document.parsers import Parser, TextParser, PDFParser, DocxParser, PlumberPDFParser
 from .source.document.schema import (
     DocumentClassifier,
     SchemaExtractor,
@@ -30,6 +30,7 @@ __all__ = [
     "TextParser",
     "PDFParser",
     "DocxParser",
+    "PlumberPDFParser",
     "NLQueryParser",
     "DocumentClassifier",
     "SchemaExtractor",

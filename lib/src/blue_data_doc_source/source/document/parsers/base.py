@@ -39,3 +39,21 @@ class Parser(ABC):
             Include ``"page_num": int`` for page-aware documents.
         """
         raise NotImplementedError  # pragma: no cover
+
+    def parse_blocks(self, path: str) -> List[Dict[str, Any]]:
+        """Parse a document into typed content blocks.
+
+        Returns a flat list of block dicts. Each block has at minimum
+        ``{"type": str, "text": str}``. Supported types:
+
+        - ``"text"`` — prose or narrative content
+        - ``"table"`` — structured tabular data; also carries a ``"table"``
+          key with ``{"headers": list[str], "rows": list[list[str]]}``
+
+        ``"page_num"`` (int, 1-based) is included when available.
+
+        The default implementation wraps ``parse()`` and marks every block
+        as ``type="text"``. Override this in parsers that can distinguish
+        tables from prose (e.g. ``PlumberPDFParser``).
+        """
+        return [{"type": "text", **page} for page in self.parse(path)]

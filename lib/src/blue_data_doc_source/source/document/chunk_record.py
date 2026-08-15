@@ -25,6 +25,8 @@ class ChunkRecord:
     metadata: Dict[str, Any] = field(default_factory=dict)
     embedding: Optional[List[float]] = None
     document_type: Optional[str] = None
+    content_type: Optional[str] = None   # "text" | "table"
+    table: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         result = {
@@ -51,6 +53,13 @@ class ChunkRecord:
 
         if self.section_title is not None:
             result["section_title"] = self.section_title
+
+        if self.content_type is not None:
+            result["content_type"] = self.content_type
+            result["metadata"] = {**result.get("metadata", self.metadata), "content_type": self.content_type}
+
+        if self.table is not None:
+            result["table"] = self.table
 
         if self.embedding is not None:
             result["embedding"] = self.embedding
