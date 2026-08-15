@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from blue_data.core.schema import DataSchema
 from blue_data.source.source import DataSource
 from blue_data.source.vector.vector_source import VectorSource
 
@@ -140,13 +141,16 @@ class DocumentDataSource(DataSource):
         collection = collection_override or request.get("collection")
         self._pipeline.ensure_index(collection=collection)
 
-    def execute_query_nl(self, text: str, database=None, collection=None, optional_properties=None):
+    def execute_query_nl(self, query: str, database=None, collection=None, schema=None, llm_fn=None, optional_properties=None):
         """Parse a natural language instruction and execute the corresponding op.
 
         Requires an ``NLQueryParser`` passed as ``nl_parser`` at construction time.
+        The ``schema`` and ``llm_fn`` parameters are accepted to satisfy the
+        ``DataSource`` ABC contract but are not used — doc-source uses its own
+        ``NLQueryParser`` for intent extraction.
 
         Args:
-            text: Natural language instruction, e.g.
+            query: Natural language instruction, e.g.
                 ``"find the termination clause in the contracts collection"``.
 
         Returns:
@@ -160,13 +164,54 @@ class DocumentDataSource(DataSource):
                 "execute_query_nl requires an nl_parser. "
                 "Pass NLQueryParser() as nl_parser= when constructing DocumentDataSource."
             )
-        op_dict = self._nl_parser.parse(text)
+        op_dict = self._nl_parser.parse(query)
         return self.execute_query(
             op_dict,
             database=database,
             collection=collection,
             optional_properties=optional_properties,
         )
+
+    def fetch_databases(self) -> List[str]:
+        """Return the logical database namespace for this source."""
+        return ["documents"]
+
+    def fetch_database_collections(self, database: str) -> List[str]:
+        """Return the collections known to this source.
+
+        The ``database`` argument is accepted for API compatibility; all
+        collections belong to the single ``"documents"`` database.
+        """
+        return [self._default_collection]
+
+    def fetch_database_collection_entities(self, database: str, collection: str) -> dict:
+        """Return a DataSchema entity map describing the ChunkRecord schema.
+
+        DataRegistry's ``sync_source`` calls this to build the registry
+        hierarchy. Returning the ChunkRecord fields as attributes lets the
+        registry display what data lives in this source without requiring an
+        actual live query.
+        """
+        schema = DataSchema()
+        schema.add_entity("ChunkRecord", description="A parsed and embedded document chunk")
+        attrs = [
+            ("document_id",   "str",       "SHA-256 content-addressed document identifier"),
+            ("chunk_id",      "str",       "Unique chunk: {document_id}_chunk_{index:06d}"),
+            ("text",          "str",       "Raw chunk text"),
+            ("file_name",     "str",       "Source file basename"),
+            ("source_type",   "str",       "MIME type of the source file"),
+            ("mime_type",     "str",       "MIME type (same as source_type)"),
+            ("page_start",    "int|None",  "First page of chunk (1-based; None for .txt/.docx)"),
+            ("page_end",      "int|None",  "Last page of chunk (always == page_start for PDFs)"),
+            ("section_title", "str|None",  "Nearest heading above this chunk"),
+            ("document_type", "str|None",  "Classified type: contract, invoice, policy, research_paper, financial_report, unknown"),
+            ("content_type",  "str|None",  "'text' or 'table' (PlumberPDFParser only)"),
+            ("entities",      "list[dict]","Named-entity spans from BasicEnricher"),
+            ("semantic_hints","dict",      "word_count, keywords, and other enrichment hints"),
+        ]
+        for name, typ, desc in attrs:
+            schema.add_entity_attribute("ChunkRecord", name, typ, desc)
+        return schema.get_entities()
 
     def _search_rich(self, request: Dict[str, Any], collection_override=None) -> Dict[str, Any]:
         query_text = request.get("query")
