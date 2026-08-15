@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from blue_data.source.source import DataSource
@@ -71,6 +72,7 @@ class DocumentDataSource(DataSource):
                 pages with no text layer. Requires the ``[ocr]`` extras.
         """
         super().__init__(name, properties)
+        self.properties["connection"]["protocol"] = "document"
         self._default_collection = default_collection
         self._nl_parser = nl_parser
         self._pipeline = DocumentPipeline(
@@ -107,10 +109,19 @@ class DocumentDataSource(DataSource):
                 "DOCUMENT.DELETE, DOCUMENT.GET_SCHEMA, or DOCUMENT.SEARCH_RICH"
             )
 
+    _PROTOCOL_BY_SUFFIX = {
+        ".txt": "document/txt",
+        ".pdf": "document/pdf",
+        ".docx": "document/docx",
+    }
+
     def _ingest(self, request: Dict[str, Any], collection_override=None) -> List[Dict[str, Any]]:
         path = request.get("path")
         if not path:
             raise ValueError("DOCUMENT.INGEST requires a 'path' field")
+
+        suffix = Path(path).suffix.lower()
+        self.properties["connection"]["protocol"] = self._PROTOCOL_BY_SUFFIX.get(suffix, "document")
 
         collection = collection_override or request.get("collection")
         return self._pipeline.ingest(path, collection=collection)
