@@ -105,26 +105,33 @@ results = source.execute_query({
 
 ## Registering with DataRegistry
 
-`DocumentDataSource` extends blue-data's `DataSource`, so it can be registered alongside SQL and graph sources in a single `DataRegistry`:
+`DocumentDataSource` extends blue-data's `DataSource` ABC, so it can be registered alongside SQL and graph sources in a single `DataRegistry`. This is the primary reason `execute_query_nl` exists: the `DataSource` ABC requires it so that a registry or agent can address any source — SQL, graph, document — through the same plain-English interface, without knowing which specific ops each source supports.
 
 ```python
 from blue_data.registry.data_registry import DataRegistry
-from blue_data_doc_source import DocumentDataSource, OpenAIEmbeddingModel
+from blue_data_doc_source import DocumentDataSource, OpenAIEmbeddingModel, NLQueryParser
 
 registry = DataRegistry()
 doc_source = DocumentDataSource(
     name="contracts",
     embedding_model=OpenAIEmbeddingModel(),
     vector_source=my_vector_source,
+    nl_parser=NLQueryParser(),   # satisfies the DataSource ABC's NL contract
 )
 registry.register_source(doc_source)
 
-# Ingest via registry
+# Structured op — works on any registered source
 registry.execute_query(
     source="contracts",
     query={"op": "DOCUMENT.INGEST", "path": "contract.pdf"},
 )
+
+# Natural language — same call works across all registered sources
+# The registry dispatches to each source's execute_query_nl
+registry.execute_query_nl(source="contracts", text="find the termination clause")
 ```
+
+An agent or MCP client talking to the registry does not need to know that documents use `DOCUMENT.SEARCH` while a SQL source uses `SELECT`. Each source's `NLQueryParser` handles the translation internally.
 
 ---
 
@@ -525,7 +532,9 @@ pipeline = DocumentPipeline(
 
 ## Natural language queries
 
-`NLQueryParser` uses an LLM to translate plain-English instructions into `DOCUMENT.*` op dicts, then executes them via `execute_query`.
+`execute_query_nl` is part of the blue-data `DataSource` ABC — every data source must implement it so a `DataRegistry` or agent can address all sources uniformly in plain English. `NLQueryParser` is doc-source's implementation: it translates a natural-language string into the appropriate `DOCUMENT.*` op dict, then hands off to `execute_query`.
+
+Without `nl_parser=` set, `execute_query_nl` raises `ValueError` immediately — the method exists on the class because the ABC requires it, but it does nothing useful until you wire up a parser.
 
 ```python
 from blue_data_doc_source import DocumentDataSource, OpenAIEmbeddingModel, NLQueryParser
@@ -538,10 +547,13 @@ source = DocumentDataSource(
 )
 
 results = source.execute_query_nl("find the termination clause in the contracts collection")
+# NLQueryParser maps this to: {"op": "DOCUMENT.SEARCH", "query": "termination clause", "collection": "contracts"}
+
 records = source.execute_query_nl("ingest /docs/policy.pdf into contracts")
+# Maps to: {"op": "DOCUMENT.INGEST", "path": "/docs/policy.pdf", "collection": "contracts"}
 ```
 
-Inject a custom LLM via `parse_fn`:
+Inject any `(str) -> dict` callable via `parse_fn` to use a different LLM or run without an API key:
 
 ```python
 parser = NLQueryParser(parse_fn=lambda text: my_llm_call(text))
