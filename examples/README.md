@@ -59,6 +59,7 @@ OPENAI_API_KEY=sk-... python3 examples/scenario-demos/semantic_search_demo.py
 | `feature-demos/parsers_demo.py` | Raw output of all four parsers (TextParser, PDFParser, DocxParser, PlumberPDFParser) before the pipeline; shows exactly what each parser returns — page dicts, typed blocks, markdown headings, OCR fields | none (OCR: tesseract + poppler; pdfplumber optional) |
 | `feature-demos/schema_inference_demo.py` | KeywordClassifier type detection + LLMSchemaExtractor field extraction on four real PDFs; document_type on chunks; DOCUMENT.GET_SCHEMA | none (OpenAI optional) |
 | `feature-demos/pdf_formats_demo.py` | PlumberPDFParser structured table extraction vs pypdf flat text; embedded images silently skipped; multi-page docs; real arXiv + Berkshire annual report PDFs; scanned image-only PDFs via Tesseract OCR | pdfplumber (OCR: tesseract + poppler) |
+| `feature-demos/rich_search_demo.py` | DOCUMENT.SEARCH_RICH vs plain DOCUMENT.SEARCH side-by-side; citation block anatomy; neighbor context (context_chunks); by_document grouping with top_sections; in-process caveat | none |
 
 ```bash
 python3 examples/feature-demos/chunking_demo.py
@@ -81,6 +82,9 @@ OPENAI_API_KEY=sk-... python3 examples/feature-demos/schema_inference_demo.py
 python3 examples/feature-demos/pdf_formats_demo.py
 # With OCR (requires: pip install blue-data-doc-source[ocr] && brew install tesseract poppler):
 python3 examples/feature-demos/pdf_formats_demo.py
+
+# Rich search — citation, context, by_document grouping (no API key needed):
+python3 examples/feature-demos/rich_search_demo.py
 ```
 
 ---

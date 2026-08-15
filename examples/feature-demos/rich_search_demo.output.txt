@@ -1,0 +1,205 @@
+
+========================================================================
+  Rich Search Demo — DOCUMENT.SEARCH_RICH vs DOCUMENT.SEARCH
+========================================================================
+
+------------------------------------------------------------------------
+  Step 1 — Ingest two documents
+------------------------------------------------------------------------
+
+  Document 1: sample_policy.txt
+    chunks: 15  document_id: doc_bc66f8ef9293d195
+
+  Document 2: service_agreement.txt
+    chunks: 8  document_id: doc_0374c6cb944ee737
+
+  Total chunks in store: 23
+
+------------------------------------------------------------------------
+  Step 2 — Plain DOCUMENT.SEARCH — flat list of raw chunk dicts
+------------------------------------------------------------------------
+
+  pipeline.search('coverage and payment terms', k=4)
+  Returns: list[dict]  (4 results)
+
+  [0] score=0.9155  file=service_agreement.txt  section='4. Confidentiality'
+       text: 'Both parties agree to maintain strict confidentiality regarding proprietary info'…
+  [1] score=0.9105  file=sample_policy.txt  section='6. TERMINATION'
+       text: '6.1 Voluntary Termination The policyholder may cancel coverage at any time by pr'…
+  [2] score=0.9039  file=sample_policy.txt  section='3. EXCLUSIONS'
+       text: '3.1 General Exclusions This policy does not cover: cosmetic procedures not medic'…
+  [3] score=0.9031  file=sample_policy.txt  section='2. COVERAGE'
+       text: '2.1 Covered Services This policy covers the following medical services when prov'…
+
+  Keys on each dict: ['chunk_id', 'document_id', 'entities', 'file_name', 'metadata', 'mime_type', 'score', 'section_title', 'semantic_hints', 'source_type', 'text']
+
+------------------------------------------------------------------------
+  Step 3 — DOCUMENT.SEARCH_RICH — full structured response
+------------------------------------------------------------------------
+
+  pipeline.search_rich('coverage and payment terms', k=4, context_chunks=1)
+
+  Top-level keys:
+    'query': 'coverage and payment terms'
+    'result_count': 4
+    'document_count': 2
+    'results': (list, len=4)
+    'by_document': (dict, len=2)
+
+------------------------------------------------------------------------
+  Step 4 — Citation block — anatomy of one result
+------------------------------------------------------------------------
+
+  Each result in rich['results'] looks like:
+
+  {
+    'rank':         1,
+    'score':        0.9155,
+    'chunk_id':     'doc_0374c6cb944ee737_chunk_000004',
+    'text':         'Both parties agree to maintain strict confidentiality regarding propri'…,
+    'citation': {
+      'document_id': 'doc_0374c6cb944ee737',
+      'file_name':   'service_agreement.txt',
+      'chunk_id':    'doc_0374c6cb944ee737_chunk_000004',
+      'chunk_index': 4,
+      'section':     '4. Confidentiality',
+    },
+    'context': {
+      'before': 'This Agreement commences on January 1, 2024 and co'…,
+      'after':  'This Agreement is governed by the laws of the Stat'…,
+    },
+  }
+
+  {
+    'rank':         2,
+    'score':        0.9105,
+    'chunk_id':     'doc_bc66f8ef9293d195_chunk_000012',
+    'text':         '6.1 Voluntary Termination The policyholder may cancel coverage at any '…,
+    'citation': {
+      'document_id': 'doc_bc66f8ef9293d195',
+      'file_name':   'sample_policy.txt',
+      'chunk_id':    'doc_bc66f8ef9293d195_chunk_000012',
+      'chunk_index': 12,
+      'section':     '6. TERMINATION',
+    },
+    'context': {
+      'before': 'out-of-network reimbursements. 5.3 Disputes and Ap'…,
+      'after':  'termination except in cases of fraud. 6.3 Continua'…,
+    },
+  }
+
+  {
+    'rank':         3,
+    'score':        0.9039,
+    'chunk_id':     'doc_bc66f8ef9293d195_chunk_000006',
+    'text':         '3.1 General Exclusions This policy does not cover: cosmetic procedures'…,
+    'citation': {
+      'document_id': 'doc_bc66f8ef9293d195',
+      'file_name':   'sample_policy.txt',
+      'chunk_id':    'doc_bc66f8ef9293d195_chunk_000006',
+      'chunk_index': 6,
+      'section':     '3. EXCLUSIONS',
+    },
+    'context': {
+      'before': '$70 copay per 30-day supply - Tier 4 (Specialty): '…,
+      'after':  'any condition for which the policyholder received '…,
+    },
+  }
+
+  {
+    'rank':         4,
+    'score':        0.9031,
+    'chunk_id':     'doc_bc66f8ef9293d195_chunk_000003',
+    'text':         '2.1 Covered Services This policy covers the following medical services'…,
+    'citation': {
+      'document_id': 'doc_bc66f8ef9293d195',
+      'file_name':   'sample_policy.txt',
+      'chunk_id':    'doc_bc66f8ef9293d195_chunk_000003',
+      'chunk_index': 3,
+      'section':     '2. COVERAGE',
+    },
+    'context': {
+      'before': 'of their state of residence. Documentation of depe'…,
+      'after':  'immunizations, cancer screenings, blood pressure a'…,
+    },
+  }
+
+
+------------------------------------------------------------------------
+  Step 5 — context_chunks parameter — neighbor context on/off
+------------------------------------------------------------------------
+
+  context_chunks=1  (default) — includes text from chunks
+  immediately before and after each result in the document.
+
+  context_chunks=1  →  results with 'before': 3, results with 'after': 3
+  context_chunks=0  →  results with no 'context' key: 3
+
+  Sample with context (context_chunks=1):
+    rank=1  text: '5.1 Filing a Claim In-network providers submit claims direct'…
+           before: 'family. Once this limit is reached, the plan cover'…
+           after:  'out-of-network reimbursements. 5.3 Disputes and Ap'…
+    rank=2  text: '3.1 General Exclusions This policy does not cover: cosmetic '…
+           before: '$70 copay per 30-day supply - Tier 4 (Specialty): '…
+           after:  'any condition for which the policyholder received '…
+    rank=3  text: 'The Provider agrees to deliver software development services'…
+           before: 'This Service Agreement ("Agreement") is entered in'…
+           after:  'Client shall pay Provider a monthly retainer of $1'…
+
+  Caveat: neighbor lookup uses an in-process chunk index populated
+  at ingest time. Chunks ingested in a previous process run are not
+  available as neighbors — 'context' keys are silently omitted for
+  those results. Re-ingest in the same process to restore context.
+
+------------------------------------------------------------------------
+  Step 6 — by_document grouping — results organised per source file
+------------------------------------------------------------------------
+
+  rich['by_document'] groups results by document_id so you can
+  see which source documents matched and how many chunks each hit.
+
+  query: 'payment terms coverage agreement'  k=6
+  result_count=6  document_count=2
+
+  Document: service_agreement.txt
+    document_id:  doc_0374c6cb944ee737
+    match_count:  3
+    top_sections: ['6. Warranties', '3. Term and Termination', '2. Payment Terms']
+    matches:
+      rank=1  score=0.8835  §='6. Warranties'  text: 'Provider warrants that services will be performed in a profe'…
+      rank=2  score=0.8540  §='3. Term and Termination'  text: 'This Agreement commences on January 1, 2024 and continues fo'…
+      rank=6  score=0.7985  §='2. Payment Terms'  text: 'Client shall pay Provider a monthly retainer of $15,000 due '…
+
+  Document: sample_policy.txt
+    document_id:  doc_bc66f8ef9293d195
+    match_count:  3
+    top_sections: ['6. TERMINATION', '4. COST SHARING', '3. EXCLUSIONS']
+    matches:
+      rank=3  score=0.8513  §='6. TERMINATION'  text: '6.1 Voluntary Termination The policyholder may cancel covera'…
+      rank=4  score=0.8376  §='4. COST SHARING'  text: '4.1 Annual Deductible The annual deductible is $1,500 per in'…
+      rank=5  score=0.8369  §='3. EXCLUSIONS'  text: 'any condition for which the policyholder received diagnosis,'…
+
+
+========================================================================
+  Summary — DOCUMENT.SEARCH vs DOCUMENT.SEARCH_RICH
+========================================================================
+
+  Feature              DOCUMENT.SEARCH        DOCUMENT.SEARCH_RICH
+  --------------------------------------------------------------------
+  Return type          list[dict]             dict
+  Ranked chunks        ✓ raw chunk fields     ✓ same KNN query
+  Citation block       ✗ fields scattered     ✓ {doc_id, file, page, section}
+  Neighbor context     ✗ not available        ✓ context.before / after
+  Grouped by document  ✗ flat list only       ✓ by_document + top_sections
+  Result count / doc   ✗ must count manually  ✓ match_count per document
+
+  When to use rich search:
+    - Feeding results to an LLM for answer generation (RAG)
+    - Building citation-aware UI (show 'page 3, §Coverage' links)
+    - Multi-document corpuses where grouping by source matters
+
+  When plain search is enough:
+    - Simple ranked snippet retrieval
+    - When you process results yourself downstream
+    - Testing / debugging — fewer nested fields to inspect
+

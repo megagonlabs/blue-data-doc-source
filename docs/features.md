@@ -354,6 +354,103 @@ The schema record is in-process only — it is not upserted to the vector store.
 
 ---
 
+## Rich search
+
+`DOCUMENT.SEARCH_RICH` runs the same KNN query as `DOCUMENT.SEARCH` and wraps the results with three extra layers in a single call.
+
+**1. Citation block** — provenance fields are packaged per result instead of scattered across the raw chunk dict:
+
+```python
+result["citation"] == {
+    "document_id": "doc_bc66f8ef9293d195",
+    "file_name":   "annual_report.pdf",
+    "chunk_id":    "doc_bc66f8ef9293d195_chunk_000003",
+    "chunk_index": 3,
+    "page":        4,                    # PDF only
+    "section":     "2. Coverage",        # when SectionChunker detected a heading
+}
+```
+
+**2. Neighbor context** — adjacent chunks from the same document, controlled by `context_chunks` (default `1`):
+
+```python
+result["context"] == {
+    "before": "…text of the chunk just before this one…",
+    "after":  "…text of the chunk just after this one…",
+}
+```
+
+Set `context_chunks=0` to omit context entirely. Neighbor lookup is **in-process only** — the chunk index is built during `ingest()` and is lost when the process exits. Results for chunks not in the index silently omit the `"context"` key.
+
+**3. `by_document` grouping** — results reorganised per source document with match count and deduplicated section titles:
+
+```python
+rich["by_document"] == {
+    "doc_bc66f8ef9293d195": {
+        "document_id":  "doc_bc66f8ef9293d195",
+        "file_name":    "annual_report.pdf",
+        "match_count":  3,
+        "top_sections": ["2. Coverage", "4. Cost Sharing"],
+        "matches":      […],   # same dicts as rich["results"]
+    },
+    …
+}
+```
+
+**Usage:**
+
+```python
+from blue_data_doc_source import DocumentPipeline
+
+pipeline = DocumentPipeline(embedding_model=..., vector_source=...)
+pipeline.ingest("policy.pdf")
+pipeline.ingest("agreement.pdf")
+
+# Pipeline call
+rich = pipeline.search_rich("termination clause", k=5, context_chunks=1)
+
+print(rich["query"])           # original query string
+print(rich["result_count"])    # number of matched chunks
+print(rich["document_count"])  # number of distinct source documents
+
+for r in rich["results"]:
+    cit = r["citation"]
+    print(f"rank {r['rank']}  {cit['file_name']}  §{cit.get('section', '')}  p{cit.get('page', '')}")
+    print(f"  {r['text'][:120]}")
+    ctx = r.get("context", {})
+    if ctx.get("before"):
+        print(f"  ← {ctx['before'][:60]}")
+    if ctx.get("after"):
+        print(f"  → {ctx['after'][:60]}")
+
+for doc_id, group in rich["by_document"].items():
+    print(f"{group['file_name']}  hits={group['match_count']}")
+    print(f"  sections: {group.get('top_sections', [])}")
+```
+
+Via `DocumentDataSource`:
+
+```python
+rich = source.execute_query({
+    "op":            "DOCUMENT.SEARCH_RICH",
+    "query":         "termination clause",
+    "collection":    "contracts",
+    "k":             5,
+    "context_chunks": 1,
+})
+```
+
+| When to use | Reason |
+|---|---|
+| LLM answer generation (RAG) | Citation block is ready to embed in the prompt |
+| Citation-aware UI | `page`, `section` are pre-extracted per result |
+| Multi-document corpus | `by_document` shows which files matched and how many times |
+| Plain retrieval, debugging | Use `DOCUMENT.SEARCH` — fewer nested fields |
+
+See `examples/feature-demos/rich_search_demo.py` for a runnable side-by-side comparison with captured output.
+
+---
+
 ## MCP server
 
 `platform/document-mcp` exposes `DocumentDataSource` as tools for Claude and other MCP clients. Each tool maps to a `DOCUMENT.*` op and returns structured JSON.
