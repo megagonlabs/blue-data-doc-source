@@ -759,7 +759,7 @@ class DocumentPipeline:
         k: int = 5,
         collection: Optional[str] = None,
         filters: Optional[Dict[str, Any]] = None,
-        mode: str = "hybrid",
+        mode: str = "vector",
     ) -> List[Dict[str, Any]]:
         """Search for chunks matching a query.
 
@@ -772,10 +772,12 @@ class DocumentPipeline:
                 (exact match) and ``page_start`` (int or ``{"gte": N, "lte": M}``).
             mode: Search strategy — one of:
 
-                - ``"hybrid"`` (default) — Reciprocal Rank Fusion of BM25 and
-                  vector KNN. Falls back to ``"vector"`` when no chunks have been
-                  ingested in the current process.
-                - ``"vector"`` — pure KNN via the vector store.
+                - ``"vector"`` (default) — pure KNN via the vector store.
+                - ``"hybrid"`` — Reciprocal Rank Fusion of BM25 and vector KNN.
+                  Use when the corpus contains exact identifiers (codes, SKUs,
+                  version numbers) where keyword matching outperforms embeddings.
+                  Falls back to ``"vector"`` when no chunks are in the in-process
+                  index.
                 - ``"bm25"`` — keyword-only search over the in-process chunk
                   index. Does not require an embedding model or vector store.
                 - ``"rerank"`` — two-stage: BM25 shortlists candidates cheaply,
@@ -940,7 +942,7 @@ class DocumentPipeline:
         collection: Optional[str] = None,
         filters: Optional[Dict[str, Any]] = None,
         context_chunks: int = 1,
-        mode: str = "hybrid",
+        mode: str = "vector",
     ) -> Dict[str, Any]:
         """Embed a query and return an enriched response with provenance, grouping,
         and neighbor context.
