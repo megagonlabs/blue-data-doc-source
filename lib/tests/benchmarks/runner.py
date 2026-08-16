@@ -4,6 +4,7 @@ Usage:
     python lib/tests/benchmarks/runner.py
     python lib/tests/benchmarks/runner.py --size small --runs 3
     python lib/tests/benchmarks/runner.py --size large --runs 10 --chunk-size 300 --overlap 60
+    python lib/tests/benchmarks/runner.py --skip-retrieval   # skip retrieval quality benchmark
 """
 import argparse
 import os
@@ -16,6 +17,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 from datasets import build_corpus, SMALL, MEDIUM, LARGE
 from bench_chunkers import benchmark_chunkers, ChunkerResult
 from bench_pipeline import benchmark_chunk_size_sweep, benchmark_pipeline_stages, SweepResult, StageResult
+from bench_retrieval import (
+    build_pipeline, ingest_corpus, evaluate_mode, print_summary_table,
+    print_per_type_table, write_markdown, GROUND_TRUTH, MODES, _HERE,
+)
 
 W = 80
 
@@ -115,6 +120,10 @@ def main() -> None:
                     help="chunk_size used for chunker comparison and stage breakdown")
     ap.add_argument("--overlap",    type=int, default=40,
                     help="overlap used for chunker comparison and stage breakdown")
+    ap.add_argument("--skip-retrieval", action="store_true",
+                    help="Skip the retrieval quality benchmark (benchmarks 1-3 only)")
+    ap.add_argument("--embedding",  choices=["dummy", "openai"], default="dummy",
+                    help="Embedding model for retrieval benchmark (openai requires OPENAI_API_KEY)")
     args = ap.parse_args()
 
     target      = {"small": SMALL, "medium": MEDIUM, "large": LARGE}[args.size]
@@ -179,6 +188,24 @@ def main() -> None:
         n_runs=n_runs,
     )
     _print_stage_table(stages)
+
+    # ── 4. Retrieval quality ─────────────────────────────────────────────────
+    if not args.skip_retrieval:
+        _section("4. RETRIEVAL QUALITY  (BM25 vs vector vs hybrid)")
+        print(f"  {len(GROUND_TRUTH)} ground-truth queries on a 3-document domain corpus.")
+        print(f"  Embedding: {args.embedding}  (vector similarity is random with dummy)")
+        print()
+        ret_pipeline = build_pipeline(args.embedding)
+        chunk_count = ingest_corpus(ret_pipeline)
+        print(f"  Ingested {chunk_count} chunks. Running {len(MODES)} modes...\n")
+        ret_results = []
+        for mode in MODES:
+            r = evaluate_mode(ret_pipeline, GROUND_TRUTH, mode, [1, 3, 5], n_runs)
+            ret_results.append(r)
+        print_summary_table(ret_results, [1, 3, 5])
+        print_per_type_table(ret_results, [1, 3, 5])
+        write_markdown(ret_results, [1, 3, 5], args.embedding, chunk_count,
+                       _HERE / "RETRIEVAL_RESULTS.md")
 
     print()
     _rule("═")

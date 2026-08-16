@@ -1,8 +1,7 @@
 # Benchmarks
 
-Performance benchmarks for the `blue-data-doc-source` pipeline. Three focused
-benchmarks measure chunker throughput, chunk-size trade-offs, and per-stage
-pipeline costs.
+Four benchmarks covering throughput and retrieval quality for the
+`blue-data-doc-source` pipeline.
 
 ## Running
 
@@ -19,6 +18,8 @@ python lib/tests/benchmarks/runner.py                           # medium corpus,
 python lib/tests/benchmarks/runner.py --size small  --runs 3   # quick smoke-check
 python lib/tests/benchmarks/runner.py --size large  --runs 10  # high-confidence numbers
 python lib/tests/benchmarks/runner.py --chunk-size 300 --overlap 60   # custom config
+python lib/tests/benchmarks/runner.py --skip-retrieval          # throughput only (no retrieval)
+python lib/tests/benchmarks/runner.py --embedding openai        # real semantic quality (requires OPENAI_API_KEY)
 ```
 
 ### Individual benchmarks
@@ -26,16 +27,20 @@ python lib/tests/benchmarks/runner.py --chunk-size 300 --overlap 60   # custom c
 ```bash
 python lib/tests/benchmarks/bench_chunkers.py --size medium --runs 7
 python lib/tests/benchmarks/bench_pipeline.py --size medium --runs 7
+python lib/tests/benchmarks/bench_retrieval.py                          # DummyEmbeddingModel
+python lib/tests/benchmarks/bench_retrieval.py --embedding openai       # OpenAI embeddings
 ```
 
 ### Options
 
-| Flag           | Default  | Description                                          |
-|----------------|----------|------------------------------------------------------|
-| `--size`       | `medium` | Corpus size: `small` ≈2K, `medium` ≈10K, `large` ≈50K words |
-| `--runs`       | `5`      | Timed repetitions per measurement (median reported)  |
-| `--chunk-size` | `200`    | Words per chunk (chunker comparison + stage breakdown) |
-| `--overlap`    | `40`     | Overlap words between consecutive chunks             |
+| Flag               | Default  | Description                                                   |
+|--------------------|----------|---------------------------------------------------------------|
+| `--size`           | `medium` | Corpus size: `small` ≈2K, `medium` ≈10K, `large` ≈50K words |
+| `--runs`           | `5`      | Timed repetitions per measurement (median reported)           |
+| `--chunk-size`     | `200`    | Words per chunk (chunker comparison + stage breakdown)        |
+| `--overlap`        | `40`     | Overlap words between consecutive chunks                      |
+| `--skip-retrieval` | off      | Skip benchmark 4 (retrieval quality)                         |
+| `--embedding`      | `dummy`  | Embedding model for retrieval benchmark (`dummy` or `openai`) |
 
 ---
 
@@ -73,6 +78,26 @@ Times chunking, enrichment (`BasicEnricher`), and embedding
 is used intentionally — OpenAI API latency would dominate and hide the
 library's own cost. Replace it with `OpenAIEmbeddingModel` locally if you want
 to measure real embedding throughput.
+
+### 4. Retrieval quality
+
+Evaluates `bm25`, `vector`, and `hybrid` search modes on a fixed 3-document
+domain corpus (insurance policy, service agreement, employee handbook) with
+24 hand-crafted ground-truth query/chunk pairs (18 keyword, 6 paraphrase).
+
+Metrics reported per mode:
+
+| Metric   | Meaning                                                                       |
+|----------|-------------------------------------------------------------------------------|
+| `Hit@k`  | Fraction of queries where the relevant chunk appears in top-k results         |
+| `MRR`    | Mean reciprocal rank — 1.0 = always rank 1; 0.0 = never found                |
+| `Lat(ms)`| Median query latency in milliseconds                                          |
+
+Results are written to `RETRIEVAL_RESULTS.md` after each run.
+
+With `DummyEmbeddingModel` (default), vector similarity is random — BM25 and
+hybrid degrade to keyword-only quality. Run with `--embedding openai` to
+evaluate real semantic retrieval and see hybrid outperform both BM25 and vector.
 
 ---
 
@@ -126,3 +151,16 @@ pipeline when enabled.
 because the `SectionChunker` header scan runs per-line regardless of chunk size.
 Above `chunk_size=500` the corpus is too small to split further; chunk count
 plateaus.
+
+**Retrieval quality (DummyEmbeddingModel baseline — 2026-08-16):**
+
+| Mode   | MRR  | Hit@1 | Hit@3 | Hit@5 |
+|--------|------|-------|-------|-------|
+| bm25   | 0.92 | 88%   | 96%   | 96%   |
+| vector | 0.17 | 0%    | 29%   | 50%   |
+| hybrid | 0.53 | 38%   | 62%   | 79%   |
+
+BM25 achieves 100% Hit@5 on keyword queries. Hybrid degrades BM25 because RRF
+mixes in random vector ranks (DummyEmbeddingModel). With real OpenAI embeddings,
+hybrid is expected to outperform both modes on paraphrase queries where keyword
+overlap is weak. See `RETRIEVAL_RESULTS.md` for the full per-query breakdown.
