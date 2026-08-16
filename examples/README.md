@@ -36,11 +36,18 @@ examples/
 
 | Demo | What it shows | Deps |
 |---|---|---|
+| `scenario-demos/structured_doc_query_demo.py` | **Start here.** Three concrete RAG failures (wrong document, structured comparison, category ambiguity) — each shown broken, then fixed with DOCUMENT.FIND + DOCUMENT.SEARCH two-step | none (OpenAI optional for FIND filters) |
 | `scenario-demos/section_vs_window_demo.py` | SectionChunker vs WindowChunker: fewer cross-topic chunks, cleaner retrieval | none |
 | `scenario-demos/provenance_demo.py` | Every search result carries file, page, and section provenance | none |
 | `scenario-demos/semantic_search_demo.py` | Semantic paraphrase search vs keyword substring match | OpenAI |
 
 ```bash
+# Start here — why BDDS differs from LangChain/LlamaIndex:
+python3 examples/scenario-demos/structured_doc_query_demo.py
+
+# With LLM field extraction (enables DOCUMENT.FIND structured filters):
+OPENAI_API_KEY=sk-... python3 examples/scenario-demos/structured_doc_query_demo.py
+
 python3 examples/scenario-demos/section_vs_window_demo.py
 python3 examples/scenario-demos/provenance_demo.py --format txt
 OPENAI_API_KEY=sk-... python3 examples/scenario-demos/semantic_search_demo.py
@@ -161,7 +168,10 @@ All operations are dispatched via `DocumentDataSource.execute_query(op_dict)`.
 | `DOCUMENT.SEARCH` | `query` | `collection`, `k` (default 5), `filter` (dict) | `list[dict]` |
 | `DOCUMENT.DELETE` | `document_id`, `chunk_count` OR `path` | `collection` | `None` |
 | `DOCUMENT.GET_SCHEMA` | `document_id` | — | `dict` (schema record) |
+| `DOCUMENT.FIND` | — | `filter` (dict) | `list[dict]` (schema records matching filter) |
 | `DOCUMENT.SEARCH_RICH` | `query` | `collection`, `k` (default 5), `filter` (dict), `context_chunks` (int, default 1) | `dict` (enriched results with provenance, context, grouping) |
+
+`DOCUMENT.FIND` filter syntax: `{"document_type": "contract"}`, `{"fields.total_due": {"gt": 30000}}`, `{"fields.vendor": {"contains": "Acme"}}`. Currency symbols and commas are stripped before numeric comparison. All conditions are ANDed. Requires a classifier set at pipeline construction.
 
 `execute_query_nl(nl_string, collection=...)` parses a natural-language string and dispatches the corresponding op. Requires `nl_parser=NLQueryParser()` at construction.
 

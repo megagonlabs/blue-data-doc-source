@@ -4,7 +4,59 @@ blue-data-doc-source is a document ingestion and retrieval source for Blue Data 
 
 It handles the full pipeline from raw file to queryable vector index: parsing text, PDFs, and DOCX files, detecting section structure, extracting entities and keywords, generating embeddings, and upserting into Blue's vector store. It plugs directly into Blue's DataSource abstraction, so documents become first-class members of the same data layer as SQL databases, graph stores, and JSON sources.
 
-Its core capabilities include:
+→ **[Full feature list](docs/features.md)** · **[Installation](docs/installation.md)** · **[Guide](docs/guide.md)** · **[Extending](docs/extending.md)** · **[Examples](examples/README.md)** · **[MCP server](docs/mcp.md)**
+
+## Why blue-data-doc-source
+
+LLMs searching enterprise documents fail in predictable, silent ways. blue-data-doc-source fixes the root cause — not the prompt.
+
+**Semantic search returns the wrong document**
+
+A corpus of 100 vendor contracts. The agent asks *"what does Acme Corp's termination clause say?"* Every RAG library (LangChain, LlamaIndex, Haystack) does the same thing: embed the query, retrieve the top-k most similar chunks. The result: chunks from six different contracts that *mention* termination, ranked above the specific Acme Corp document the user cares about. The right contract may rank 15th because it uses "cancellation" instead of "termination."
+
+blue-data-doc-source fixes this with a two-step pattern. At ingest time, `LLMSchemaExtractor` extracts `parties`, `governing_law`, and `effective_date` from each contract — one API call per document, not per query. At query time, `DOCUMENT.FIND` narrows to the right document deterministically, then `DOCUMENT.SEARCH` retrieves the clause within that document only. No noise.
+
+```python
+# Step 1 — structured filter: no embedding, no LLM, deterministic
+docs = pipeline.find_schemas({"fields.parties": {"contains": "Acme Corp"}})
+
+# Step 2 — text retrieval scoped to the matched document only
+chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["document_id"]})
+# → ['2. TERMINATION — Either party may terminate this agreement with sixty days...']
+```
+
+**Structured questions can't be answered by embedding distance**
+
+*"Find all invoices from Blue Solutions where the total exceeds $30,000."* A vector search returns chunks that *mention* Blue Solutions and amounts. It cannot evaluate `total_due > 30000` — that requires parsing `"$35,154"` as a number, which embedding distance cannot do. The answer is either wrong or requires the LLM to read every invoice chunk and compare manually.
+
+blue-data-doc-source extracts `vendor` and `total_due` from each invoice at ingest. The query becomes a direct filter — no LLM at query time, no embedding cost, no hallucinated comparisons.
+
+```python
+pipeline.find_schemas({
+    "document_type": "invoice",
+    "fields.vendor":    {"contains": "Blue Solutions"},
+    "fields.total_due": {"gt": 30000},   # "$35,154" → 35154 → 35154 > 30000 ✓
+})
+# → [{document_type: "invoice", fields: {total_due: "$35,154", vendor: "Blue Solutions Inc.", ...}}]
+```
+
+**A mixed corpus makes every search ambiguous**
+
+A legal team ingests contracts, invoices, and policies into one index. A search for *"termination obligations liability"* returns policy exclusion clauses and invoice payment terms alongside contract termination clauses — equally ranked, because semantic similarity doesn't understand document categories. The agent has no reliable signal about which results to trust.
+
+blue-data-doc-source classifies every document at ingest (`KeywordClassifier` — zero API cost) and propagates `document_type` to every chunk. A pre-filter pins the search to the right category before any KNN scoring runs.
+
+```python
+results = pipeline.search(
+    "termination obligations liability",
+    filters={"document_type": "contract"},  # pre-filter before KNN — only contract chunks scored
+)
+# → all results from contracts; policy and invoice noise eliminated
+```
+
+See the runnable demo: `python3 examples/scenario-demos/structured_doc_query_demo.py`
+
+## Core capabilities
 
 - **Multi-format parsing** — PDF (text layer + optional Tesseract OCR), plain text, and DOCX through a single interface; `PlumberPDFParser` adds structure-aware table extraction
 - **Section-aware chunking** — detects markdown, numbered, ALL-CAPS, and underlined headers; keeps chunks within section boundaries; preserves section heading on every chunk
@@ -12,15 +64,15 @@ Its core capabilities include:
 - **Full provenance** — every chunk carries `file_name`, `page_start`, `page_end`, `section_title`, and `content_type`; results are always citable
 - **Rich search** — `search_rich()` / `DOCUMENT.SEARCH_RICH` returns ranked results with per-chunk citation, neighbor context, and `by_document` grouping in a single call
 - **Regex enrichment** — `BasicEnricher` extracts named entities (DATE, EMAIL, PERCENT, MONEY, PROPER_NOUN) and semantic hints with no ML dependency
+- **LLM enrichment** — `LLMEnricher` extracts keyphrases, subject-predicate-object relationships, semantic flags (`is_legal`, `is_financial`, …), and language via a single LLM call per chunk; any provider via `llm_fn` injection
 - **Pluggable embeddings** — `OpenAIEmbeddingModel`, `DummyEmbeddingModel`, or any custom `EmbeddingModel` subclass
 - **Pluggable vector storage** — any blue-data `VectorSource`; `MemoryVectorSource` for dev, `RedisVectorSource` for production
-- **Document schema inference** — `KeywordClassifier` identifies document type (contract, invoice, policy, research_paper, financial_report) from content at ingest time; `LLMSchemaExtractor` extracts typed fields per type via a single GPT-4o-mini call; `document_type` propagates to every chunk; `DOCUMENT.GET_SCHEMA` retrieves the schema without re-reading the file
+- **Document schema inference** — `KeywordClassifier` identifies document type (contract, invoice, policy, research_paper, financial_report) at ingest time with zero API cost; `LLMSchemaExtractor` extracts typed fields (parties, effective_date, total_due, …) via a single LLM call per document; `document_type` propagates to every chunk
+- **Structured corpus query** — `DOCUMENT.FIND` filters across all ingested documents by extracted field values (`{"fields.governing_law": {"contains": "California"}}`, `{"fields.total_due": {"gt": 30000}}`); `FileSchemaStore` persists extracted fields across restarts
 - **Metadata pre-filtering** — scope KNN search to a document, file, section, MIME type, or page range before scoring
 - **Natural language queries** — `NLQueryParser` maps plain-English instructions to `DOCUMENT.*` ops; `parse_fn` injection for keyless use
 - **Pluggable parsers** — `Parser` ABC for external processors (LlamaIndex, vision models, cloud OCR); bypass via `ingest_text` / `ingest_pages`
 - **MCP server** — `platform/document-mcp` exposes all ops as tools callable from Claude Desktop
-
-→ **[Full feature list](docs/features.md)** · **[Installation](docs/installation.md)** · **[Guide](docs/guide.md)** · **[Extending](docs/extending.md)** · **[Examples](examples/README.md)** · **[MCP server](docs/mcp.md)**
 
 ## Repository layout
 

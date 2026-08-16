@@ -1,0 +1,186 @@
+
+========================================================================
+Structured Document Queries — Why Semantic Search Isn't Enough
+========================================================================
+
+  Corpus: 2 contracts, 1 invoice, 1 insurance policy, 1 research paper
+  Three failure modes of naive document search — and the fix for each.
+
+  OPENAI_API_KEY detected — field-level filters enabled (Failure 2 + 3)
+
+------------------------------------------------------------------------
+Ingesting corpus — 5 documents
+------------------------------------------------------------------------
+
+  acme_contract.txt           5 chunks  type=contract
+  beta_contract.txt           5 chunks  type=contract
+  invoice_aug26.txt           2 chunks  type=invoice
+  health_policy.txt           5 chunks  type=policy
+  hybrid_rank.txt             2 chunks  type=research_paper
+
+  Total: 5 documents, 19 chunks in one collection
+
+========================================================================
+FAILURE 1 — Semantic search returns the wrong documents
+========================================================================
+
+  Question: "What does Acme Corp's termination clause say?"
+
+  Naive approach: search 'termination clause acme corp' across all 5 documents.
+  With DummyEmbeddingModel (random vectors), results are unordered — but even
+  with real embeddings this query returns chunks from MULTIPLE documents because
+  'termination' appears in the policy and both contracts.
+
+  ✗  search('termination clause acme corp', k=5)  —  5 result(s)
+
+  document_type       file                        section                       text preview
+  ------------------  --------------------------  ----------------------------  ------------------------------
+  contract            acme_contract.txt           TERMINATION                   Either party may terminate this agr...
+  contract            acme_contract.txt           (no section)                  SERVICE AGREEMENT — ACME CORP This ...
+  contract            acme_contract.txt           OBLIGATIONS                   TechVendor Inc. shall deliver softw...
+  contract            acme_contract.txt           INTELLECTUAL PROPERTY         All deliverables and work product p...
+  invoice             invoice_aug26.txt           INVOICE                       Invoice Number: INV-2026-0891 Invoi...
+
+  Result includes chunks from: {'invoice_aug26.txt'}
+  The agent cannot tell which chunks are from Acme Corp's contract
+  without post-filtering — and the termination sections are mixed together.
+
+  ✓  FIX: Two-step — DOCUMENT.FIND narrows to Acme's contract, then SEARCH
+
+  Step 1 — find Acme Corp's document deterministically:
+    contracts = pipeline.find_schemas({'document_type': 'contract'})
+
+  Step 2 — search ONLY within that document:
+    pipeline.search('termination', filters={'document_id': acme_id}, mode='bm25')
+
+  document_type       file                        section                       text preview
+  ------------------  --------------------------  ----------------------------  ------------------------------
+  contract            acme_contract.txt           TERMINATION                   Either party may terminate this agr...
+
+  All 1 result(s) from acme_contract.txt only: YES
+  Termination clause found in section: 'TERMINATION'
+
+========================================================================
+FAILURE 2 — Structured questions need structured answers
+========================================================================
+
+  Question: "Find all invoices where the total exceeds $30,000"
+
+  Naive approach: search 'invoice total exceeds thirty thousand dollars'.
+  Embedding distance cannot evaluate '$35,154 > 30000'. The model can only
+  return chunks that are semantically similar to the query — not filter on
+  a numeric field extracted from the document content.
+
+  ✗  search('invoice total exceeds thirty thousand dollars', k=5)  —  5 result(s)
+
+  document_type       file                        section                       text preview
+  ------------------  --------------------------  ----------------------------  ------------------------------
+  contract            beta_contract.txt           (no section)                  CONSULTING AGREEMENT — BETA LTD Thi...
+  policy              health_policy.txt           DEDUCTIBLES AND OUT-OF-POCKE  The annual individual deductible is...
+  invoice             invoice_aug26.txt           INVOICE                       Invoice Number: INV-2026-0891 Invoi...
+  contract            acme_contract.txt           (no section)                  SERVICE AGREEMENT — ACME CORP This ...
+  contract            beta_contract.txt           TERMINATION                   Either party may terminate this agr...
+
+  The search returns chunks with the word 'total' — it cannot compare
+  '$35,154' against the threshold 30,000. Every RAG library has this problem.
+
+  ✓  FIX: DOCUMENT.FIND with a numeric field filter
+
+    pipeline.find_schemas({
+        'document_type': 'invoice',
+        'fields.total_due': {'gt': 30000},  # '$35,154' parsed numerically
+    })
+
+  -> invoice       total_due='$35,154'
+     vendor='Blue Solutions Inc.'
+     bill_to='Acme Manufacturing Corp'
+
+  Deterministic. No embedding. No hallucination. Returns exactly the right set.
+
+========================================================================
+FAILURE 3 — 'Which contract is governed by California?' needs a definite answer
+========================================================================
+
+  Question: "Which of our contracts is governed by California law?"
+
+  Naive approach: search 'contract governed by California law'.
+  Both contracts mention California-adjacent legal language. The search returns
+  chunks from both and cannot tell the agent which DOCUMENT to reference.
+
+  ✗  search('contract governed by California law', type=contract, k=5)  —  5 result(s)
+
+  document_type       file                        section                       text preview
+  ------------------  --------------------------  ----------------------------  ------------------------------
+  contract            beta_contract.txt           GOVERNING LAW                 This agreement is governed exclusiv...
+  contract            acme_contract.txt           GOVERNING LAW AND DISPUTES    This agreement is governed by the l...
+  contract            beta_contract.txt           (no section)                  CONSULTING AGREEMENT — BETA LTD Thi...
+  contract            acme_contract.txt           (no section)                  SERVICE AGREEMENT — ACME CORP This ...
+  contract            acme_contract.txt           TERMINATION                   Either party may terminate this agr...
+
+  Results span 2 file(s): ['acme_contract.txt', 'beta_contract.txt']
+  The agent gets a mix of chunks — it cannot definitively answer
+  'Beta Ltd contract' without reading and reasoning over all of them.
+
+  ✓  FIX: DOCUMENT.FIND returns the exact document
+
+    pipeline.find_schemas({
+        'document_type': 'contract',
+        'fields.governing_law': {'contains': 'California'},
+    })
+
+  -> contract      governing_law='State of California'
+     parties=['DataSystems LLC', 'Beta Ltd']
+
+  One document. One answer. No LLM needed at query time.
+
+========================================================================
+The Agent Pattern — DOCUMENT.FIND + DOCUMENT.SEARCH
+========================================================================
+
+  Real agent queries combine structured filtering with text retrieval.
+  DOCUMENT.FIND pins the document. DOCUMENT.SEARCH reads the clause.
+
+  Agent task: 'Summarize the termination terms in Acme Corp's contract.'
+
+  Step 1 — pin the document (no embedding, deterministic):
+    contracts = pipeline.find_schemas({'fields.parties': {'contains': 'Acme Corp'}})
+    -> matched: contract — ['TechVendor Inc.', 'Acme Corp']
+
+  Step 2 — retrieve the specific clause:
+    chunks = pipeline.search('termination', filters={'document_id': target_id})
+
+  [TERMINATION]
+  Either party may terminate this agreement with sixty days written notice. Acme C...
+
+
+========================================================================
+Summary — What existing RAG libraries can't do
+========================================================================
+
+  Every RAG library (LangChain, LlamaIndex, Haystack) gives you:
+    embed query → nearest k chunks → paste into LLM context
+
+  That fails for:
+  ✗  'What does ACME CORP's termination clause say?'
+       → returns chunks from MULTIPLE contracts; agent cannot tell which is Acme's
+
+  ✗  'Find invoices where total exceeds $30,000'
+       → embedding distance cannot evaluate '$35,154 > 30000'
+
+  ✗  'Which contract is governed by California law?'
+       → returns chunks from all contracts mentioning California; no definite answer
+
+  blue-data-doc-source fixes this with a two-layer architecture:
+
+  Layer 1 — At ingest time (one API call per document):
+    KeywordClassifier → document_type (contract/invoice/policy/...)
+    LLMSchemaExtractor → typed fields (parties, governing_law, total_due, ...)
+
+  Layer 2 — At query time (no API calls for filtering):
+    DOCUMENT.FIND → deterministic structured filter over extracted fields
+    DOCUMENT.SEARCH → text retrieval scoped to the matched documents
+
+  The pattern:
+    docs   = pipeline.find_schemas({'fields.parties': {'contains': 'Acme Corp'}})
+    chunks = pipeline.search('termination', filters={'document_id': docs[0]['document_id']})
+
