@@ -741,7 +741,7 @@ class DocumentPipeline:
         filters: Optional[Dict[str, Any]] = None,
         context_chunks: int = 1,
     ) -> Dict[str, Any]:
-        """Embed a query and return an enriched response with citation, grouping,
+        """Embed a query and return an enriched response with provenance, grouping,
         and neighbor context.
 
         Args:
@@ -767,7 +767,7 @@ class DocumentPipeline:
             Each result dict contains:
 
             - ``rank``, ``score``, ``chunk_id``, ``text``
-            - ``citation`` — ``{document_id, file_name, chunk_index}`` plus
+            - ``provenance`` — ``{document_id, file_name, chunk_index}`` plus
               ``page`` (PDF only) and ``section`` (when detected)
             - ``document_type`` — present when a classifier was set at ingest
             - ``context`` — ``{before, after}`` with neighboring chunk text;
@@ -781,24 +781,24 @@ class DocumentPipeline:
             document_id = chunk.get("document_id", "")
             idx = self._chunk_idx_from_id(chunk_id)
 
-            citation: Dict[str, Any] = {
+            provenance: Dict[str, Any] = {
                 "document_id": document_id,
                 "file_name": chunk.get("file_name", ""),
                 "chunk_id": chunk_id,
             }
             if idx is not None:
-                citation["chunk_index"] = idx
+                provenance["chunk_index"] = idx
             if chunk.get("page_start") is not None:
-                citation["page"] = chunk["page_start"]
+                provenance["page"] = chunk["page_start"]
             if chunk.get("section_title"):
-                citation["section"] = chunk["section_title"]
+                provenance["section"] = chunk["section_title"]
 
             result: Dict[str, Any] = {
                 "rank": rank,
                 "score": chunk.get("score"),
                 "chunk_id": chunk_id,
                 "text": chunk.get("text", ""),
-                "citation": citation,
+                "provenance": provenance,
             }
 
             doc_type = chunk.get("document_type")
@@ -826,11 +826,11 @@ class DocumentPipeline:
 
         by_document: Dict[str, Dict[str, Any]] = {}
         for r in results:
-            doc_id = r["citation"]["document_id"]
+            doc_id = r["provenance"]["document_id"]
             if doc_id not in by_document:
                 entry: Dict[str, Any] = {
                     "document_id": doc_id,
-                    "file_name": r["citation"].get("file_name", ""),
+                    "file_name": r["provenance"].get("file_name", ""),
                     "match_count": 0,
                     "matches": [],
                 }
@@ -844,7 +844,7 @@ class DocumentPipeline:
             seen: set = set()
             sections = []
             for m in entry["matches"]:
-                sec = m["citation"].get("section")
+                sec = m["provenance"].get("section")
                 if sec and sec not in seen:
                     sections.append(sec)
                     seen.add(sec)

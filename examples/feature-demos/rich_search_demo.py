@@ -5,7 +5,7 @@ Shows DOCUMENT.SEARCH_RICH versus plain DOCUMENT.SEARCH.
 Plain search returns a flat list of raw chunk dicts — text, score, metadata.
 Rich search wraps the same KNN query and adds three layers on top:
 
-  1. Citation block  — document_id, file_name, chunk_id, page (PDF), section
+  1. Provenance block — document_id, file_name, chunk_id, page (PDF), section
   2. Neighbor context — text of adjacent chunks (before / after each result)
   3. by_document grouping — results reorganised by source document with
      match_count and deduplicated top_sections
@@ -167,8 +167,8 @@ def run() -> None:
         else:
             print(f"    {key!r}: {val!r}")
 
-    # ── Step 4: citation anatomy ──────────────────────────────────────────
-    _step(4, "Citation block — anatomy of one result")
+    # ── Step 4: provenance anatomy ────────────────────────────────────────
+    _step(4, "Provenance block — anatomy of one result")
 
     print()
     print("  Each result in rich['results'] looks like:")
@@ -181,17 +181,17 @@ def run() -> None:
         print(f"    'chunk_id':     {r['chunk_id']!r},")
         snippet = (r.get("text") or "")[:70].replace("\n", " ")
         print(f"    'text':         {snippet!r}…,")
-        cit = r["citation"]
-        print( "    'citation': {")
-        print(f"      'document_id': {cit['document_id']!r},")
-        print(f"      'file_name':   {cit['file_name']!r},")
-        print(f"      'chunk_id':    {cit['chunk_id']!r},")
-        if "chunk_index" in cit:
-            print(f"      'chunk_index': {cit['chunk_index']},")
-        if "page" in cit:
-            print(f"      'page':        {cit['page']},")
-        if "section" in cit:
-            print(f"      'section':     {cit['section']!r},")
+        prov = r["provenance"]
+        print( "    'provenance': {")
+        print(f"      'document_id': {prov['document_id']!r},")
+        print(f"      'file_name':   {prov['file_name']!r},")
+        print(f"      'chunk_id':    {prov['chunk_id']!r},")
+        if "chunk_index" in prov:
+            print(f"      'chunk_index': {prov['chunk_index']},")
+        if "page" in prov:
+            print(f"      'page':        {prov['page']},")
+        if "section" in prov:
+            print(f"      'section':     {prov['section']!r},")
         print( "    },")
         ctx = r.get("context", {})
         if ctx:
@@ -281,7 +281,7 @@ def run() -> None:
         print(f"    matches:")
         for m in group["matches"]:
             snippet = (m.get("text") or "")[:60].replace("\n", " ")
-            sec     = m["citation"].get("section", "")
+            sec     = m["provenance"].get("section", "")
             print(f"      rank={m['rank']}  score={m['score']:.4f}  "
                   f"§={sec!r}  text: {snippet!r}…")
         print()
@@ -293,14 +293,14 @@ def run() -> None:
     print("  " + "-" * 68)
     print("  Return type          list[dict]             dict")
     print("  Ranked chunks        ✓ raw chunk fields     ✓ same KNN query")
-    print("  Citation block       ✗ fields scattered     ✓ {doc_id, file, page, section}")
+    print("  Provenance block     ✗ fields scattered     ✓ {doc_id, file, page, section}")
     print("  Neighbor context     ✗ not available        ✓ context.before / after")
     print("  Grouped by document  ✗ flat list only       ✓ by_document + top_sections")
     print("  Result count / doc   ✗ must count manually  ✓ match_count per document")
     print()
     print("  When to use rich search:")
     print("    - Feeding results to an LLM for answer generation (RAG)")
-    print("    - Building citation-aware UI (show 'page 3, §Coverage' links)")
+    print("    - Building provenance-aware UI (show 'page 3, §Coverage' links)")
     print("    - Multi-document corpuses where grouping by source matters")
     print()
     print("  When plain search is enough:")

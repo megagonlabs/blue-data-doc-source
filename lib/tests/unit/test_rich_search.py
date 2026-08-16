@@ -1,4 +1,4 @@
-"""Tests for search_rich — citation, grouping, neighbor context, and DOCUMENT.SEARCH_RICH op."""
+"""Tests for search_rich — provenance, grouping, neighbor context, and DOCUMENT.SEARCH_RICH op."""
 from __future__ import annotations
 
 import pytest
@@ -170,7 +170,7 @@ class TestRichSearchResultItems:
         pipeline, _, _ = pipeline_with_data
         result = pipeline.search_rich("obligations", k=3)
         for r in result["results"]:
-            for key in ("rank", "score", "chunk_id", "text", "citation"):
+            for key in ("rank", "score", "chunk_id", "text", "provenance"):
                 assert key in r, f"Missing key {key!r} in result"
 
     def test_rank_is_sequential_from_1(self, pipeline_with_data):
@@ -218,49 +218,49 @@ class TestRichSearchResultItems:
 
 
 # ---------------------------------------------------------------------------
-# Citation
+# Provenance
 # ---------------------------------------------------------------------------
 
-class TestRichSearchCitation:
-    def test_citation_has_required_keys(self, pipeline_with_data):
+class TestRichSearchProvenance:
+    def test_provenance_has_required_keys(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
         result = pipeline.search_rich("termination", k=3)
         for r in result["results"]:
-            cit = r["citation"]
+            prov = r["provenance"]
             for key in ("document_id", "file_name", "chunk_id", "chunk_index"):
-                assert key in cit, f"Missing citation key {key!r}"
+                assert key in prov, f"Missing provenance key {key!r}"
 
-    def test_citation_file_name_matches_chunk(self, pipeline_with_data):
+    def test_provenance_file_name_matches_chunk(self, pipeline_with_data):
         pipeline, contract_records, _ = pipeline_with_data
         doc_id = contract_records[0]["document_id"]
         result = pipeline.search_rich(
             "obligations", k=2, filters={"document_id": doc_id}
         )
         for r in result["results"]:
-            assert r["citation"]["file_name"] == "contract.txt"
+            assert r["provenance"]["file_name"] == "contract.txt"
 
-    def test_citation_document_id_matches_chunk(self, pipeline_with_data):
+    def test_provenance_document_id_matches_chunk(self, pipeline_with_data):
         pipeline, contract_records, _ = pipeline_with_data
         expected_doc_id = contract_records[0]["document_id"]
         result = pipeline.search_rich(
             "agreement", k=2, filters={"document_id": expected_doc_id}
         )
         for r in result["results"]:
-            assert r["citation"]["document_id"] == expected_doc_id
+            assert r["provenance"]["document_id"] == expected_doc_id
 
-    def test_citation_chunk_id_matches_result(self, pipeline_with_data):
+    def test_provenance_chunk_id_matches_result(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
         result = pipeline.search_rich("termination", k=3)
         for r in result["results"]:
-            assert r["citation"]["chunk_id"] == r["chunk_id"]
+            assert r["provenance"]["chunk_id"] == r["chunk_id"]
 
-    def test_citation_chunk_index_is_int(self, pipeline_with_data):
+    def test_provenance_chunk_index_is_int(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
         result = pipeline.search_rich("termination", k=3)
         for r in result["results"]:
-            assert isinstance(r["citation"]["chunk_index"], int)
+            assert isinstance(r["provenance"]["chunk_index"], int)
 
-    def test_citation_section_present_when_section_chunker_detects_header(self, pipeline_with_data):
+    def test_provenance_section_present_when_section_chunker_detects_header(self, pipeline_with_data):
         vs = MemoryVectorSource()
         pipeline = DocumentPipeline(
             embedding_model=DummyEmbeddingModel(dim=8),
@@ -273,7 +273,7 @@ class TestRichSearchCitation:
         structured = "# Introduction\nThis is the intro text.\n\n# Methods\nThese are the methods."
         pipeline.ingest_text(structured, file_name="structured.txt")
         result = pipeline.search_rich("introduction", k=2)
-        sections = [r["citation"].get("section") for r in result["results"]]
+        sections = [r["provenance"].get("section") for r in result["results"]]
         assert any(s is not None for s in sections)
 
 
@@ -540,4 +540,4 @@ class TestSearchRichOp:
             "filter": {"document_id": doc_id},
         })
         for r in result["results"]:
-            assert r["citation"]["document_id"] == doc_id
+            assert r["provenance"]["document_id"] == doc_id

@@ -358,10 +358,10 @@ The schema record is in-process only — it is not upserted to the vector store.
 
 `DOCUMENT.SEARCH_RICH` runs the same KNN query as `DOCUMENT.SEARCH` and wraps the results with three extra layers in a single call.
 
-**1. Citation block** — provenance fields are packaged per result instead of scattered across the raw chunk dict:
+**1. Provenance block** — provenance fields are packaged per result instead of scattered across the raw chunk dict:
 
 ```python
-result["citation"] == {
+result["provenance"] == {
     "document_id": "doc_bc66f8ef9293d195",
     "file_name":   "annual_report.pdf",
     "chunk_id":    "doc_bc66f8ef9293d195_chunk_000003",
@@ -414,7 +414,7 @@ print(rich["result_count"])    # number of matched chunks
 print(rich["document_count"])  # number of distinct source documents
 
 for r in rich["results"]:
-    cit = r["citation"]
+    cit = r["provenance"]
     print(f"rank {r['rank']}  {cit['file_name']}  §{cit.get('section', '')}  p{cit.get('page', '')}")
     print(f"  {r['text'][:120]}")
     ctx = r.get("context", {})
@@ -442,8 +442,8 @@ rich = source.execute_query({
 
 | When to use | Reason |
 |---|---|
-| LLM answer generation (RAG) | Citation block is ready to embed in the prompt |
-| Citation-aware UI | `page`, `section` are pre-extracted per result |
+| LLM answer generation (RAG) | Provenance block is ready to embed in the prompt |
+| Provenance-aware UI | `page`, `section` are pre-extracted per result |
 | Multi-document corpus | `by_document` shows which files matched and how many times |
 | Plain retrieval, debugging | Use `DOCUMENT.SEARCH` — fewer nested fields |
 

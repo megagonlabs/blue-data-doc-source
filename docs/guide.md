@@ -96,7 +96,7 @@ results = source.execute_query({
 |---|---|---|
 | `DOCUMENT.INGEST` | `path` | `list[dict]` — one dict per chunk |
 | `DOCUMENT.SEARCH` | `query` | `list[dict]` — ranked matching chunks |
-| `DOCUMENT.SEARCH_RICH` | `query` | `dict` — ranked results with citation, context, and grouping |
+| `DOCUMENT.SEARCH_RICH` | `query` | `dict` — ranked results with provenance, context, and grouping |
 | `DOCUMENT.ENSURE_INDEX` | — | `None` |
 | `DOCUMENT.DELETE` | `path` OR (`document_id` + `chunk_count`) | `int` — deleted chunk count |
 | `DOCUMENT.GET_SCHEMA` | `document_id` | `dict` — schema record; raises if unknown |
@@ -301,7 +301,7 @@ All filters are combined with AND. `None` values are ignored. Chunks where an op
 
 ## Rich search
 
-`search_rich()` returns an enriched response in a single call — ranked chunks with per-chunk citation, neighbor context, and results grouped by document.
+`search_rich()` returns an enriched response in a single call — ranked chunks with per-chunk provenance, neighbor context, and results grouped by document.
 
 ```python
 response = pipeline.search_rich("termination clause", k=5, context_chunks=1)
@@ -315,13 +315,13 @@ response["by_document"]     # results grouped by document_id
 
 Each result carries:
 - `rank`, `score`, `chunk_id`, `text`
-- `citation` — `{document_id, file_name, chunk_id, chunk_index}` plus `page` (PDF) and `section` (when detected)
+- `provenance` — `{document_id, file_name, chunk_id, chunk_index}` plus `page` (PDF) and `section` (when detected)
 - `document_type` — present when a classifier was set at ingest
 - `context` — `{before, after}` with neighboring chunk text; keys omitted when no neighbor exists
 
 ```python
 for r in response["results"]:
-    print(r["rank"], r["citation"]["file_name"], r["citation"].get("page"))
+    print(r["rank"], r["provenance"]["file_name"], r["provenance"].get("page"))
     print(r["text"][:120])
     if "context" in r:
         print("  before:", r["context"].get("before", "")[:60])

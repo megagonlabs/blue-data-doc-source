@@ -47,7 +47,7 @@
     'by_document': (dict, len=2)
 
 ------------------------------------------------------------------------
-  Step 4 — Citation block — anatomy of one result
+  Step 4 — Provenance block — anatomy of one result
 ------------------------------------------------------------------------
 
   Each result in rich['results'] looks like:
@@ -57,7 +57,7 @@
     'score':        0.9155,
     'chunk_id':     'doc_0374c6cb944ee737_chunk_000004',
     'text':         'Both parties agree to maintain strict confidentiality regarding propri'…,
-    'citation': {
+    'provenance': {
       'document_id': 'doc_0374c6cb944ee737',
       'file_name':   'service_agreement.txt',
       'chunk_id':    'doc_0374c6cb944ee737_chunk_000004',
@@ -75,7 +75,7 @@
     'score':        0.9105,
     'chunk_id':     'doc_bc66f8ef9293d195_chunk_000012',
     'text':         '6.1 Voluntary Termination The policyholder may cancel coverage at any '…,
-    'citation': {
+    'provenance': {
       'document_id': 'doc_bc66f8ef9293d195',
       'file_name':   'sample_policy.txt',
       'chunk_id':    'doc_bc66f8ef9293d195_chunk_000012',
@@ -93,7 +93,7 @@
     'score':        0.9039,
     'chunk_id':     'doc_bc66f8ef9293d195_chunk_000006',
     'text':         '3.1 General Exclusions This policy does not cover: cosmetic procedures'…,
-    'citation': {
+    'provenance': {
       'document_id': 'doc_bc66f8ef9293d195',
       'file_name':   'sample_policy.txt',
       'chunk_id':    'doc_bc66f8ef9293d195_chunk_000006',
@@ -111,7 +111,7 @@
     'score':        0.9031,
     'chunk_id':     'doc_bc66f8ef9293d195_chunk_000003',
     'text':         '2.1 Covered Services This policy covers the following medical services'…,
-    'citation': {
+    'provenance': {
       'document_id': 'doc_bc66f8ef9293d195',
       'file_name':   'sample_policy.txt',
       'chunk_id':    'doc_bc66f8ef9293d195_chunk_000003',
@@ -188,14 +188,14 @@
   --------------------------------------------------------------------
   Return type          list[dict]             dict
   Ranked chunks        ✓ raw chunk fields     ✓ same KNN query
-  Citation block       ✗ fields scattered     ✓ {doc_id, file, page, section}
+  Provenance block     ✗ fields scattered     ✓ {doc_id, file, page, section}
   Neighbor context     ✗ not available        ✓ context.before / after
   Grouped by document  ✗ flat list only       ✓ by_document + top_sections
   Result count / doc   ✗ must count manually  ✓ match_count per document
 
   When to use rich search:
     - Feeding results to an LLM for answer generation (RAG)
-    - Building citation-aware UI (show 'page 3, §Coverage' links)
+    - Building provenance-aware UI (show 'page 3, §Coverage' links)
     - Multi-document corpuses where grouping by source matters
 
   When plain search is enough:
