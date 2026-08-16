@@ -135,7 +135,8 @@ class DocumentDataSource(DataSource):
         collection = collection_override or request.get("collection")
         k = request.get("k", 5)
         filters = request.get("filter")
-        return self._pipeline.search(query_text, k=k, collection=collection, filters=filters)
+        mode = request.get("mode", "hybrid")
+        return self._pipeline.search(query_text, k=k, collection=collection, filters=filters, mode=mode)
 
     def _ensure_index(self, request: Dict[str, Any], collection_override=None) -> None:
         collection = collection_override or request.get("collection")
@@ -221,12 +222,14 @@ class DocumentDataSource(DataSource):
         k = request.get("k", 5)
         filters = request.get("filter")
         context_chunks = request.get("context_chunks", 1)
+        mode = request.get("mode", "hybrid")
         return self._pipeline.search_rich(
             query_text,
             k=k,
             collection=collection,
             filters=filters,
             context_chunks=context_chunks,
+            mode=mode,
         )
 
     def _get_schema(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:

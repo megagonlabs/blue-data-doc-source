@@ -4,6 +4,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from blue_data.core.utils.similarity_utils import compute_bm25_score, normalize_bm25_scores
 from blue_data.source.vector.vector_source import VectorSource
 
 from .chunkers import Chunker, SectionChunker
@@ -137,8 +138,10 @@ class DocumentPipeline:
         self._index_created: Set[str] = set()
         # document_id → schema record — populated during ingest when classifier is set
         self._schema_registry: Dict[str, Dict[str, Any]] = {}
-        # chunk_id → chunk dict — populated during ingest; used for neighbor context lookup
+        # chunk_id → chunk dict — populated during ingest; used for neighbor context and BM25
         self._chunk_index: Dict[str, Dict[str, Any]] = {}
+        # chunk_id → collection name — needed to scope BM25 to the correct collection
+        self._chunk_collection: Dict[str, str] = {}
 
     def ingest(self, path: str, collection: Optional[str] = None) -> List[Dict[str, Any]]:
         """Parse, chunk, enrich, and embed a file.
@@ -449,6 +452,7 @@ class DocumentPipeline:
                 record_dict = record.to_dict()
                 records.append(record_dict)
                 self._chunk_index[chunk_id] = record_dict
+                self._chunk_collection[chunk_id] = collection
                 self._upsert(chunk_id, record_dict, collection)
                 chunk_index += 1
 
@@ -514,6 +518,7 @@ class DocumentPipeline:
                 record_dict = record.to_dict()
                 records.append(record_dict)
                 self._chunk_index[chunk_id] = record_dict
+                self._chunk_collection[chunk_id] = collection
                 self._upsert(chunk_id, record_dict, collection)
                 chunk_index += 1
             else:
@@ -538,6 +543,7 @@ class DocumentPipeline:
                     record_dict = record.to_dict()
                     records.append(record_dict)
                     self._chunk_index[chunk_id] = record_dict
+                    self._chunk_collection[chunk_id] = collection
                     self._upsert(chunk_id, record_dict, collection)
                     chunk_index += 1
 
@@ -658,6 +664,7 @@ class DocumentPipeline:
         for idx in range(count):
             chunk_id = f"{doc_id}_chunk_{idx:06d}"
             self._chunk_index.pop(chunk_id, None)
+            self._chunk_collection.pop(chunk_id, None)
             try:
                 self.vector_source.delete(collection=target, doc_id=chunk_id)
                 deleted += 1
@@ -669,44 +676,193 @@ class DocumentPipeline:
 
         return deleted
 
+    @staticmethod
+    def _chunk_matches_filters(
+        chunk: Dict[str, Any],
+        filters: Optional[Dict[str, Any]],
+    ) -> bool:
+        """Return True if a chunk dict satisfies all filter constraints."""
+        if not filters:
+            return True
+        for field in _FILTER_TAG_FIELDS:
+            value = filters.get(field)
+            if value is not None and chunk.get(field) != value:
+                return False
+        page = filters.get("page_start")
+        if page is not None:
+            chunk_page = chunk.get("page_start")
+            if isinstance(page, int):
+                if chunk_page != page:
+                    return False
+            elif isinstance(page, dict):
+                lo = page.get("gte")
+                hi = page.get("lte")
+                if chunk_page is None:
+                    return False
+                if lo is not None and chunk_page < lo:
+                    return False
+                if hi is not None and chunk_page > hi:
+                    return False
+        return True
+
+    def _bm25_candidates(
+        self,
+        query: str,
+        collection: str,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, float]:
+        """Return normalised BM25 scores for all in-collection chunks.
+
+        Scores all chunks in ``_chunk_index`` that belong to ``collection`` and
+        pass ``filters``. Returns ``{chunk_id: normalised_score}`` with scores
+        in [0, 1]. Chunks scoring 0 are excluded. Returns an empty dict when
+        the in-process index has no entries for the collection (e.g. process
+        restart with a persistent vector store).
+        """
+        candidates = {
+            cid: rec
+            for cid, rec in self._chunk_index.items()
+            if self._chunk_collection.get(cid) == collection
+            and self._chunk_matches_filters(rec, filters)
+        }
+        if not candidates:
+            return {}
+        ids = list(candidates.keys())
+        # Strip punctuation so "Termination:" matches query token "termination".
+        # Include section_title in document text — section headers contain key terms.
+        _punct = re.compile(r"[^\w\s]")
+        clean = lambda t: _punct.sub(" ", t)  # noqa: E731
+        raw = [
+            compute_bm25_score(
+                clean(query),
+                clean(candidates[cid].get("text", "")),
+                schema_text=clean(candidates[cid]["section_title"]) if candidates[cid].get("section_title") else None,
+            )
+            for cid in ids
+        ]
+        norm = normalize_bm25_scores(raw)
+        return {cid: score for cid, score in zip(ids, norm) if score > 0}
+
     def search(
         self,
         query: str,
         k: int = 5,
         collection: Optional[str] = None,
         filters: Optional[Dict[str, Any]] = None,
+        mode: str = "hybrid",
     ) -> List[Dict[str, Any]]:
-        """Embed a query and return the k nearest chunks from the vector store.
+        """Search for chunks matching a query.
 
         Args:
             query: Natural language query string.
             k: Number of results to return.
             collection: Override the instance-level collection for this call only.
-            filters: Optional pre-filter applied before KNN. Supported keys:
-                ``document_id``, ``file_name``, ``section_title``, ``mime_type``
-                (exact string match) and ``page_start`` (int for exact page, or
-                ``{"gte": N, "lte": M}`` for a range). Requires ``ensure_index``
-                to have been called after this feature was added; existing indexes
-                without the extra filterable fields must be recreated.
+            filters: Optional pre-filter. Supported keys: ``document_id``,
+                ``file_name``, ``section_title``, ``mime_type``, ``content_type``
+                (exact match) and ``page_start`` (int or ``{"gte": N, "lte": M}``).
+            mode: Search strategy — one of:
+
+                - ``"hybrid"`` (default) — Reciprocal Rank Fusion of BM25 and
+                  vector KNN. Falls back to ``"vector"`` when no chunks have been
+                  ingested in the current process.
+                - ``"vector"`` — pure KNN via the vector store.
+                - ``"bm25"`` — keyword-only search over the in-process chunk
+                  index. Does not require an embedding model or vector store.
 
         Returns:
-            List of matching chunk dicts as returned by the vector store.
+            List of matching chunk dicts, each with a ``score`` field.
 
         Raises:
-            ValueError: If ``embedding_model`` or ``vector_source`` is not set.
+            ValueError: If ``embedding_model`` or ``vector_source`` is not set
+                and ``mode`` is ``"vector"`` or ``"hybrid"``.
         """
+        target = collection or self.collection
+
+        if mode == "bm25":
+            bm25_scores = self._bm25_candidates(query, target, filters)
+            if not bm25_scores:
+                return []
+            ranked = sorted(bm25_scores.items(), key=lambda x: x[1], reverse=True)
+            results = []
+            for chunk_id, score in ranked[:k]:
+                chunk = dict(self._chunk_index[chunk_id])
+                chunk["score"] = score
+                results.append(chunk)
+            return results
+
+        # vector or hybrid — both require embedding_model and vector_source
         if self.embedding_model is None:
             raise ValueError("An embedding_model is required for search")
         if self.vector_source is None:
             raise ValueError("A vector_source is required for search")
 
         query_vector = self.embedding_model.embed_text(query)
-        return self.vector_source.knn(
-            index_name=collection or self.collection,
+
+        if mode == "vector":
+            return self.vector_source.knn(
+                index_name=target,
+                query_vector=query_vector,
+                k=k,
+                filter_expr=_build_filter_expr(filters),
+            )
+
+        # hybrid: RRF fusion of vector KNN + BM25
+        bm25_scores = self._bm25_candidates(query, target, filters)
+        if not bm25_scores:
+            # no in-process BM25 corpus — degrade to pure vector
+            return self.vector_source.knn(
+                index_name=target,
+                query_vector=query_vector,
+                k=k,
+                filter_expr=_build_filter_expr(filters),
+            )
+
+        k_vec = max(k * 3, 20)
+        vec_results = self.vector_source.knn(
+            index_name=target,
             query_vector=query_vector,
-            k=k,
+            k=k_vec,
             filter_expr=_build_filter_expr(filters),
         )
+
+        # build rank maps (1-based)
+        vec_rank: Dict[str, int] = {
+            r.get("chunk_id", ""): i + 1
+            for i, r in enumerate(vec_results)
+            if r.get("chunk_id")
+        }
+        bm25_ranked = sorted(bm25_scores.items(), key=lambda x: x[1], reverse=True)
+        bm25_rank: Dict[str, int] = {cid: i + 1 for i, (cid, _) in enumerate(bm25_ranked)}
+
+        # RRF: score every chunk that appears in either ranking
+        rrf_k = 60
+        n_vec_fallback = len(vec_results) + 1
+        n_bm25_fallback = len(bm25_ranked) + 1
+        all_ids = set(vec_rank) | set(bm25_rank)
+
+        scored: List[Tuple[float, str]] = [
+            (
+                1.0 / (rrf_k + vec_rank.get(cid, n_vec_fallback))
+                + 1.0 / (rrf_k + bm25_rank.get(cid, n_bm25_fallback)),
+                cid,
+            )
+            for cid in all_ids
+        ]
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        vec_by_id = {r.get("chunk_id", ""): r for r in vec_results}
+        results: List[Dict[str, Any]] = []
+        for rrf_score, chunk_id in scored[:k]:
+            if chunk_id in vec_by_id:
+                chunk = dict(vec_by_id[chunk_id])
+            elif chunk_id in self._chunk_index:
+                chunk = dict(self._chunk_index[chunk_id])
+            else:
+                continue
+            chunk["score"] = rrf_score
+            results.append(chunk)
+
+        return results
 
     # ------------------------------------------------------------------
     # Rich search
@@ -740,6 +896,7 @@ class DocumentPipeline:
         collection: Optional[str] = None,
         filters: Optional[Dict[str, Any]] = None,
         context_chunks: int = 1,
+        mode: str = "hybrid",
     ) -> Dict[str, Any]:
         """Embed a query and return an enriched response with provenance, grouping,
         and neighbor context.
@@ -773,7 +930,7 @@ class DocumentPipeline:
             - ``context`` — ``{before, after}`` with neighboring chunk text;
               keys are omitted when no neighbor is available
         """
-        raw = self.search(query, k=k, collection=collection, filters=filters)
+        raw = self.search(query, k=k, collection=collection, filters=filters, mode=mode)
 
         results: List[Dict[str, Any]] = []
         for rank, chunk in enumerate(raw, 1):
