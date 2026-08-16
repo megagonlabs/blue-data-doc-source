@@ -255,6 +255,76 @@ class TestVectorMode:
 
 
 # ---------------------------------------------------------------------------
+# mode="rerank"
+# ---------------------------------------------------------------------------
+
+class TestRerankMode:
+    def test_returns_results(self, pipeline_with_two_docs):
+        results = pipeline_with_two_docs.search("terminate agreement", k=3, mode="rerank")
+        assert len(results) > 0
+
+    def test_results_have_score(self, pipeline_with_two_docs):
+        results = pipeline_with_two_docs.search("terminate agreement", k=3, mode="rerank")
+        for r in results:
+            assert "score" in r
+            assert 0.0 <= r["score"] <= 1.0
+
+    def test_respects_k(self, pipeline_with_two_docs):
+        results = pipeline_with_two_docs.search("coverage deductible", k=2, mode="rerank")
+        assert len(results) <= 2
+
+    def test_embeddings_stored_during_ingest(self, pipeline_with_two_docs):
+        pipeline = pipeline_with_two_docs
+        for cid in pipeline._chunk_index:
+            assert cid in pipeline._chunk_embeddings
+
+    def test_embeddings_cleared_on_delete(self):
+        vs = MemoryVectorSource()
+        pipeline = DocumentPipeline(
+            embedding_model=DummyEmbeddingModel(dim=8),
+            vector_source=vs,
+            chunk_size=60,
+            overlap=10,
+            collection="docs",
+        )
+        pipeline.ensure_index("docs")
+        records = pipeline.ingest_text(
+            CONTRACT_TEXT, file_name="contract.txt",
+            mime_type="text/plain", collection="docs"
+        )
+        doc_id = records[0]["document_id"]
+        pipeline.delete(document_id=doc_id, chunk_count=len(records), collection="docs")
+        assert not any(cid.startswith(doc_id) for cid in pipeline._chunk_embeddings)
+
+    def test_falls_back_to_bm25_when_no_embeddings(self):
+        # Pipeline with no embedding model — rerank falls back to BM25 order
+        pipeline = DocumentPipeline(chunk_size=60, overlap=10, collection="docs")
+        pipeline.ingest_text(
+            CONTRACT_TEXT, file_name="contract.txt",
+            mime_type="text/plain", collection="docs"
+        )
+        results = pipeline.search("terminate agreement", k=3, mode="rerank")
+        assert len(results) > 0  # BM25 fallback
+
+    def test_empty_bm25_corpus_returns_empty(self):
+        pipeline = DocumentPipeline(
+            embedding_model=DummyEmbeddingModel(dim=8),
+            vector_source=MemoryVectorSource(),
+            collection="docs",
+        )
+        results = pipeline.search("anything", k=3, mode="rerank")
+        assert results == []
+
+    def test_filter_applied(self, pipeline_with_two_docs):
+        results = pipeline_with_two_docs.search(
+            "coverage deductible premium", k=5, mode="rerank",
+            filters={"file_name": "policy.txt"},
+        )
+        for r in results:
+            assert r.get("file_name") == "policy.txt"
+
+
+# ---------------------------------------------------------------------------
 # DOCUMENT.SEARCH op respects mode field
 # ---------------------------------------------------------------------------
 

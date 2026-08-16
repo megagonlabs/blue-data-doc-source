@@ -306,7 +306,7 @@ GROUND_TRUTH: List[Dict[str, Any]] = [
     },
 ]
 
-MODES = ["bm25", "vector", "hybrid"]
+MODES = ["bm25", "vector", "hybrid", "rerank"]
 COLLECTION = "docs"
 CHUNK_SIZE = 100
 OVERLAP = 20
@@ -627,10 +627,12 @@ def write_markdown(
     lines += [
         "## Notes",
         "",
-        f"- **BM25**: in-process keyword scoring with punctuation normalization and section-title boosting.",
+        f"- **BM25**: in-process keyword scoring with punctuation normalization and section-title boosting. No API calls — ~0.1ms latency.",
         f"- **Vector**: KNN over MemoryVectorSource. With `DummyEmbeddingModel` vector similarity is "
-        f"random — run with `--embedding openai` for meaningful vector/hybrid results.",
-        f"- **Hybrid**: Reciprocal Rank Fusion (k=60) of BM25 and vector rankings.",
+        f"random — run with `--embedding openai` for meaningful vector/hybrid/rerank results.",
+        f"- **Hybrid**: Reciprocal Rank Fusion (k=60) of BM25 and vector rankings. Requires embedding model + vector store.",
+        f"- **Rerank**: BM25 shortlists candidates (top 4k or 20), then 1 query embedding re-ranks by cosine similarity. "
+        f"Requires embedding model but not vector store. Falls back to BM25 order when no stored embeddings are available.",
         f"- chunk_size={CHUNK_SIZE}, overlap={OVERLAP}; one section body per chunk.",
         f"- Hit@k = fraction of queries where relevant chunk appears in top-k.",
         f"- MRR = mean reciprocal rank; 1.0 = always rank 1, 0.0 = never found.",

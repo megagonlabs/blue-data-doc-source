@@ -4,7 +4,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from blue_data.core.utils.similarity_utils import compute_bm25_score, normalize_bm25_scores
+from blue_data.core.utils.similarity_utils import compute_bm25_score, normalize_bm25_scores, compute_vector_score
 from blue_data.source.vector.vector_source import VectorSource
 
 from .chunkers import Chunker, SectionChunker
@@ -142,6 +142,8 @@ class DocumentPipeline:
         self._chunk_index: Dict[str, Dict[str, Any]] = {}
         # chunk_id → collection name — needed to scope BM25 to the correct collection
         self._chunk_collection: Dict[str, str] = {}
+        # chunk_id → embedding vector — used by rerank mode to avoid re-embedding candidates
+        self._chunk_embeddings: Dict[str, List[float]] = {}
 
     def ingest(self, path: str, collection: Optional[str] = None) -> List[Dict[str, Any]]:
         """Parse, chunk, enrich, and embed a file.
@@ -315,6 +317,7 @@ class DocumentPipeline:
         for idx in range(old_count):
             chunk_id = f"{old_doc_id}_chunk_{idx:06d}"
             self._chunk_index.pop(chunk_id, None)
+            self._chunk_embeddings.pop(chunk_id, None)
             try:
                 self.vector_source.delete(collection=old_collection, doc_id=chunk_id)
             except Exception:
@@ -453,6 +456,8 @@ class DocumentPipeline:
                 records.append(record_dict)
                 self._chunk_index[chunk_id] = record_dict
                 self._chunk_collection[chunk_id] = collection
+                if record.embedding is not None:
+                    self._chunk_embeddings[chunk_id] = record.embedding
                 self._upsert(chunk_id, record_dict, collection)
                 chunk_index += 1
 
@@ -519,6 +524,8 @@ class DocumentPipeline:
                 records.append(record_dict)
                 self._chunk_index[chunk_id] = record_dict
                 self._chunk_collection[chunk_id] = collection
+                if record.embedding is not None:
+                    self._chunk_embeddings[chunk_id] = record.embedding
                 self._upsert(chunk_id, record_dict, collection)
                 chunk_index += 1
             else:
@@ -544,6 +551,8 @@ class DocumentPipeline:
                     records.append(record_dict)
                     self._chunk_index[chunk_id] = record_dict
                     self._chunk_collection[chunk_id] = collection
+                    if record.embedding is not None:
+                        self._chunk_embeddings[chunk_id] = record.embedding
                     self._upsert(chunk_id, record_dict, collection)
                     chunk_index += 1
 
@@ -665,6 +674,7 @@ class DocumentPipeline:
             chunk_id = f"{doc_id}_chunk_{idx:06d}"
             self._chunk_index.pop(chunk_id, None)
             self._chunk_collection.pop(chunk_id, None)
+            self._chunk_embeddings.pop(chunk_id, None)
             try:
                 self.vector_source.delete(collection=target, doc_id=chunk_id)
                 deleted += 1
@@ -768,6 +778,10 @@ class DocumentPipeline:
                 - ``"vector"`` — pure KNN via the vector store.
                 - ``"bm25"`` — keyword-only search over the in-process chunk
                   index. Does not require an embedding model or vector store.
+                - ``"rerank"`` — two-stage: BM25 shortlists candidates cheaply,
+                  then one query embedding re-ranks them by cosine similarity.
+                  Requires ``embedding_model`` but not ``vector_source``. Falls
+                  back to BM25 ranking when no stored embeddings are available.
 
         Returns:
             List of matching chunk dicts, each with a ``score`` field.
@@ -789,6 +803,36 @@ class DocumentPipeline:
                 chunk["score"] = score
                 results.append(chunk)
             return results
+
+        if mode == "rerank":
+            # Stage 1: BM25 shortlist — cheap, no embedding needed.
+            bm25_scores = self._bm25_candidates(query, target, filters)
+            if not bm25_scores:
+                return []
+            # Fetch a wider candidate set than k so re-ranking has room to work.
+            bm25_k = max(k * 4, 20)
+            shortlist = sorted(bm25_scores.items(), key=lambda x: x[1], reverse=True)[:bm25_k]
+            # Stage 2: embed query once and re-rank shortlist by cosine similarity.
+            if self.embedding_model is None or not any(
+                cid in self._chunk_embeddings for cid, _ in shortlist
+            ):
+                # No stored embeddings — fall back to BM25 ranking.
+                return [
+                    {**dict(self._chunk_index[cid]), "score": score}
+                    for cid, score in shortlist[:k]
+                ]
+            query_vector = self.embedding_model.embed_text(query)
+            reranked: List[Tuple[float, str]] = []
+            for chunk_id, _ in shortlist:
+                emb = self._chunk_embeddings.get(chunk_id)
+                if emb is None:
+                    continue
+                reranked.append((compute_vector_score(query_vector, emb), chunk_id))
+            reranked.sort(key=lambda x: x[0], reverse=True)
+            return [
+                {**dict(self._chunk_index[cid]), "score": score}
+                for score, cid in reranked[:k]
+            ]
 
         # vector or hybrid — both require embedding_model and vector_source
         if self.embedding_model is None:
