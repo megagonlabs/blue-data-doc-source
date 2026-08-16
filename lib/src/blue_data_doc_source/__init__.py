@@ -4,7 +4,7 @@ from .source.document.chunk_record import ChunkRecord
 from .source.document.nl_parser import NLQueryParser
 from .source.document.chunkers import Chunker, SectionChunker, SentenceChunker, WindowChunker
 from .source.document.embeddings import EmbeddingModel, DummyEmbeddingModel, OpenAIEmbeddingModel
-from .source.document.enrichment import Enricher, BasicEnricher
+from .source.document.enrichment import Enricher, BasicEnricher, LLMEnricher
 from .source.document.parsers import Parser, TextParser, PDFParser, DocxParser, PlumberPDFParser
 from .source.document.schema import (
     DocumentClassifier,
@@ -26,6 +26,7 @@ __all__ = [
     "OpenAIEmbeddingModel",
     "Enricher",
     "BasicEnricher",
+    "LLMEnricher",
     "Parser",
     "TextParser",
     "PDFParser",
