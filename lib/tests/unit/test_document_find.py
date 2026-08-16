@@ -1,0 +1,412 @@
+"""Tests for DOCUMENT.FIND op and SchemaStore."""
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+
+import pytest
+
+from blue_data_doc_source import (
+    DocumentDataSource,
+    DocumentPipeline,
+    DummyEmbeddingModel,
+    FileSchemaStore,
+    KeywordClassifier,
+    MemorySchemaStore,
+    SchemaStore,
+)
+from blue_data_doc_source.source.document.schema.schema_store import _matches
+
+# ---------------------------------------------------------------------------
+# Sample schema records
+# ---------------------------------------------------------------------------
+
+CONTRACT_A = {
+    "document_id": "doc_contract_a",
+    "document_type": "contract",
+    "confidence": 0.78,
+    "classifier": "llm",
+    "chunk_id": "doc_contract_a_schema",
+    "fields": {
+        "parties": ["TechCorp Inc.", "BuildRight LLC"],
+        "governing_law": "State of Delaware",
+        "contract_value": "$180,000",
+        "effective_date": "2026-09-01",
+        "expiration_date": "2027-08-31",
+    },
+}
+
+CONTRACT_B = {
+    "document_id": "doc_contract_b",
+    "document_type": "contract",
+    "confidence": 0.65,
+    "classifier": "keyword",
+    "chunk_id": "doc_contract_b_schema",
+    "fields": {
+        "parties": ["Alpha Corp", "Beta Inc"],
+        "governing_law": "State of California",
+        "contract_value": "$45,000",
+        "effective_date": "2025-01-01",
+        "expiration_date": "2025-12-31",
+    },
+}
+
+INVOICE = {
+    "document_id": "doc_invoice",
+    "document_type": "invoice",
+    "confidence": 0.80,
+    "classifier": "llm",
+    "chunk_id": "doc_invoice_schema",
+    "fields": {
+        "vendor": "Blue Solutions Inc.",
+        "bill_to": "Acme Manufacturing Corp",
+        "total_due": "$35,154",
+        "invoice_date": "2026-08-01",
+        "due_date": "2026-08-31",
+    },
+}
+
+POLICY = {
+    "document_id": "doc_policy",
+    "document_type": "policy",
+    "confidence": 0.64,
+    "classifier": "llm",
+    "chunk_id": "doc_policy_schema",
+    "fields": {
+        "policy_number": "BSH-2024-004521",
+        "insured": "Jane Doe",
+        "effective_date": "2024-01-01",
+        "deductible": "$1,500",
+    },
+}
+
+ALL_RECORDS = [CONTRACT_A, CONTRACT_B, INVOICE, POLICY]
+
+
+def _store_with_all() -> MemorySchemaStore:
+    store = MemorySchemaStore()
+    for r in ALL_RECORDS:
+        store.upsert(r)
+    return store
+
+
+# ---------------------------------------------------------------------------
+# MemorySchemaStore basics
+# ---------------------------------------------------------------------------
+
+class TestMemorySchemaStore:
+    def test_upsert_and_get(self):
+        store = MemorySchemaStore()
+        store.upsert(CONTRACT_A)
+        assert store.get("doc_contract_a") == CONTRACT_A
+
+    def test_get_missing_returns_none(self):
+        store = MemorySchemaStore()
+        assert store.get("nonexistent") is None
+
+    def test_upsert_overwrites(self):
+        store = MemorySchemaStore()
+        store.upsert(CONTRACT_A)
+        updated = dict(CONTRACT_A, confidence=0.99)
+        store.upsert(updated)
+        assert store.get("doc_contract_a")["confidence"] == 0.99
+
+    def test_delete_removes_record(self):
+        store = MemorySchemaStore()
+        store.upsert(CONTRACT_A)
+        store.delete("doc_contract_a")
+        assert store.get("doc_contract_a") is None
+
+    def test_delete_missing_is_noop(self):
+        store = MemorySchemaStore()
+        store.delete("nonexistent")  # must not raise
+
+    def test_find_no_filter_returns_all(self):
+        store = _store_with_all()
+        assert len(store.find()) == 4
+
+    def test_find_empty_filter_returns_all(self):
+        store = _store_with_all()
+        assert len(store.find({})) == 4
+
+
+# ---------------------------------------------------------------------------
+# FileSchemaStore persistence
+# ---------------------------------------------------------------------------
+
+class TestFileSchemaStore:
+    def test_survives_reload(self):
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            path = f.name
+        try:
+            store = FileSchemaStore(path)
+            store.upsert(CONTRACT_A)
+            # reload from disk
+            store2 = FileSchemaStore(path)
+            assert store2.get("doc_contract_a")["document_type"] == "contract"
+        finally:
+            os.unlink(path)
+            if os.path.exists(path + ".tmp"):
+                os.unlink(path + ".tmp")
+
+    def test_delete_persists(self):
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            path = f.name
+        try:
+            store = FileSchemaStore(path)
+            store.upsert(CONTRACT_A)
+            store.delete("doc_contract_a")
+            store2 = FileSchemaStore(path)
+            assert store2.get("doc_contract_a") is None
+        finally:
+            os.unlink(path)
+
+    def test_missing_file_starts_empty(self):
+        path = tempfile.mktemp(suffix=".json")
+        store = FileSchemaStore(path)
+        assert store.find() == []
+
+    def test_find_works_after_reload(self):
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            path = f.name
+        try:
+            store = FileSchemaStore(path)
+            for r in ALL_RECORDS:
+                store.upsert(r)
+            store2 = FileSchemaStore(path)
+            results = store2.find({"document_type": "contract"})
+            assert len(results) == 2
+        finally:
+            os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# Filter: exact match
+# ---------------------------------------------------------------------------
+
+class TestFilterExactMatch:
+    def test_exact_document_type(self):
+        store = _store_with_all()
+        results = store.find({"document_type": "contract"})
+        assert len(results) == 2
+        assert all(r["document_type"] == "contract" for r in results)
+
+    def test_exact_document_type_case_insensitive(self):
+        store = _store_with_all()
+        results = store.find({"document_type": "CONTRACT"})
+        assert len(results) == 2
+
+    def test_exact_nested_field(self):
+        store = _store_with_all()
+        results = store.find({"fields.governing_law": "State of Delaware"})
+        assert len(results) == 1
+        assert results[0]["document_id"] == "doc_contract_a"
+
+    def test_exact_nested_field_case_insensitive(self):
+        store = _store_with_all()
+        results = store.find({"fields.governing_law": "state of delaware"})
+        assert len(results) == 1
+
+    def test_no_match_returns_empty(self):
+        store = _store_with_all()
+        results = store.find({"document_type": "financial_report"})
+        assert results == []
+
+    def test_multiple_conditions_anded(self):
+        store = _store_with_all()
+        results = store.find({
+            "document_type": "contract",
+            "fields.governing_law": "State of California",
+        })
+        assert len(results) == 1
+        assert results[0]["document_id"] == "doc_contract_b"
+
+
+# ---------------------------------------------------------------------------
+# Filter: contains operator
+# ---------------------------------------------------------------------------
+
+class TestFilterContains:
+    def test_contains_substring(self):
+        store = _store_with_all()
+        results = store.find({"fields.vendor": {"contains": "Blue Solutions"}})
+        assert len(results) == 1
+        assert results[0]["document_type"] == "invoice"
+
+    def test_contains_case_insensitive(self):
+        store = _store_with_all()
+        results = store.find({"fields.vendor": {"contains": "blue solutions"}})
+        assert len(results) == 1
+
+    def test_contains_no_match(self):
+        store = _store_with_all()
+        results = store.find({"fields.vendor": {"contains": "nonexistent"}})
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# Filter: numeric comparison operators
+# ---------------------------------------------------------------------------
+
+class TestFilterNumericComparison:
+    def test_gt_strips_currency_symbol(self):
+        store = _store_with_all()
+        # total_due = "$35,154" → 35154; contract_value = "$180,000" / "$45,000"
+        results = store.find({"fields.total_due": {"gt": 30000}})
+        assert len(results) == 1
+        assert results[0]["document_type"] == "invoice"
+
+    def test_lt_numeric(self):
+        store = _store_with_all()
+        results = store.find({"fields.contract_value": {"lt": 50000}})
+        assert len(results) == 1
+        assert results[0]["document_id"] == "doc_contract_b"
+
+    def test_gte_numeric(self):
+        store = _store_with_all()
+        results = store.find({"fields.contract_value": {"gte": 180000}})
+        assert len(results) == 1
+        assert results[0]["document_id"] == "doc_contract_a"
+
+    def test_lte_numeric(self):
+        store = _store_with_all()
+        results = store.find({"fields.contract_value": {"lte": 45000}})
+        assert len(results) == 1
+        assert results[0]["document_id"] == "doc_contract_b"
+
+    def test_date_string_comparison(self):
+        store = _store_with_all()
+        # ISO dates compare lexicographically — 2025 < 2026
+        results = store.find({"fields.effective_date": {"lt": "2026-01-01"}})
+        # contract_b (2025-01-01) and policy (2024-01-01)
+        ids = {r["document_id"] for r in results}
+        assert "doc_contract_b" in ids
+        assert "doc_policy" in ids
+        assert "doc_contract_a" not in ids
+
+
+# ---------------------------------------------------------------------------
+# Filter: missing field returns no match
+# ---------------------------------------------------------------------------
+
+class TestFilterMissingField:
+    def test_missing_nested_field_excluded(self):
+        store = _store_with_all()
+        # policy has no 'vendor' field
+        results = store.find({"fields.vendor": "Blue Solutions Inc."})
+        assert all(r["document_type"] != "policy" for r in results)
+
+    def test_missing_top_level_field_excluded(self):
+        store = _store_with_all()
+        results = store.find({"nonexistent_key": "value"})
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# DocumentPipeline.find_schemas
+# ---------------------------------------------------------------------------
+
+class TestPipelineFindSchemas:
+    def _pipeline_with_classifier(self):
+        return DocumentPipeline(
+            chunk_size=100,
+            overlap=10,
+            classifier=KeywordClassifier(),
+        )
+
+    def test_find_schemas_returns_ingested_types(self):
+        pipeline = self._pipeline_with_classifier()
+        pipeline.ingest_text(
+            "This agreement is between parties. Termination requires 30 days notice. "
+            "Governing law is California. Indemnification clause applies. Warranties provided. "
+            "Arbitration for disputes. Intellectual property owned by client. Liability capped.",
+            file_name="c.txt",
+        )
+        results = pipeline.find_schemas({"document_type": "contract"})
+        assert len(results) == 1
+
+    def test_find_schemas_no_filter_returns_all(self):
+        pipeline = self._pipeline_with_classifier()
+        pipeline.ingest_text(
+            "Invoice #001. Bill to: Acme. Due date: 2026-08-31. Amount due: $1000. "
+            "Subtotal: $900. Tax: $100. Vendor: Supplier Co. Remit to: PO Box 1. "
+            "Purchase order: PO-123. Invoice number: INV-001. Unit price: $100.",
+            file_name="inv.txt",
+        )
+        pipeline.ingest_text(
+            "This agreement is between parties. Termination clause included. "
+            "Governing law: Delaware. Indemnification applies. Warranties included. "
+            "Arbitration required. Force majeure included. Intellectual property clause.",
+            file_name="c.txt",
+        )
+        results = pipeline.find_schemas()
+        assert len(results) == 2
+
+    def test_find_schemas_empty_when_no_classifier(self):
+        pipeline = DocumentPipeline(chunk_size=100, overlap=10)
+        pipeline.ingest_text("Some text.", file_name="t.txt")
+        assert pipeline.find_schemas() == []
+
+
+# ---------------------------------------------------------------------------
+# DocumentDataSource DOCUMENT.FIND op
+# ---------------------------------------------------------------------------
+
+class TestDocumentFindOp:
+    def _source(self):
+        return DocumentDataSource(
+            name="test",
+            embedding_model=DummyEmbeddingModel(dim=8),
+            chunk_size=100,
+            overlap=10,
+            classifier=KeywordClassifier(),
+        )
+
+    def test_find_op_returns_list(self):
+        source = self._source()
+        source._pipeline.ingest_text(
+            "This agreement is between parties. Termination clause. Governing law: California. "
+            "Indemnification applies. Arbitration required. Warranties given. Liability capped. "
+            "Intellectual property: work for hire. Force majeure clause included.",
+            file_name="c.txt",
+        )
+        results = source.execute_query({
+            "op": "DOCUMENT.FIND",
+            "filter": {"document_type": "contract"},
+        })
+        assert isinstance(results, list)
+        assert len(results) == 1
+
+    def test_find_op_no_filter_returns_all(self):
+        source = self._source()
+        source._pipeline.ingest_text(
+            "Invoice #001. Bill to: Acme. Amount due: $500. Due date: 2026-09-01. "
+            "Vendor: ABC Inc. Subtotal: $450. Tax: $50. Remit to supplier. "
+            "Purchase order PO-99. Invoice number INV-99. Unit price $450.",
+            file_name="i.txt",
+        )
+        results = source.execute_query({"op": "DOCUMENT.FIND"})
+        assert isinstance(results, list)
+
+    def test_find_op_no_classifier_returns_empty(self):
+        source = DocumentDataSource(name="test", chunk_size=100, overlap=10)
+        source._pipeline.ingest_text("Some text.", file_name="t.txt")
+        results = source.execute_query({"op": "DOCUMENT.FIND"})
+        assert results == []
+
+    def test_schema_store_injected_into_source(self):
+        store = MemorySchemaStore()
+        store.upsert(CONTRACT_A)
+        source = DocumentDataSource(
+            name="test",
+            chunk_size=100,
+            overlap=10,
+            schema_store=store,
+        )
+        results = source.execute_query({
+            "op": "DOCUMENT.FIND",
+            "filter": {"document_type": "contract"},
+        })
+        assert len(results) == 1
+        assert results[0]["document_id"] == "doc_contract_a"

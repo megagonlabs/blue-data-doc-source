@@ -11,6 +11,9 @@ from .source.document.schema import (
     SchemaExtractor,
     KeywordClassifier,
     LLMSchemaExtractor,
+    SchemaStore,
+    MemorySchemaStore,
+    FileSchemaStore,
 )
 
 __all__ = [
@@ -37,4 +40,7 @@ __all__ = [
     "SchemaExtractor",
     "KeywordClassifier",
     "LLMSchemaExtractor",
+    "SchemaStore",
+    "MemorySchemaStore",
+    "FileSchemaStore",
 ]

@@ -10,6 +10,7 @@ from .enrichment import Enricher
 from .nl_parser import NLQueryParser
 from .pipeline import DocumentPipeline
 from .schema.base import DocumentClassifier, SchemaExtractor
+from .schema.schema_store import SchemaStore
 
 
 class DocumentDataSource(DataSource):
@@ -52,6 +53,7 @@ class DocumentDataSource(DataSource):
         ocr_fallback: bool = False,
         classifier: Optional[DocumentClassifier] = None,
         schema_extractor: Optional[SchemaExtractor] = None,
+        schema_store: Optional[SchemaStore] = None,
     ):
         """
         Args:
@@ -86,6 +88,7 @@ class DocumentDataSource(DataSource):
             ocr_fallback=ocr_fallback,
             classifier=classifier,
             schema_extractor=schema_extractor,
+            schema_store=schema_store,
         )
 
     def execute_query(self, query, database=None, collection=None, optional_properties=None):
@@ -101,13 +104,15 @@ class DocumentDataSource(DataSource):
             return self._delete(query, collection)
         elif op == "DOCUMENT.GET_SCHEMA":
             return self._get_schema(query)
+        elif op == "DOCUMENT.FIND":
+            return self._find(query)
         elif op == "DOCUMENT.SEARCH_RICH":
             return self._search_rich(query, collection)
         else:
             raise ValueError(
                 f"Unsupported op: {op!r}. "
                 "Expected DOCUMENT.INGEST, DOCUMENT.SEARCH, DOCUMENT.ENSURE_INDEX, "
-                "DOCUMENT.DELETE, DOCUMENT.GET_SCHEMA, or DOCUMENT.SEARCH_RICH"
+                "DOCUMENT.DELETE, DOCUMENT.GET_SCHEMA, DOCUMENT.FIND, or DOCUMENT.SEARCH_RICH"
             )
 
     _PROTOCOL_BY_SUFFIX = {
@@ -231,6 +236,22 @@ class DocumentDataSource(DataSource):
             context_chunks=context_chunks,
             mode=mode,
         )
+
+    def _find(self, request: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Implement DOCUMENT.FIND — filter schema records by extracted field values.
+
+        Filter syntax (all conditions ANDed):
+            ``document_type``           exact match, case-insensitive
+            ``fields.<name>``           exact match or operator dict
+            ``{"contains": "..."}``     substring match
+            ``{"gt": N}``               numeric or lexicographic comparison
+            ``{"lt": N}``, ``{"gte": N}``, ``{"lte": N}``
+
+        Returns a list of schema records — one per matching document.
+        Each record includes ``document_id``, ``document_type``, ``confidence``,
+        ``classifier``, and ``fields``.
+        """
+        return self._pipeline.find_schemas(request.get("filter"))
 
     def _get_schema(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         document_id = request.get("document_id")
