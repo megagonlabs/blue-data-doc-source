@@ -1,8 +1,8 @@
 # blue-data-doc-source
 
-blue-data-doc-source is a document ingestion and retrieval source for Blue Data Intelligence. It sits upstream of Blue's vector layer, converting unstructured documents into structured, provenance-aware chunk records that AI agents can search, cite, and reason over.
+Documents are data. Not search indexes — data. blue-data-doc-source makes them queryable, filterable, and joinable alongside the rest of your data layer: SQL tables, graph stores, JSON sources, and knowledge bases, all registered in the same blue-data `DataRegistry` and accessible to the same agents.
 
-It handles the full pipeline from raw file to queryable vector index: parsing text, PDFs, and DOCX files, detecting section structure, extracting entities and keywords, generating embeddings, and upserting into Blue's vector store. It plugs directly into Blue's DataSource abstraction, so documents become first-class members of the same data layer as SQL databases, graph stores, and JSON sources.
+It handles the full pipeline from raw file to queryable data source: parsing PDFs, DOCX, and text files; classifying document type and extracting typed fields at ingest; chunking with section awareness; enriching with entities and keyphrases; embedding; and upserting into blue-data's vector layer. The result is a `DocumentDataSource` — a first-class member of the blue-data intelligence layer that agents can filter, search, and cross-reference with other sources, not a standalone search box.
 
 → **[Full feature list](docs/features.md)** · **[Installation](docs/installation.md)** · **[Guide](docs/guide.md)** · **[Extending](docs/extending.md)** · **[Examples](examples/README.md)** · **[MCP server](docs/mcp.md)**
 
@@ -56,19 +56,98 @@ results = pipeline.search(
 
 See the runnable demo: `python3 examples/scenario-demos/structured_doc_query_demo.py`
 
+**The integration story: documents alongside your other data sources**
+
+The deeper reason to use blue-data-doc-source over a standalone RAG library is that documents don't exist in isolation. A contract references parties that exist in your CRM. An invoice references line items that exist in your ERP. A policy references roles that exist in your HR system. Standalone RAG libraries have no answer to this — they are silos.
+
+`DocumentDataSource` extends blue-data's `DataSource` ABC. It registers in the same `DataRegistry` as your SQL sources, graph stores, and JSON sources. Agents built on the blue-data intelligence layer can query across all of them in a single context — retrieving contract terms, cross-referencing against entity data, joining invoice totals against purchase orders — without stitching together separate clients.
+
+```python
+from blue_data import DataRegistry
+from blue_data_doc_source import (
+    DocumentDataSource, OpenAIEmbeddingModel,
+    KeywordClassifier, LLMSchemaExtractor,
+)
+from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
+
+doc_source = DocumentDataSource(
+    name="legal_corpus",
+    embedding_model=OpenAIEmbeddingModel(),
+    vector_source=RedisVectorSource(host="localhost", port=6379),
+    classifier=KeywordClassifier(),
+    schema_extractor=LLMSchemaExtractor(),
+)
+
+# Documents registered alongside SQL, graph, and JSON sources — one registry for all
+registry = DataRegistry()
+registry.register(sql_source)    # CRM: customers, vendors
+registry.register(graph_source)  # entity relationships
+registry.register(doc_source)    # contracts, invoices, policies
+
+# Agent queries documents the same way it queries any other source
+contracts = doc_source.execute_query({
+    "op": "DOCUMENT.FIND",
+    "filter": {"document_type": "contract", "fields.governing_law": {"contains": "California"}},
+})
+
+# Scope text retrieval to matched documents — combine with other source results in the agent
+for doc in contracts:
+    clauses = doc_source.execute_query({
+        "op": "DOCUMENT.SEARCH",
+        "query": "indemnification obligations",
+        "filter": {"document_id": doc["document_id"]},
+        "k": 3,
+    })
+```
+
+**Production-grade ingestion that standalone RAG libraries skip**
+
+Every document gets a SHA-256 content hash as its `document_id`. Re-ingesting the same file always produces the same chunk IDs — upsert, not duplicate. LangChain and LlamaIndex leave deduplication entirely to the developer.
+
+Extracted schema fields persist across process restarts via `FileSchemaStore`. Ingest once, the schema survives the restart — `DOCUMENT.FIND` works immediately with no re-extraction.
+
+```python
+from blue_data_doc_source import DocumentDataSource, FileSchemaStore, KeywordClassifier, LLMSchemaExtractor
+
+source = DocumentDataSource(
+    name="legal_corpus",
+    schema_store=FileSchemaStore("schemas.json"),  # atomic JSON write — survives restarts
+    classifier=KeywordClassifier(),
+    schema_extractor=LLMSchemaExtractor(),
+    embedding_model=OpenAIEmbeddingModel(),
+    vector_source=redis_source,
+)
+
+# Ingest once — schema written atomically to schemas.json
+source.execute_query({"op": "DOCUMENT.INGEST", "path": "contract.pdf"})
+
+# After restart: FileSchemaStore reloads schemas.json — no re-extraction needed
+docs = source.execute_query({
+    "op": "DOCUMENT.FIND",
+    "filter": {"fields.parties": {"contains": "Acme Corp"}},
+})
+```
+
 ## Core capabilities
+
+### What differentiates this from LangChain / LlamaIndex / Haystack
+
+- **blue-data DataRegistry integration** — `DocumentDataSource` extends blue-data's `DataSource` ABC; registers in the same `DataRegistry` as SQL, graph, and JSON sources; agents query documents and structured data in a single context with one interface
+- **Document schema inference** — `KeywordClassifier` identifies document type (`contract`, `invoice`, `policy`, `research_paper`, `financial_report`) at ingest with zero API cost; `LLMSchemaExtractor` extracts typed fields (`parties`, `effective_date`, `total_due`, `governing_law`, …) via a single LLM call per document; `document_type` propagates to every chunk and is filterable in KNN search
+- **Structured corpus query (`DOCUMENT.FIND`)** — filter across all ingested documents by extracted field values (`{"fields.governing_law": {"contains": "California"}}`, `{"fields.total_due": {"gt": 30000}}`); currency symbols and commas stripped automatically before numeric comparison; all conditions ANDed; no embedding, no LLM, deterministic
+- **Persistent schema store** — `SchemaStore` ABC with `MemorySchemaStore` (default) and `FileSchemaStore` (atomic JSON write, survives process restarts); injectable — pass any backend
+- **Content-addressed ingestion** — SHA-256 hash of file bytes is the `document_id`; re-ingesting the same file is always a safe upsert; chunk IDs are stable across re-ingests; deduplication LangChain and LlamaIndex leave to the developer
+
+### Standard pipeline (solid foundation, not unique)
 
 - **Multi-format parsing** — PDF (text layer + optional Tesseract OCR), plain text, and DOCX through a single interface; `PlumberPDFParser` adds structure-aware table extraction
 - **Section-aware chunking** — detects markdown, numbered, ALL-CAPS, and underlined headers; keeps chunks within section boundaries; preserves section heading on every chunk
-- **Content-addressed deduplication** — SHA-256 hash of file bytes; same file always produces the same chunk IDs; re-ingest is a safe upsert
 - **Full provenance** — every chunk carries `file_name`, `page_start`, `page_end`, `section_title`, and `content_type`; results are always citable
 - **Rich search** — `search_rich()` / `DOCUMENT.SEARCH_RICH` returns ranked results with per-chunk citation, neighbor context, and `by_document` grouping in a single call
 - **Regex enrichment** — `BasicEnricher` extracts named entities (DATE, EMAIL, PERCENT, MONEY, PROPER_NOUN) and semantic hints with no ML dependency
 - **LLM enrichment** — `LLMEnricher` extracts keyphrases, subject-predicate-object relationships, semantic flags (`is_legal`, `is_financial`, …), and language via a single LLM call per chunk; any provider via `llm_fn` injection
 - **Pluggable embeddings** — `OpenAIEmbeddingModel`, `DummyEmbeddingModel`, or any custom `EmbeddingModel` subclass
 - **Pluggable vector storage** — any blue-data `VectorSource`; `MemoryVectorSource` for dev, `RedisVectorSource` for production
-- **Document schema inference** — `KeywordClassifier` identifies document type (contract, invoice, policy, research_paper, financial_report) at ingest time with zero API cost; `LLMSchemaExtractor` extracts typed fields (parties, effective_date, total_due, …) via a single LLM call per document; `document_type` propagates to every chunk
-- **Structured corpus query** — `DOCUMENT.FIND` filters across all ingested documents by extracted field values (`{"fields.governing_law": {"contains": "California"}}`, `{"fields.total_due": {"gt": 30000}}`); `FileSchemaStore` persists extracted fields across restarts
 - **Metadata pre-filtering** — scope KNN search to a document, file, section, MIME type, or page range before scoring
 - **Natural language queries** — `NLQueryParser` maps plain-English instructions to `DOCUMENT.*` ops; `parse_fn` injection for keyless use
 - **Pluggable parsers** — `Parser` ABC for external processors (LlamaIndex, vision models, cloud OCR); bypass via `ingest_text` / `ingest_pages`
