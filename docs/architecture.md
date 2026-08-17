@@ -9,10 +9,19 @@ File (.txt / .pdf / .docx)
 Parser              extract raw text or page-by-page text
   │
   ▼
+DocumentClassifier  classify document type — contract, invoice, policy, … (optional)
+  │
+  ▼
+SchemaExtractor     extract typed fields — parties, total_due, governing_law, … (optional)
+  │
+  ▼
+SchemaStore         persist schema record — MemorySchemaStore or FileSchemaStore (optional)
+  │
+  ▼
 Chunker             split into overlapping word-windows, section-aware
   │
   ▼
-Enricher            regex entity + keyword extraction (optional)
+Enricher            entity + keyword extraction — BasicEnricher or LLMEnricher (optional)
   │
   ▼
 EmbeddingModel      embed each chunk text (optional)
@@ -123,9 +132,11 @@ class Enricher(ABC):
         # must return {"entities": [...], "semantic_hints": {...}}
 ```
 
-`BasicEnricher` is the only built-in implementation. It uses regular expressions — no ML dependency. Extracted entities carry `{"text": str, "type": str}`. Entity types: `DATE`, `EMAIL`, `PERCENT`, `MONEY`, `PROPER_NOUN`.
+Built-in implementations:
 
-Semantic hints always include: `word_count`, `sentence_count`, `has_questions`, `has_numbers`, `keywords` (top-k non-stopword terms by frequency).
+**`BasicEnricher`** — regex-based, no ML dependency. Entity types: `DATE`, `EMAIL`, `PERCENT`, `MONEY`, `PROPER_NOUN`. Semantic hints: `word_count`, `sentence_count`, `has_questions`, `has_numbers`, `keywords`.
+
+**`LLMEnricher`** — one LLM call per chunk via injected `llm_fn: (str) -> str`. Entity types: `PERSON`, `ORG`, `LOCATION`, `DATE`, `MONEY`, `PERCENT`, `PRODUCT`, `LEGAL_TERM`, `REGULATION`. Additional semantic hints: `keyphrases`, `relationships` (subject/predicate/object triples), `semantic_flags` (`is_legal`, `is_financial`, `is_policy`, `is_technical`, `is_hr`, `contains_obligation`, `contains_risk`), `language`, `summary`. Falls back to `fallback.enrich()` on LLM failure or parse error.
 
 When no `Enricher` is set, `entities` and `semantic_hints` on each `ChunkRecord` are left empty.
 
@@ -211,6 +222,7 @@ The registry is in-process only. Cross-process stale-chunk cleanup requires an e
 | Enrichment logic | `DocumentPipeline(enricher=MyEnricher())` |
 | Embedding model | `DocumentPipeline(embedding_model=MyModel())` |
 | Vector store backend | `DocumentPipeline(vector_source=MyVectorSource())` |
+| Schema storage backend | `DocumentPipeline(schema_store=FileSchemaStore("schemas.json"))` |
 | NL query parsing | `DocumentDataSource(nl_parser=NLQueryParser(parse_fn=...))` |
 
 Pre-extracted text or pages can be fed directly to `pipeline.ingest_text()` or `pipeline.ingest_pages()`, bypassing file I/O entirely.

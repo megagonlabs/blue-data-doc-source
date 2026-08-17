@@ -21,6 +21,7 @@ DocumentPipeline(
     ocr_fallback: bool = False,
     classifier: DocumentClassifier | None = None,
     schema_extractor: SchemaExtractor | None = None,
+    schema_store: SchemaStore | None = None,
 )
 ```
 
@@ -28,7 +29,8 @@ DocumentPipeline(
 - `parser` — when provided, overrides built-in extension detection; all extensions are routed through the custom parser
 - `ocr_fallback` — passes `ocr_fallback=True` to the built-in `PDFParser`; has no effect when a custom `parser` is set
 - `classifier` — when set, classifies the document type once per ingest (before the chunk loop) and propagates `document_type` to every `ChunkRecord`; defaults to `None` (no classification)
-- `schema_extractor` — when set alongside `classifier`, extracts typed fields from the document text via a single call per ingest; result stored in `_schema_registry`; defaults to `None`
+- `schema_extractor` — when set alongside `classifier`, extracts typed fields from the document text via a single call per ingest; result stored in `schema_store`; defaults to `None`
+- `schema_store` — backend for schema records; defaults to `MemorySchemaStore()` (in-process); pass `FileSchemaStore(path)` for persistence across restarts
 
 ### Methods
 
@@ -41,6 +43,7 @@ DocumentPipeline(
 | `ensure_index(collection=None)` | `None` | Create vector index for the collection; idempotent — safe to call multiple times |
 | `delete(path=None, document_id=None, chunk_count=None, collection=None)` | `int` | Delete all chunks for a document; returns count of successful delete calls |
 | `get_schema(document_id)` | `dict \| None` | Return the schema record stored during ingest; `None` if no `classifier` was set or the document is unknown |
+| `find_schemas(filter=None)` | `list[dict]` | Return all schema records matching the filter dict; see `SchemaStore.find()` for filter syntax; returns `[]` when no classifier is set |
 | `search_rich(query, k=5, collection=None, filters=None, context_chunks=1)` | `dict` | Enriched search response: ranked results with citation, neighbor context, and `by_document` grouping |
 
 ### Document identity and deduplication
@@ -69,6 +72,7 @@ DocumentDataSource(
     ocr_fallback: bool = False,
     classifier: DocumentClassifier | None = None,
     schema_extractor: SchemaExtractor | None = None,
+    schema_store: SchemaStore | None = None,
 )
 ```
 
@@ -81,6 +85,7 @@ DocumentDataSource(
 | `DOCUMENT.ENSURE_INDEX` | — | `collection` | `None` |
 | `DOCUMENT.DELETE` | `path` OR (`document_id` + `chunk_count`) | `collection` | `int` — deleted chunk count |
 | `DOCUMENT.GET_SCHEMA` | `document_id` | — | `dict` — schema record; raises if unknown |
+| `DOCUMENT.FIND` | — | `filter` (dict) | `list[dict]` — schema records matching filter; see `SchemaStore.find()` for filter syntax |
 | `DOCUMENT.SEARCH_RICH` | `query` | `collection`, `k` (default 5), `filter` (dict), `context_chunks` (int, default 1) | `dict` — enriched results with citation, neighbor context, and `by_document` grouping |
 
 ### Methods
@@ -196,6 +201,31 @@ Semantic hints computed:
 | `has_questions` | bool | Whether the chunk contains `?` |
 | `has_numbers` | bool | Whether the chunk contains any digit sequence |
 | `keywords` | list[str] | Top-N non-stopword words by frequency (default N=10) |
+
+**`LLMEnricher`** — one LLM call per chunk via an injected `llm_fn: (str) -> str`. Provider-agnostic.
+
+```python
+LLMEnricher(
+    llm_fn: Callable[[str], str],
+    fallback: Enricher | None = None,  # used when LLM call or JSON parse fails
+    max_chunk_chars: int = 2000,       # truncates chunk text before sending to LLM
+)
+```
+
+Fields extracted per chunk:
+
+| Field | Location | Description |
+|-------|----------|-------------|
+| `entities` | top-level list | `[{text, type}]`; types: `PERSON`, `ORG`, `LOCATION`, `DATE`, `MONEY`, `PERCENT`, `PRODUCT`, `LEGAL_TERM`, `REGULATION` |
+| `keyphrases` | `semantic_hints` | List of key phrases extracted from the chunk |
+| `relationships` | `semantic_hints` | Subject-predicate-object triples: `[{subject, predicate, object}]` |
+| `semantic_flags` | `semantic_hints` | Boolean flags: `is_legal`, `is_financial`, `is_policy`, `is_technical`, `is_hr`, `contains_obligation`, `contains_risk` |
+| `language` | `semantic_hints` | ISO 639-1 language code (e.g. `"en"`) |
+| `summary` | `semantic_hints` | One-sentence summary of the chunk |
+| `word_count` | `semantic_hints` | Computed locally — not from LLM |
+| `sentence_count` | `semantic_hints` | Computed locally — not from LLM |
+
+On LLM call failure or JSON parse error, falls back to `fallback.enrich(text)` if provided, otherwise returns a minimal dict with computed `word_count` / `sentence_count` only.
 
 See [extending.md](../docs/extending.md) for custom `Enricher` implementation and combiner pattern.
 
@@ -319,7 +349,7 @@ Builds a type-specific prompt from the document text and returns a JSON dict of 
 
 ### Schema record format
 
-The schema stored in `pipeline._schema_registry` (and returned by `get_schema` / `DOCUMENT.GET_SCHEMA`) has the following shape:
+The schema stored in `pipeline.schema_store` (and returned by `get_schema` / `DOCUMENT.GET_SCHEMA`) has the following shape:
 
 ```python
 {
@@ -336,4 +366,53 @@ The schema stored in `pipeline._schema_registry` (and returned by `get_schema` /
 }
 ```
 
-Schema is stored in-process only. Cross-process retrieval is not supported — store the schema dict from the ingest response if persistence is required.
+Schema persistence is controlled by the injected `SchemaStore`. The default `MemorySchemaStore` is in-process only. Pass `FileSchemaStore(path)` to persist across restarts — the file is written atomically on every upsert.
+
+---
+
+## SchemaStore (ABC)
+
+Pluggable backend for per-document schema records. Injected into `DocumentPipeline` and `DocumentDataSource` via `schema_store=`. Defaults to `MemorySchemaStore()` when omitted.
+
+```python
+class SchemaStore(ABC):
+    def upsert(self, record: dict) -> None: ...
+    def get(self, document_id: str) -> dict | None: ...
+    def find(self, filter: dict | None = None) -> list[dict]: ...
+    def delete(self, document_id: str) -> None: ...
+```
+
+### Built-in implementations
+
+**`MemorySchemaStore`** — in-process dict; default when no `schema_store=` is passed.
+
+**`FileSchemaStore(path)`** — JSON file backend; reads on init, writes atomically on every `upsert` and `delete` (write-to-tmp then `os.replace`). Survives process restarts. Creates the file on first write; handles empty or missing files safely.
+
+### `find()` filter syntax
+
+```python
+# Exact match (case-insensitive for strings)
+store.find({"document_type": "contract"})
+
+# Dot notation for nested fields
+store.find({"fields.governing_law": "State of Delaware"})
+
+# Substring match
+store.find({"fields.vendor": {"contains": "Blue Solutions"}})
+
+# Numeric comparison — strips $€£¥ and commas before comparing
+store.find({"fields.total_due": {"gt": 30000}})
+store.find({"fields.contract_value": {"lte": 50000}})
+
+# ISO date string lexicographic comparison
+store.find({"fields.effective_date": {"lt": "2026-01-01"}})
+
+# Multiple conditions — all ANDed
+store.find({
+    "document_type": "invoice",
+    "fields.vendor": {"contains": "Acme"},
+    "fields.total_due": {"gt": 10000},
+})
+```
+
+Supported operators: `contains`, `gt`, `lt`, `gte`, `lte`. Pass `None` or `{}` to return all records.

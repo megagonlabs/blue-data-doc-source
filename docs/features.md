@@ -129,6 +129,83 @@ Pass `enricher=BasicEnricher()` to `DocumentDataSource` to attach enrichment to 
 
 ---
 
+## LLM enrichment
+
+`LLMEnricher` makes a single LLM call per chunk and extracts richer metadata than regex alone: named entities with extended types, keyphrases, subject-predicate-object relationships, semantic flags, language, and a one-sentence summary.
+
+```python
+from blue_data_doc_source import LLMEnricher, BasicEnricher
+import openai
+
+def call_openai(text: str) -> str:
+    response = openai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": text}],
+    )
+    return response.choices[0].message.content
+
+enricher = LLMEnricher(
+    llm_fn=call_openai,
+    fallback=BasicEnricher(),   # used when LLM call or JSON parse fails
+    max_chunk_chars=2000,       # truncate chunk before sending to LLM
+)
+```
+
+Entity types extracted: `PERSON`, `ORG`, `LOCATION`, `DATE`, `MONEY`, `PERCENT`, `PRODUCT`, `LEGAL_TERM`, `REGULATION`.
+
+Fields added to `semantic_hints`: `keyphrases`, `relationships` (subject/predicate/object triples), `semantic_flags` (`is_legal`, `is_financial`, `is_policy`, `is_technical`, `is_hr`, `contains_obligation`, `contains_risk`), `language` (ISO 639-1), `summary`. `word_count` and `sentence_count` are always computed locally regardless of LLM output.
+
+`llm_fn` is any `(str) -> str` callable — provider-agnostic. On failure, falls back to `fallback.enrich(text)` if provided.
+
+---
+
+## Structured corpus query (DOCUMENT.FIND)
+
+`DOCUMENT.FIND` filters across all ingested documents by extracted schema field values — no embedding, no LLM, deterministic. Requires a `classifier` to be set so that schema records exist.
+
+```python
+# Filter by document type
+docs = pipeline.find_schemas({"document_type": "contract"})
+
+# Filter by nested extracted field
+docs = pipeline.find_schemas({"fields.governing_law": {"contains": "California"}})
+
+# Numeric comparison — currency symbols and commas stripped automatically
+docs = pipeline.find_schemas({"fields.total_due": {"gt": 30000}})
+
+# Multiple conditions ANDed
+docs = pipeline.find_schemas({
+    "document_type": "invoice",
+    "fields.vendor":    {"contains": "Blue Solutions"},
+    "fields.total_due": {"gt": 10000},
+})
+```
+
+Supported filter operators: exact match (case-insensitive for strings), `contains` (substring), `gt`, `lt`, `gte`, `lte` (numeric with currency stripping, or lexicographic for ISO date strings).
+
+Via `DocumentDataSource`:
+
+```python
+docs = source.execute_query({
+    "op": "DOCUMENT.FIND",
+    "filter": {"document_type": "contract", "fields.governing_law": {"contains": "Delaware"}},
+})
+```
+
+Schema records persist across restarts when `FileSchemaStore` is used — ingest once, query forever.
+
+**Two-step agent pattern** — `DOCUMENT.FIND` narrows the corpus to the right documents, then `DOCUMENT.SEARCH` retrieves text only within those documents:
+
+```python
+# Step 1: find by structured field — deterministic
+docs = pipeline.find_schemas({"fields.parties": {"contains": "Acme Corp"}})
+
+# Step 2: retrieve text scoped to matched document only
+chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["document_id"]})
+```
+
+---
+
 ## Pluggable embedding models
 
 `EmbeddingModel` is an ABC with a single `embed_text(text) -> list[float]` method and a `dim` property. Swap implementations without changing the pipeline.
@@ -350,7 +427,17 @@ pipeline.ingest("contract.pdf")
 results = pipeline.search("termination clause", filters={"document_type": "contract"})
 ```
 
-The schema record is in-process only — it is not upserted to the vector store. Retrieve it during the same process via `pipeline.get_schema(document_id)` or from the `"schema"` key in the ingest response. If you need it after restart, save the `fields` dict yourself.
+The schema record is not upserted to the vector store. Retrieve it via `pipeline.get_schema(document_id)` or `DOCUMENT.GET_SCHEMA`. By default the schema is stored in `MemorySchemaStore` (in-process only). Pass `FileSchemaStore(path)` to persist across restarts:
+
+```python
+from blue_data_doc_source import DocumentPipeline, FileSchemaStore, KeywordClassifier, LLMSchemaExtractor
+
+pipeline = DocumentPipeline(
+    classifier=KeywordClassifier(),
+    schema_extractor=LLMSchemaExtractor(),
+    schema_store=FileSchemaStore("schemas.json"),  # survives process restarts
+)
+```
 
 ---
 

@@ -100,6 +100,7 @@ results = source.execute_query({
 | `DOCUMENT.ENSURE_INDEX` | — | `None` |
 | `DOCUMENT.DELETE` | `path` OR (`document_id` + `chunk_count`) | `int` — deleted chunk count |
 | `DOCUMENT.GET_SCHEMA` | `document_id` | `dict` — schema record; raises if unknown |
+| `DOCUMENT.FIND` | — | `list[dict]` — schema records matching `filter`; no embedding, no LLM, deterministic |
 
 ---
 
@@ -169,6 +170,18 @@ records = pipeline.ingest("policy.pdf")
 for r in records:
     print(r["entities"])        # [{"text": "January 15, 2026", "type": "DATE"}, ...]
     print(r["semantic_hints"])  # {"word_count": 312, "keywords": [...], ...}
+```
+
+`LLMEnricher` makes one LLM call per chunk and extracts richer metadata: extended entity types (`PERSON`, `ORG`, `LOCATION`, `LEGAL_TERM`, `REGULATION`, …), keyphrases, subject-predicate-object relationships, semantic flags (`is_legal`, `is_financial`, …), language, and a summary. Provider-agnostic via `llm_fn: (str) -> str`.
+
+```python
+from blue_data_doc_source import LLMEnricher, BasicEnricher
+
+enricher = LLMEnricher(
+    llm_fn=lambda text: my_llm_call(text),
+    fallback=BasicEnricher(),  # used on LLM failure or parse error
+)
+pipeline = DocumentPipeline(enricher=enricher, ...)
 ```
 
 Enrichment is optional — omit `enricher` and `entities` / `semantic_hints` are empty on every record. See [extending.md](extending.md) to implement a custom enricher.
@@ -502,6 +515,49 @@ schema = source.execute_query({
     "op": "DOCUMENT.GET_SCHEMA",
     "document_id": "doc_abc123",
 })
+```
+
+### Schema persistence (FileSchemaStore)
+
+By default schemas are stored in `MemorySchemaStore` — in-process only. Pass `FileSchemaStore` to persist across restarts:
+
+```python
+from blue_data_doc_source import DocumentPipeline, FileSchemaStore, KeywordClassifier, LLMSchemaExtractor
+
+pipeline = DocumentPipeline(
+    classifier=KeywordClassifier(),
+    schema_extractor=LLMSchemaExtractor(),
+    schema_store=FileSchemaStore("schemas.json"),  # written atomically on every ingest
+)
+# After restart, schemas.json is reloaded — DOCUMENT.FIND works immediately
+```
+
+### Structured corpus query (DOCUMENT.FIND)
+
+`find_schemas()` filters across all ingested documents by schema field values — no embedding, no LLM call at query time:
+
+```python
+# All contracts governed by California
+docs = pipeline.find_schemas({"document_type": "contract", "fields.governing_law": {"contains": "California"}})
+
+# Invoices over $30,000 — currency symbols stripped automatically
+docs = pipeline.find_schemas({"document_type": "invoice", "fields.total_due": {"gt": 30000}})
+```
+
+Via `DocumentDataSource`:
+
+```python
+docs = source.execute_query({
+    "op": "DOCUMENT.FIND",
+    "filter": {"fields.parties": {"contains": "Acme Corp"}},
+})
+```
+
+**Two-step pattern** — combine with `DOCUMENT.SEARCH` for precise, noise-free retrieval:
+
+```python
+docs   = pipeline.find_schemas({"fields.parties": {"contains": "Acme Corp"}})
+chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["document_id"]})
 ```
 
 ### Custom classifier or extractor

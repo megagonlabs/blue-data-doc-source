@@ -227,3 +227,93 @@ Claude can then:
 - Delete: `"remove the old contract doc_abc123 from contracts"`
 
 All pipeline logic — chunking, embedding, deduplication — runs server-side. Claude interacts only through MCP tool calls.
+
+---
+
+## Scenario 9: Structured Corpus Query (DOCUMENT.FIND + Two-Step Pattern)
+
+A legal team has ingested 200 contracts, invoices, and policies into one corpus. They need to find all contracts governed by California law and retrieve their indemnification clauses — without the noise of semantic search returning irrelevant document types.
+
+**Example:**
+
+```python
+from blue_data_doc_source import (
+    DocumentDataSource, OpenAIEmbeddingModel, KeywordClassifier,
+    LLMSchemaExtractor, FileSchemaStore,
+)
+from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
+
+source = DocumentDataSource(
+    name="legal_corpus",
+    embedding_model=OpenAIEmbeddingModel(),
+    vector_source=RedisVectorSource(host="localhost", port=6379),
+    classifier=KeywordClassifier(),
+    schema_extractor=LLMSchemaExtractor(),
+    schema_store=FileSchemaStore("schemas.json"),
+    default_collection="legal_corpus",
+)
+
+# Step 1 — structured filter: no embedding, no LLM, deterministic
+contracts = source.execute_query({
+    "op": "DOCUMENT.FIND",
+    "filter": {
+        "document_type": "contract",
+        "fields.governing_law": {"contains": "California"},
+    },
+})
+print(f"Found {len(contracts)} California contracts")
+# → Found 3 California contracts
+
+# Step 2 — text retrieval scoped to each matched document
+for doc in contracts:
+    clauses = source.execute_query({
+        "op": "DOCUMENT.SEARCH",
+        "query": "indemnification obligations",
+        "filter": {"document_id": doc["document_id"]},
+        "k": 2,
+    })
+    print(f"\n{doc['fields'].get('parties', [])}")
+    for c in clauses:
+        print(f"  § {c.get('section_title')}  {c['text'][:100]}")
+```
+
+Without `DOCUMENT.FIND`, a search for "indemnification California" returns chunks from all document types, ranked by semantic similarity, with no reliable way to know which contract they belong to.
+
+---
+
+## Scenario 10: Persistent Schema Store Across Restarts
+
+A developer runs nightly ingestion jobs that add new documents to a corpus. Agents querying the corpus the next morning need access to extracted schema fields without re-extracting them.
+
+**Example:**
+
+```python
+# --- Ingest job (runs nightly) ---
+from blue_data_doc_source import DocumentPipeline, FileSchemaStore, KeywordClassifier, LLMSchemaExtractor
+
+pipeline = DocumentPipeline(
+    classifier=KeywordClassifier(),
+    schema_extractor=LLMSchemaExtractor(),
+    schema_store=FileSchemaStore("/data/schemas.json"),  # atomic write on every ingest
+    embedding_model=...,
+    vector_source=...,
+)
+pipeline.ingest("new_contract.pdf")
+# → schemas.json updated atomically; no data loss on crash
+
+# --- Agent query (next morning, new process) ---
+pipeline2 = DocumentPipeline(
+    classifier=KeywordClassifier(),
+    schema_store=FileSchemaStore("/data/schemas.json"),  # reloads existing schemas on init
+)
+
+# All previously extracted schemas are immediately queryable
+docs = pipeline2.find_schemas({
+    "document_type": "contract",
+    "fields.effective_date": {"gte": "2026-01-01"},
+})
+print(f"{len(docs)} contracts effective in 2026")
+# → No re-extraction. No API calls. Just a filter over the loaded store.
+```
+
+`FileSchemaStore` writes atomically (write-to-tmp, then `os.replace`) — a crash mid-write never corrupts the file. The store reloads cleanly from disk on every new process.
