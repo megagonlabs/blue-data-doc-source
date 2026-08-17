@@ -63,4 +63,8 @@ class WindowChunker(Chunker):
         return chunks
 
     def chunk_with_titles(self, text: str) -> List[Tuple[Optional[str], str]]:
+        """Chunk text with section_title=None on every chunk.
+
+        WindowChunker has no section awareness — title is always None.
+        """
         return [(None, chunk) for chunk in self.chunk(text)]

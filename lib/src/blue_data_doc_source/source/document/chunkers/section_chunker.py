@@ -15,6 +15,12 @@ _UNDERLINE = re.compile(r'^[=\-]{3,}\s*$')
 
 
 def _extract_title(line: str) -> Optional[str]:
+    """Return the heading text if *line* matches a recognised header pattern, else None.
+
+    Recognised patterns: markdown (``# Title``), numbered (``1.2 Overview``),
+    ALL-CAPS (3–8 words). Underlined headers are handled by the caller before
+    this function is reached.
+    """
     stripped = line.strip()
     if not stripped:
         return None
@@ -45,6 +51,11 @@ class SectionChunker(Chunker):
         self._window = WindowChunker(chunk_size=chunk_size, overlap=overlap)
 
     def chunk_with_titles(self, text: str) -> List[Tuple[Optional[str], str]]:
+        """Split text by detected section headers and chunk within each section.
+
+        Returns (section_title, chunk_text) pairs. When no headers are found,
+        falls back to plain WindowChunker with section_title=None on all chunks.
+        """
         sections = self._split_sections(text)
         if not sections:
             return [(None, chunk) for chunk in self._window.chunk(text)]
@@ -59,6 +70,11 @@ class SectionChunker(Chunker):
         return result
 
     def _split_sections(self, text: str) -> List[Tuple[Optional[str], str]]:
+        """Parse text into (title, content) section pairs.
+
+        Returns an empty list when no named headers are detected — the caller
+        uses this as the signal to fall back to plain window chunking.
+        """
         lines = text.splitlines()
         sections: List[Tuple[Optional[str], str]] = []
         current_title: Optional[str] = None

@@ -126,4 +126,9 @@ class SentenceChunker(Chunker):
         return chunks
 
     def chunk_with_titles(self, text: str) -> List[Tuple[Optional[str], str]]:
+        """Chunk text with section_title=None on every chunk.
+
+        SentenceChunker has no section awareness — title is always None.
+        Use SectionChunker to preserve section headings.
+        """
         return [(None, chunk) for chunk in self.chunk(text)]
