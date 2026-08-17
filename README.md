@@ -1,20 +1,20 @@
 # blue-data-doc-source
 
-Documents are data. Not search indexes — data. blue-data-doc-source makes them queryable, filterable, and joinable alongside the rest of your data layer: SQL tables, graph stores, JSON sources, and knowledge bases, all registered in the same blue-data `DataRegistry` and accessible to the same agents.
+Documents are data — not merely search-index content. blue-data-doc-source makes them queryable and filterable alongside SQL tables, graph stores, JSON sources, and knowledge bases. All are registered through the same blue-data `DataRegistry`, allowing agents to retrieve document evidence and cross-reference it with other enterprise data sources.
 
-It handles the full pipeline from raw file to queryable data source: parsing PDFs, DOCX, and text files; classifying document type and extracting typed fields at ingest; chunking with section awareness; enriching with entities and keyphrases; embedding; and upserting into blue-data's vector layer. The result is a `DocumentDataSource` — a first-class member of the blue-data intelligence layer that agents can filter, search, and cross-reference with other sources, not a standalone search box.
+It handles the full pipeline from raw file to queryable data source: parsing PDFs, DOCX, and text files; assigning document type and extracting typed fields at ingest; chunking with section awareness; enriching with entities and keyphrases; embedding; and upserting into blue-data's vector layer. The result is a `DocumentDataSource` — a first-class member of the blue-data intelligence layer, not a standalone search box.
 
 → **[Full feature list](docs/features.md)** · **[Installation](docs/installation.md)** · **[Guide](docs/guide.md)** · **[Extending](docs/extending.md)** · **[Examples](examples/README.md)** · **[MCP server](docs/mcp.md)**
 
 ## Why blue-data-doc-source
 
-LLMs searching enterprise documents fail in predictable, silent ways. blue-data-doc-source fixes the root cause — not the prompt.
+The genuine differentiator is not any single feature — it is the combination: document-level typed records, chunk-level semantic retrieval, a two-stage find-then-search query pattern, and integration with blue-data's broader data-source and registry model. Together these make documents a structured, queryable part of an agent's data layer rather than a separate search silo.
 
-**Semantic search returns the wrong document**
+**Failure 1 — Semantic search returns the wrong document**
 
-A corpus of 100 vendor contracts. The agent asks *"what does Acme Corp's termination clause say?"* Every RAG library (LangChain, LlamaIndex, Haystack) does the same thing: embed the query, retrieve the top-k most similar chunks. The result: chunks from six different contracts that *mention* termination, ranked above the specific Acme Corp document the user cares about. The right contract may rank 15th because it uses "cancellation" instead of "termination."
+A corpus of 100 vendor contracts. The agent asks *"what does Acme Corp's termination clause say?"* A conventional vector-search pipeline embeds the query and retrieves the most semantically similar chunks across the corpus. Without document-level filtering, chunks from unrelated contracts may outrank the relevant Acme Corp clause — particularly when that contract uses "cancellation" rather than "termination."
 
-blue-data-doc-source fixes this with a two-step pattern. At ingest time, `LLMSchemaExtractor` extracts `parties`, `governing_law`, and `effective_date` from each contract — one API call per document, not per query. At query time, `DOCUMENT.FIND` narrows to the right document deterministically, then `DOCUMENT.SEARCH` retrieves the clause within that document only. No noise.
+blue-data-doc-source adds a two-step pattern. At ingest time, `LLMSchemaExtractor` extracts `parties`, `governing_law`, and `effective_date` from each contract — one API call per document, not per query. At query time, `DOCUMENT.FIND` evaluates filters over the persisted extracted fields, then `DOCUMENT.SEARCH` retrieves the clause within the matched document only.
 
 ```python
 # Step 1 — structured filter: no embedding, no LLM, deterministic
@@ -29,7 +29,7 @@ chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["
 
 *"Find all invoices from Blue Solutions where the total exceeds $30,000."* A vector search returns chunks that *mention* Blue Solutions and amounts. It cannot evaluate `total_due > 30000` — that requires parsing `"$35,154"` as a number, which embedding distance cannot do. The answer is either wrong or requires the LLM to read every invoice chunk and compare manually.
 
-blue-data-doc-source extracts `vendor` and `total_due` from each invoice at ingest. The query becomes a direct filter — no LLM at query time, no embedding cost, no hallucinated comparisons.
+blue-data-doc-source extracts `vendor` and `total_due` from each invoice at ingest. The query becomes a direct filter — no query-time LLM comparison, no embedding cost. (Field values are extracted by an LLM at ingest; the filter evaluation itself is deterministic over those persisted values.)
 
 ```python
 pipeline.find_schemas({
@@ -58,9 +58,9 @@ See the runnable demo: `python3 examples/scenario-demos/structured_doc_query_dem
 
 **The integration story: documents alongside your other data sources**
 
-The deeper reason to use blue-data-doc-source over a standalone RAG library is that documents don't exist in isolation. A contract references parties that exist in your CRM. An invoice references line items that exist in your ERP. A policy references roles that exist in your HR system. Standalone RAG libraries have no answer to this — they are silos.
+Documents don't exist in isolation. A contract references parties that exist in your CRM. An invoice references line items that exist in your ERP. A policy references roles that exist in your HR system. General-purpose RAG frameworks can be connected to structured systems, but doing so typically requires application-specific orchestration for each combination.
 
-`DocumentDataSource` extends blue-data's `DataSource` ABC. It registers in the same `DataRegistry` as your SQL sources, graph stores, and JSON sources. Agents built on the blue-data intelligence layer can query across all of them in a single context — retrieving contract terms, cross-referencing against entity data, joining invoice totals against purchase orders — without stitching together separate clients.
+`DocumentDataSource` extends blue-data's `DataSource` ABC and registers in the same `DataRegistry` as your SQL sources, graph stores, and JSON sources. Agents built on the blue-data intelligence layer can retrieve document evidence and cross-reference it with entity data from other registered sources — with a shared registration model rather than per-integration glue code.
 
 ```python
 from blue_data import DataRegistry
@@ -78,13 +78,13 @@ doc_source = DocumentDataSource(
     schema_extractor=LLMSchemaExtractor(),
 )
 
-# Documents registered alongside SQL, graph, and JSON sources — one registry for all
+# All sources share one registry — same registration model, source-specific query ops
 registry = DataRegistry()
 registry.register(sql_source)    # CRM: customers, vendors
 registry.register(graph_source)  # entity relationships
 registry.register(doc_source)    # contracts, invoices, policies
 
-# Agent queries documents the same way it queries any other source
+# Filter documents by extracted schema fields
 contracts = doc_source.execute_query({
     "op": "DOCUMENT.FIND",
     "filter": {"document_type": "contract", "fields.governing_law": {"contains": "California"}},
@@ -100,9 +100,9 @@ for doc in contracts:
     })
 ```
 
-**Production-grade ingestion that standalone RAG libraries skip**
+**Reliable, repeatable ingestion**
 
-Every document gets a SHA-256 content hash as its `document_id`. Re-ingesting the same file always produces the same chunk IDs — upsert, not duplicate. LangChain and LlamaIndex leave deduplication entirely to the developer.
+Every document gets a SHA-256 content hash as its `document_id`. Re-ingesting the same file always produces the same document ID — upsert, not duplicate. Chunk IDs are also stable provided the parser, chunker, and chunk size remain unchanged between ingests.
 
 Extracted schema fields persist across process restarts via `FileSchemaStore`. Ingest once, the schema survives the restart — `DOCUMENT.FIND` works immediately with no re-extraction.
 
@@ -132,11 +132,11 @@ docs = source.execute_query({
 
 ### What differentiates this from LangChain / LlamaIndex / Haystack
 
-- **blue-data DataRegistry integration** — `DocumentDataSource` extends blue-data's `DataSource` ABC; registers in the same `DataRegistry` as SQL, graph, and JSON sources; agents query documents and structured data in a single context with one interface
-- **Document schema inference** — `KeywordClassifier` identifies document type (`contract`, `invoice`, `policy`, `research_paper`, `financial_report`) at ingest with zero API cost; `LLMSchemaExtractor` extracts typed fields (`parties`, `effective_date`, `total_due`, `governing_law`, …) via a single LLM call per document; `document_type` propagates to every chunk and is filterable in KNN search
-- **Structured corpus query (`DOCUMENT.FIND`)** — filter across all ingested documents by extracted field values (`{"fields.governing_law": {"contains": "California"}}`, `{"fields.total_due": {"gt": 30000}}`); currency symbols and commas stripped automatically before numeric comparison; all conditions ANDed; no embedding, no LLM, deterministic
+- **blue-data DataRegistry integration** — `DocumentDataSource` extends blue-data's `DataSource` ABC; registers in the same `DataRegistry` as SQL, graph, and JSON sources using a shared registration and metadata model; each source type retains its own query vocabulary
+- **Document schema inference** — `KeywordClassifier` assigns a document type (`contract`, `invoice`, `policy`, `research_paper`, `financial_report`) at ingest using configurable keyword rules, with zero API cost; `LLMSchemaExtractor` extracts typed fields (`parties`, `effective_date`, `total_due`, `governing_law`, …) via a single LLM call per document; `document_type` propagates to every chunk and is filterable in KNN search
+- **Structured corpus query (`DOCUMENT.FIND`)** — filter across all ingested documents by extracted field values (`{"fields.governing_law": {"contains": "California"}}`, `{"fields.total_due": {"gt": 30000}}`); currency symbols (`$€£¥`) and commas are stripped before numeric comparison — other formats (percentages, locale separators, parenthesized negatives) are not normalised and will fall back to lexicographic comparison; all conditions ANDed; filter evaluation is deterministic over persisted extracted fields — no embedding, no query-time LLM call (note: extracted field values are LLM outputs and may not be perfectly accurate)
 - **Persistent schema store** — `SchemaStore` ABC with `MemorySchemaStore` (default) and `FileSchemaStore` (atomic JSON write, survives process restarts); injectable — pass any backend
-- **Content-addressed ingestion** — SHA-256 hash of file bytes is the `document_id`; re-ingesting the same file is always a safe upsert; chunk IDs are stable across re-ingests; deduplication LangChain and LlamaIndex leave to the developer
+- **Content-addressed ingestion** — SHA-256 hash of file bytes is the `document_id`; re-ingesting the same file is always a safe upsert; chunk IDs are stable provided the parser, chunker, and chunk size remain unchanged
 
 ### Standard pipeline (solid foundation, not unique)
 
