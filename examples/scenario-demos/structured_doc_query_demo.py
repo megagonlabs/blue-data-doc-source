@@ -36,16 +36,19 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from local_memory_store import LocalMemoryVectorStore
 
 from blue_data_doc_source import (
+    DocumentDataSource,
     DocumentPipeline,
     DummyEmbeddingModel,
     KeywordClassifier,
     LLMFieldExtractor,
+    NLQueryParser,
 )
 
 DIV  = "=" * 72
@@ -515,6 +518,166 @@ def run() -> None:
                 print(f"  [{section}]  {snippet}...")
 
     # ====================================================================
+    # DOCUMENT.FIND_THEN_SEARCH — compound op
+    # ====================================================================
+    _banner("DOCUMENT.FIND_THEN_SEARCH — Two steps in one call")
+    print()
+    print("  The agent pattern above works — but it requires the caller to:")
+    print("    1. call find_records() to get matching documents")
+    print("    2. loop over each match and call search() scoped to that doc_id")
+    print("    3. merge and sort results manually")
+    print()
+    print("  DOCUMENT.FIND_THEN_SEARCH encapsulates all three steps:")
+    print()
+    print("    source.execute_query({")
+    print("        'op': 'DOCUMENT.FIND_THEN_SEARCH',")
+    print("        'find_filter': {'document_type': 'contract'},")
+    print("        'query': 'termination notice period',")
+    print("        'k': 4,")
+    print("        'mode': 'bm25',")
+    print("    })")
+    print()
+    print("  Structured filter pins the candidate set. Text search reads the clause.")
+    print("  Results from all matched documents are merged and returned sorted by score.")
+    print()
+
+    fts_store = LocalMemoryVectorStore()
+    fts_source = DocumentDataSource(
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=fts_store,
+        chunk_size=120,
+        overlap=20,
+        default_collection="fts_corpus",
+        classifier=KeywordClassifier(),
+        field_extractor=field_extractor,
+    )
+    fts_source.execute_query({"op": "DOCUMENT.ENSURE_INDEX", "collection": "fts_corpus"})
+
+    with tempfile.TemporaryDirectory() as _tmpdir:
+        for _fname, _content in CORPUS.items():
+            _fpath = os.path.join(_tmpdir, _fname)
+            with open(_fpath, "w") as _f:
+                _f.write(_content)
+            fts_source.execute_query({
+                "op": "DOCUMENT.INGEST",
+                "path": _fpath,
+                "collection": "fts_corpus",
+            })
+        fts_results = fts_source.execute_query({
+            "op": "DOCUMENT.FIND_THEN_SEARCH",
+            "find_filter": {"document_type": "contract"},
+            "query": "termination notice period",
+            "k": 4,
+            "mode": "bm25",
+            "collection": "fts_corpus",
+        })
+
+    print(f"  Result: {len(fts_results)} chunk(s) from contract documents")
+    print()
+    if fts_results:
+        _chunk_table(fts_results)
+        print()
+        _doc_ids_seen = {r.get("document_id") for r in fts_results}
+        print(f"  Chunks span {len(_doc_ids_seen)} matched contract(s), merged and ranked by score.")
+        if len(_doc_ids_seen) > 1:
+            print("  The agent sees one ranked list — no manual merge loop needed.")
+    else:
+        print("  (No results — KeywordClassifier did not reach min_confidence for 'contract')")
+
+    # ====================================================================
+    # execute_query_nl — natural language dispatches to FIND_THEN_SEARCH
+    # ====================================================================
+    _banner("execute_query_nl — Natural language dispatches to FIND_THEN_SEARCH")
+    print()
+    print("  NLQueryParser translates plain-English questions into structured op dicts.")
+    print("  When it detects 'find documents of type X, then search for Y' intent,")
+    print("  it emits DOCUMENT.FIND_THEN_SEARCH — no orchestration code needed.")
+    print()
+    print("    source = DocumentDataSource(..., nl_parser=NLQueryParser())")
+    print("    results = source.execute_query_nl(")
+    print("        'find the termination clause in our contracts'")
+    print("    )")
+    print()
+    print("  With OPENAI_API_KEY the parse step is fully automatic.")
+    print("  Here we use a custom parse_fn to show the dispatch without an API call:")
+    print()
+
+    def _simulated_nl_parse(text: str) -> dict:
+        return {
+            "op": "DOCUMENT.FIND_THEN_SEARCH",
+            "find_filter": {"document_type": "contract"},
+            "query": "termination notice period",
+            "k": 4,
+            "mode": "bm25",
+            "collection": "nl_corpus",
+        }
+
+    nl_store = LocalMemoryVectorStore()
+    nl_source = DocumentDataSource(
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=nl_store,
+        chunk_size=120,
+        overlap=20,
+        default_collection="nl_corpus",
+        classifier=KeywordClassifier(),
+        field_extractor=field_extractor,
+        nl_parser=NLQueryParser(parse_fn=_simulated_nl_parse),
+    )
+    nl_source.execute_query({"op": "DOCUMENT.ENSURE_INDEX", "collection": "nl_corpus"})
+
+    with tempfile.TemporaryDirectory() as _tmpdir:
+        for _fname, _content in CORPUS.items():
+            _fpath = os.path.join(_tmpdir, _fname)
+            with open(_fpath, "w") as _f:
+                _f.write(_content)
+            nl_source.execute_query({
+                "op": "DOCUMENT.INGEST",
+                "path": _fpath,
+                "collection": "nl_corpus",
+            })
+        nl_results = nl_source.execute_query_nl(
+            "find the termination clause in our contracts"
+        )
+
+    print(f"  NL query  ->  DOCUMENT.FIND_THEN_SEARCH  ->  {len(nl_results)} chunk(s)")
+    print()
+    print("  Parsed intent (simulated — with OPENAI_API_KEY this is done by GPT):")
+    print("    op          = DOCUMENT.FIND_THEN_SEARCH")
+    print("    find_filter = {'document_type': 'contract'}")
+    print("    query       = 'termination notice period'")
+    print()
+    if nl_results:
+        _chunk_table(nl_results)
+        print()
+
+    if has_openai:
+        print(f"  {TICK}  With OPENAI_API_KEY: NLQueryParser resolves multi-field intent automatically")
+        print()
+        print("    results = source.execute_query_nl(")
+        print("        'find termination terms in contracts governed by California'")
+        print("    )")
+        print("    # NLQueryParser detects FIND_THEN_SEARCH with a compound filter:")
+        print("    # find_filter = {")
+        print("    #     'document_type': 'contract',")
+        print("    #     'fields.governing_law': {'contains': 'California'},")
+        print("    # }")
+        print("    # query = 'termination notice period'")
+    else:
+        print("  Set OPENAI_API_KEY to enable fully automatic NL parsing:")
+        print()
+        print("    source = DocumentDataSource(")
+        print("        ...,")
+        print("        nl_parser=NLQueryParser(),  # uses GPT by default")
+        print("    )")
+        print("    results = source.execute_query_nl(")
+        print("        'find termination terms in contracts governed by California'")
+        print("    )")
+        print("    # NLQueryParser detects: DOCUMENT.FIND_THEN_SEARCH")
+        print("    # find_filter = {'document_type': 'contract',")
+        print("    #                'fields.governing_law': {'contains': 'California'}}")
+        print("    # query = 'termination notice period'")
+
+    # ====================================================================
     # Summary
     # ====================================================================
     _banner("Summary — What existing RAG libraries can't do")
@@ -539,12 +702,25 @@ def run() -> None:
     print("    LLMFieldExtractor → typed fields (parties, governing_law, total_due, ...)")
     print()
     print("  Layer 2 — At query time (no API calls for filtering):")
-    print("    DOCUMENT.FIND → deterministic structured filter over extracted fields")
-    print("    DOCUMENT.SEARCH → text retrieval scoped to the matched documents")
+    print("    DOCUMENT.FIND             → deterministic structured filter over extracted fields")
+    print("    DOCUMENT.SEARCH           → text retrieval scoped to matched documents")
+    print("    DOCUMENT.FIND_THEN_SEARCH → compound: filter + search + merge in one call")
     print()
-    print("  The pattern:")
+    print("  The two-step pattern:")
     print("    docs   = pipeline.find_records({'fields.parties': {'contains': 'Acme Corp'}})")
     print("    chunks = pipeline.search('termination', filters={'document_id': docs[0]['document_id']})")
+    print()
+    print("  Or in one call via DocumentDataSource:")
+    print("    chunks = source.execute_query({")
+    print("        'op': 'DOCUMENT.FIND_THEN_SEARCH',")
+    print("        'find_filter': {'fields.parties': {'contains': 'Acme Corp'}},")
+    print("        'query': 'termination',")
+    print("    })")
+    print()
+    print("  Or in plain English via NLQueryParser:")
+    print("    chunks = source.execute_query_nl(")
+    print("        'find the termination clause in Acme Corp contracts'")
+    print("    )")
     print()
     if not has_openai:
         print("  Run with OPENAI_API_KEY to see Failures 2 and 3 fixed live:")
