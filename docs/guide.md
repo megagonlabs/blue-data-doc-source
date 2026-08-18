@@ -101,6 +101,7 @@ results = source.execute_query({
 | `DOCUMENT.DELETE` | `path` OR (`document_id` + `chunk_count`) | `int` — deleted chunk count |
 | `DOCUMENT.GET_RECORD` | `document_id` | `dict` — DocumentRecord; raises if document unknown or no classifier was set |
 | `DOCUMENT.FIND` | — | `list[dict]` — DocumentRecords matching `filter`; no embedding, no LLM, deterministic |
+| `DOCUMENT.FIND_THEN_SEARCH` | `query` | `list[dict]` — filter documents by `find_filter`, search text within matched documents, return ranked chunks |
 
 ---
 
@@ -591,7 +592,27 @@ Filters are plain dicts. All conditions are ANDed. A missing field causes the co
 
 **Numeric coercion:** strips `$`, `€`, `£`, `¥`, and `,` before parsing. So `"$35,154"` → `35154.0`. Formats that don't parse (percentages, locale separators like `.` as thousands separator, parenthesized negatives like `(500)`) fall back to lexicographic string comparison — the filter will not error, but the result may be wrong.
 
-> **Note:** `DOCUMENT.FIND` is not yet reachable via `execute_query_nl` / `NLQueryParser`. Use `execute_query` with the structured filter dict directly.
+**`DOCUMENT.FIND_THEN_SEARCH`** — combines a document filter with text retrieval in one call. The pipeline runs FIND internally, searches within each matched document, and returns ranked chunks. Use this when you want content from a known subset of documents:
+
+```python
+# "find the termination clause in Acme Corp contracts"
+chunks = source.execute_query({
+    "op": "DOCUMENT.FIND_THEN_SEARCH",
+    "find_filter": {"document_type": "contract", "fields.parties": {"contains": "Acme Corp"}},
+    "query": "termination clause",
+    "k": 5,
+})
+
+# "what are the payment terms in Blue Solutions invoices over $30,000?"
+chunks = source.execute_query({
+    "op": "DOCUMENT.FIND_THEN_SEARCH",
+    "find_filter": {"document_type": "invoice", "fields.vendor": {"contains": "Blue Solutions"}, "fields.total_due": {"gt": 30000}},
+    "query": "payment terms",
+    "k": 3,
+})
+```
+
+Both `DOCUMENT.FIND` and `DOCUMENT.FIND_THEN_SEARCH` are reachable via `execute_query_nl` when an `NLQueryParser` is wired up — the parser detects whether the query is purely structural (FIND) or combines a document filter with content retrieval (FIND_THEN_SEARCH).
 
 ### Custom classifier or extractor
 
@@ -648,7 +669,7 @@ Inject any `(str) -> dict` callable via `parse_fn` to use a different LLM or run
 parser = NLQueryParser(parse_fn=lambda text: my_llm_call(text))
 ```
 
-**NLQueryParser limitations:** the parser currently supports `DOCUMENT.SEARCH`, `DOCUMENT.INGEST`, `DOCUMENT.DELETE`, and `DOCUMENT.ENSURE_INDEX`. `DOCUMENT.FIND` and `DOCUMENT.GET_RECORD` are not reachable via natural language — use `execute_query` with the structured op dict directly for those.
+**NLQueryParser supported ops:** `DOCUMENT.SEARCH`, `DOCUMENT.INGEST`, `DOCUMENT.DELETE`, `DOCUMENT.ENSURE_INDEX`, `DOCUMENT.FIND`, and `DOCUMENT.FIND_THEN_SEARCH`. `DOCUMENT.GET_RECORD` requires `execute_query` with a structured op dict — it needs an exact `document_id` which natural language cannot reliably supply.
 
 ---
 

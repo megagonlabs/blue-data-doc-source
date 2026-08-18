@@ -193,7 +193,18 @@ Dot notation accesses nested fields: `"fields.governing_law"`, `"fields.total_du
 
 Numeric coercion handles `"$35,154"` → `35154.0`. Formats that can't be parsed (percentages, parenthesized negatives, locale separators) fall back to string comparison without erroring.
 
-> **Note:** `DOCUMENT.FIND` is not yet reachable via `execute_query_nl` / `NLQueryParser`. Use `execute_query` with the structured filter dict directly.
+**`DOCUMENT.FIND_THEN_SEARCH`** — combines a document filter with text retrieval in one call. Runs FIND internally, searches within each matched document, returns ranked chunks:
+
+```python
+chunks = source.execute_query({
+    "op": "DOCUMENT.FIND_THEN_SEARCH",
+    "find_filter": {"document_type": "contract", "fields.parties": {"contains": "Acme Corp"}},
+    "query": "termination clause",
+    "k": 5,
+})
+```
+
+Both ops are reachable via `execute_query_nl` — the `NLQueryParser` detects whether the query is purely structural (`DOCUMENT.FIND`) or combines a document filter with content retrieval (`DOCUMENT.FIND_THEN_SEARCH`).
 
 Via `DocumentDataSource`:
 

@@ -149,7 +149,7 @@ docs = source.execute_query({
 - **Pluggable embeddings** — `OpenAIEmbeddingModel`, `DummyEmbeddingModel`, or any custom `EmbeddingModel` subclass
 - **Pluggable vector storage** — any blue-data `VectorSource`; `MemoryVectorSource` for dev, `RedisVectorSource` for production
 - **Metadata pre-filtering** — scope KNN search to a document, file, section, MIME type, or page range before scoring
-- **Natural language queries** — `NLQueryParser` maps plain-English instructions to `DOCUMENT.SEARCH`, `DOCUMENT.INGEST`, `DOCUMENT.DELETE`, and `DOCUMENT.ENSURE_INDEX`; `DOCUMENT.FIND` and `DOCUMENT.GET_RECORD` require `execute_query` with a structured filter dict; `parse_fn` injection for keyless use
+- **Natural language queries** — `NLQueryParser` maps plain-English instructions to `DOCUMENT.SEARCH`, `DOCUMENT.INGEST`, `DOCUMENT.DELETE`, `DOCUMENT.ENSURE_INDEX`, `DOCUMENT.FIND`, and `DOCUMENT.FIND_THEN_SEARCH`; `parse_fn` injection for keyless use
 - **Pluggable parsers** — `Parser` ABC for external processors (LlamaIndex, vision models, cloud OCR); bypass via `ingest_text` / `ingest_pages`
 - **MCP server** — `platform/document-mcp` exposes all ops as tools callable from Claude Desktop
 
@@ -324,6 +324,12 @@ source = DocumentDataSource(
 
 results = source.execute_query_nl("find the termination clause")
 records = source.execute_query_nl("ingest /docs/policy.pdf into contracts")
+
+# DOCUMENT.FIND — structural filter, no content retrieval
+docs = source.execute_query_nl("list all invoices from Blue Solutions over $30,000")
+
+# DOCUMENT.FIND_THEN_SEARCH — filter documents, then retrieve text from them
+chunks = source.execute_query_nl("find the termination clause in Acme Corp contracts")
 ```
 
 You can swap in any LLM backend via `parse_fn`:
