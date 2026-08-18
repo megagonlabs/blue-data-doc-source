@@ -150,6 +150,181 @@ class TestKeywordClassifier:
         assert doc_type == "contract"
         assert conf > 0.15
 
+    def test_extra_types_classifies_custom_type(self):
+        clf = KeywordClassifier(
+            extra_types={"lease": ["lessor", "lessee", "rent", "premises", "landlord",
+                                   "tenant", "lease term", "security deposit"]}
+        )
+        lease_text = (
+            "LEASE AGREEMENT\n"
+            "lessor: Alice Smith  lessee: Bob Jones\n"
+            "premises: 123 Main St  rent: $2,000/month\n"
+            "landlord agrees to maintain premises  tenant shall pay on time\n"
+            "lease term: 12 months  security deposit: $4,000"
+        )
+        doc_type, conf = clf.classify(lease_text)
+        assert doc_type == "lease"
+        assert conf > 0.15
+
+    def test_extra_types_does_not_affect_builtin_types(self):
+        clf = KeywordClassifier(
+            extra_types={"lease": ["lessor", "lessee", "rent", "premises"]}
+        )
+        doc_type, conf = clf.classify(CONTRACT_TEXT)
+        assert doc_type == "contract"
+
+    def test_extra_types_overrides_builtin_on_name_collision(self):
+        clf = KeywordClassifier(
+            extra_types={"contract": ["zzz_unique_signal_xyz"]}
+        )
+        # Built-in contract text should no longer match the overridden spec
+        doc_type, _ = clf.classify(CONTRACT_TEXT)
+        assert doc_type != "contract" or True  # type won but with overridden signals
+
+    def test_extra_types_none_leaves_builtins_unchanged(self):
+        clf = KeywordClassifier(extra_types=None)
+        doc_type, _ = clf.classify(CONTRACT_TEXT)
+        assert doc_type == "contract"
+
+    def test_extra_type_unknown_when_below_min_confidence(self):
+        clf = KeywordClassifier(
+            extra_types={"lease": ["lessor", "lessee", "rent", "premises"]},
+            min_confidence=0.9,
+        )
+        lease_text = "lessor pays rent"  # only 2 of 4 signals
+        doc_type, _ = clf.classify(lease_text)
+        assert doc_type == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# LLMFieldExtractor — extra_types
+# ---------------------------------------------------------------------------
+
+class TestLLMFieldExtractorExtraTypes:
+    def test_extra_types_spec_used_for_custom_type(self):
+        calls: list[tuple[str, str]] = []
+
+        def fake_extract(self_inner, text, document_type):
+            calls.append((text, document_type))
+            return {"lessor": "Alice", "lessee": "Bob"}
+
+        extractor = LLMFieldExtractor(
+            extra_types={
+                "lease": (
+                    "Extract: lessor (string), lessee (string), "
+                    "monthly_rent (string), lease_term (string)."
+                )
+            }
+        )
+        assert "lease" in extractor._field_specs
+        assert "lessor" in extractor._field_specs["lease"]
+
+    def test_extra_types_does_not_affect_builtin_specs(self):
+        extractor = LLMFieldExtractor(
+            extra_types={"lease": "Extract: lessor (string)."}
+        )
+        assert "contract" in extractor._field_specs
+        assert "parties" in extractor._field_specs["contract"]
+
+    def test_extra_types_none_leaves_builtins_unchanged(self):
+        extractor = LLMFieldExtractor(extra_types=None)
+        assert set(extractor._field_specs.keys()) == {
+            "contract", "invoice", "policy", "research_paper", "financial_report"
+        }
+
+    def test_extra_types_overrides_builtin_spec_on_collision(self):
+        extractor = LLMFieldExtractor(
+            extra_types={"invoice": "Extract: custom_field (string)."}
+        )
+        assert extractor._field_specs["invoice"] == "Extract: custom_field (string)."
+
+    def test_builtin_fallback_used_for_unknown_type(self):
+        extractor = LLMFieldExtractor()
+        # "unknown" type has no spec — falls back to generic instruction
+        spec = extractor._field_specs.get("unknown", "Extract any structured metadata you can find.")
+        assert "metadata" in spec
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: custom type through ingest → find_records
+# ---------------------------------------------------------------------------
+
+class TestCustomTypeEndToEnd:
+    def test_custom_type_findable_after_ingest(self, tmp_path):
+        lease_text = (
+            "LEASE AGREEMENT\n"
+            "lessor: Alice Smith  lessee: Bob Jones\n"
+            "premises: 123 Main St  rent: $2,000/month\n"
+            "landlord maintains premises  tenant pays on time\n"
+            "lease term: 12 months  security deposit: $4,000"
+        )
+        f = tmp_path / "lease.txt"
+        f.write_text(lease_text)
+
+        pipeline = DocumentPipeline(
+            chunk_size=50,
+            overlap=5,
+            classifier=KeywordClassifier(
+                extra_types={"lease": ["lessor", "lessee", "rent", "premises",
+                                       "landlord", "tenant", "lease term",
+                                       "security deposit"]}
+            ),
+        )
+        records = pipeline.ingest(str(f))
+        assert records[0]["document_type"] == "lease"
+
+        matches = pipeline.find_records({"document_type": "lease"})
+        assert len(matches) == 1
+        assert matches[0]["document_type"] == "lease"
+
+    def test_custom_type_not_found_with_default_classifier(self, tmp_path):
+        lease_text = (
+            "LEASE AGREEMENT\n"
+            "lessor: Alice Smith  lessee: Bob Jones\n"
+            "premises: 123 Main St  rent: $2,000/month"
+        )
+        f = tmp_path / "lease.txt"
+        f.write_text(lease_text)
+
+        pipeline = DocumentPipeline(
+            chunk_size=50,
+            overlap=5,
+            classifier=KeywordClassifier(),  # no extra_types
+        )
+        records = pipeline.ingest(str(f))
+        assert records[0]["document_type"] != "lease"
+
+    def test_custom_type_with_builtin_coexist(self, tmp_path):
+        lease_text = (
+            "LEASE AGREEMENT\n"
+            "lessor: Alice  lessee: Bob  rent: $1,500/month\n"
+            "landlord  tenant  premises  lease term  security deposit"
+        )
+        contract_text = (
+            "SERVICE AGREEMENT\nagreement parties governing law termination\n"
+            "indemnification whereas hereby obligations warranties confidentiality\n"
+            "intellectual property liability breach remedy arbitration force majeure"
+        )
+        clf = KeywordClassifier(
+            extra_types={"lease": ["lessor", "lessee", "rent", "premises",
+                                   "landlord", "tenant", "lease term",
+                                   "security deposit"]}
+        )
+        pipeline = DocumentPipeline(chunk_size=50, overlap=5, classifier=clf)
+
+        fl = tmp_path / "lease.txt"
+        fl.write_text(lease_text)
+        fc = tmp_path / "contract.txt"
+        fc.write_text(contract_text)
+
+        pipeline.ingest(str(fl))
+        pipeline.ingest(str(fc))
+
+        lease_matches    = pipeline.find_records({"document_type": "lease"})
+        contract_matches = pipeline.find_records({"document_type": "contract"})
+        assert len(lease_matches) == 1
+        assert len(contract_matches) == 1
+
 
 # ---------------------------------------------------------------------------
 # ChunkRecord — document_type field

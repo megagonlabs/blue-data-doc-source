@@ -49,15 +49,45 @@ class LLMFieldExtractor(FieldExtractor):
     """OpenAI-backed field extractor — optional dependency.
 
     Requires ``openai>=1.0`` to be installed and ``OPENAI_API_KEY`` set.
+
+    Args:
+        model: OpenAI model to use for extraction. Default ``"gpt-4o-mini"``.
+        sample_chars: Maximum characters from the start of the document sent to
+            the LLM. Default 4000.
+        extra_types: Additional document types and their field extraction specs,
+            supplied as a mapping of ``{type_name: field_spec_string}``. The
+            field spec string is a plain-English instruction telling the LLM
+            what to extract, in the same format as the built-in specs. Merged
+            with the built-in types; user-supplied types take precedence on
+            name collision.
+
+    Example::
+
+        extractor = LLMFieldExtractor(
+            extra_types={
+                "lease": (
+                    "Extract: lessor (string), lessee (string), "
+                    "monthly_rent (string with currency), lease_term (string), "
+                    "security_deposit (string), premises_address (string)."
+                ),
+                "employment": (
+                    "Extract: employer (string), employee (string), "
+                    "job_title (string), start_date (ISO date string), "
+                    "salary (string with currency), jurisdiction (string)."
+                ),
+            }
+        )
     """
 
     def __init__(
         self,
         model: str = "gpt-4o-mini",
         sample_chars: int = 4000,
+        extra_types: dict[str, str] | None = None,
     ) -> None:
         self._model = model
         self._sample_chars = sample_chars
+        self._field_specs = {**_FIELD_SPECS, **(extra_types or {})}
         self._client: Any = None
 
     def _get_client(self) -> Any:
@@ -73,7 +103,7 @@ class LLMFieldExtractor(FieldExtractor):
         return self._client
 
     def extract(self, text: str, document_type: str) -> dict:
-        field_spec = _FIELD_SPECS.get(document_type, "Extract any structured metadata you can find.")
+        field_spec = self._field_specs.get(document_type, "Extract any structured metadata you can find.")
         prompt = _DEFAULT_PROMPT.format(
             field_spec=field_spec,
             text=text[: self._sample_chars],
