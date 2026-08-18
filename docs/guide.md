@@ -99,8 +99,8 @@ results = source.execute_query({
 | `DOCUMENT.SEARCH_RICH` | `query` | `dict` — ranked results with provenance, context, and grouping |
 | `DOCUMENT.ENSURE_INDEX` | — | `None` |
 | `DOCUMENT.DELETE` | `path` OR (`document_id` + `chunk_count`) | `int` — deleted chunk count |
-| `DOCUMENT.GET_RECORD` | `document_id` | `dict` — schema record; raises if unknown |
-| `DOCUMENT.FIND` | — | `list[dict]` — schema records matching `filter`; no embedding, no LLM, deterministic |
+| `DOCUMENT.GET_RECORD` | `document_id` | `dict` — DocumentRecord; raises if document unknown or no classifier was set |
+| `DOCUMENT.FIND` | — | `list[dict]` — DocumentRecords matching `filter`; no embedding, no LLM, deterministic |
 
 ---
 
@@ -517,9 +517,9 @@ schema = source.execute_query({
 })
 ```
 
-### Schema persistence (FileRecordStore)
+### Record persistence (FileRecordStore)
 
-By default schemas are stored in `MemoryRecordStore` — in-process only. Pass `FileRecordStore` to persist across restarts:
+By default DocumentRecords are stored in `MemoryRecordStore` — in-process only. Pass `FileRecordStore` to persist across restarts:
 
 ```python
 from blue_data_doc_source import DocumentPipeline, FileRecordStore, KeywordClassifier, LLMFieldExtractor
@@ -534,7 +534,7 @@ pipeline = DocumentPipeline(
 
 ### Structured corpus query (DOCUMENT.FIND)
 
-`find_records()` filters across all ingested documents by schema field values — no embedding, no LLM call at query time:
+`find_records()` filters across all ingested DocumentRecords — no embedding, no LLM call at query time. Requires a `classifier` to be set at ingest time so that records exist.
 
 ```python
 # All contracts governed by California
@@ -559,6 +559,39 @@ docs = source.execute_query({
 docs   = pipeline.find_records({"fields.parties": {"contains": "Acme Corp"}})
 chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["document_id"]})
 ```
+
+#### Filter syntax reference
+
+Filters are plain dicts. All conditions are ANDed. A missing field causes the condition to fail (the record is excluded).
+
+**Filterable top-level fields:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `document_type` | string | Exact match, case-insensitive. Values: `contract`, `invoice`, `policy`, `research_paper`, `financial_report`, `unknown` |
+| `confidence` | float | Confidence score from the classifier (0–1) |
+| `classifier` | string | `"keyword"` or `"llm"` |
+
+**Extracted fields** — accessed via dot notation `fields.<name>`:
+
+```python
+{"fields.governing_law": "California"}           # exact match
+{"fields.vendor": {"contains": "Blue Solutions"}} # substring
+{"fields.total_due": {"gt": 30000}}               # numeric comparison
+{"fields.effective_date": {"gte": "2024-01-01"}}  # lexicographic (ISO dates sort correctly)
+```
+
+**Operators:**
+
+| Operator | Behaviour |
+|---|---|
+| _(no operator)_ | Exact match — case-insensitive for strings |
+| `contains` | Case-insensitive substring match |
+| `gt`, `lt`, `gte`, `lte` | Numeric if both sides parse as numbers; lexicographic otherwise |
+
+**Numeric coercion:** strips `$`, `€`, `£`, `¥`, and `,` before parsing. So `"$35,154"` → `35154.0`. Formats that don't parse (percentages, locale separators like `.` as thousands separator, parenthesized negatives like `(500)`) fall back to lexicographic string comparison — the filter will not error, but the result may be wrong.
+
+> **Note:** `DOCUMENT.FIND` is not yet reachable via `execute_query_nl` / `NLQueryParser`. Use `execute_query` with the structured filter dict directly.
 
 ### Custom classifier or extractor
 
@@ -614,6 +647,8 @@ Inject any `(str) -> dict` callable via `parse_fn` to use a different LLM or run
 ```python
 parser = NLQueryParser(parse_fn=lambda text: my_llm_call(text))
 ```
+
+**NLQueryParser limitations:** the parser currently supports `DOCUMENT.SEARCH`, `DOCUMENT.INGEST`, `DOCUMENT.DELETE`, and `DOCUMENT.ENSURE_INDEX`. `DOCUMENT.FIND` and `DOCUMENT.GET_RECORD` are not reachable via natural language — use `execute_query` with the structured op dict directly for those.
 
 ---
 

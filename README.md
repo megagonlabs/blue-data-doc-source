@@ -84,7 +84,7 @@ registry.register(sql_source)    # CRM: customers, vendors
 registry.register(graph_source)  # entity relationships
 registry.register(doc_source)    # contracts, invoices, policies
 
-# Filter documents by extracted schema fields
+# Filter documents by extracted fields
 contracts = doc_source.execute_query({
     "op": "DOCUMENT.FIND",
     "filter": {"document_type": "contract", "fields.governing_law": {"contains": "California"}},
@@ -104,7 +104,7 @@ for doc in contracts:
 
 Every document gets a SHA-256 content hash as its `document_id`. Re-ingesting the same file always produces the same document ID — upsert, not duplicate. Chunk IDs are also stable provided the parser, chunker, and chunk size remain unchanged between ingests.
 
-Extracted schema fields persist across process restarts via `FileRecordStore`. Ingest once, the schema survives the restart — `DOCUMENT.FIND` works immediately with no re-extraction.
+Extracted fields persist across process restarts via `FileRecordStore`. Ingest once, the DocumentRecord survives the restart — `DOCUMENT.FIND` works immediately with no re-extraction.
 
 ```python
 from blue_data_doc_source import DocumentDataSource, FileRecordStore, KeywordClassifier, LLMFieldExtractor
@@ -149,7 +149,7 @@ docs = source.execute_query({
 - **Pluggable embeddings** — `OpenAIEmbeddingModel`, `DummyEmbeddingModel`, or any custom `EmbeddingModel` subclass
 - **Pluggable vector storage** — any blue-data `VectorSource`; `MemoryVectorSource` for dev, `RedisVectorSource` for production
 - **Metadata pre-filtering** — scope KNN search to a document, file, section, MIME type, or page range before scoring
-- **Natural language queries** — `NLQueryParser` maps plain-English instructions to `DOCUMENT.*` ops; `parse_fn` injection for keyless use
+- **Natural language queries** — `NLQueryParser` maps plain-English instructions to `DOCUMENT.SEARCH`, `DOCUMENT.INGEST`, `DOCUMENT.DELETE`, and `DOCUMENT.ENSURE_INDEX`; `DOCUMENT.FIND` and `DOCUMENT.GET_RECORD` require `execute_query` with a structured filter dict; `parse_fn` injection for keyless use
 - **Pluggable parsers** — `Parser` ABC for external processors (LlamaIndex, vision models, cloud OCR); bypass via `ingest_text` / `ingest_pages`
 - **MCP server** — `platform/document-mcp` exposes all ops as tools callable from Claude Desktop
 

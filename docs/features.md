@@ -161,7 +161,7 @@ Fields added to `semantic_hints`: `keyphrases`, `relationships` (subject/predica
 
 ## Structured corpus query (DOCUMENT.FIND)
 
-`DOCUMENT.FIND` filters across all ingested documents by extracted schema field values — no embedding, no LLM, deterministic. Requires a `classifier` to be set so that schema records exist.
+`DOCUMENT.FIND` filters across all ingested DocumentRecords by extracted field values — no embedding, no LLM, deterministic. Requires a `classifier` to be set so that records exist.
 
 ```python
 # Filter by document type
@@ -181,7 +181,19 @@ docs = pipeline.find_records({
 })
 ```
 
-Supported filter operators: exact match (case-insensitive for strings), `contains` (substring), `gt`, `lt`, `gte`, `lte` (numeric with currency stripping, or lexicographic for ISO date strings).
+**Filter syntax:** all conditions ANDed; missing fields exclude the record.
+
+| Operator | Behaviour |
+|---|---|
+| _(no operator)_ | Exact match — case-insensitive for strings |
+| `contains` | Case-insensitive substring match |
+| `gt`, `lt`, `gte`, `lte` | Numeric after stripping `$€£¥` and `,`; lexicographic fallback |
+
+Dot notation accesses nested fields: `"fields.governing_law"`, `"fields.total_due"`. Top-level filterable fields: `document_type`, `confidence`, `classifier`.
+
+Numeric coercion handles `"$35,154"` → `35154.0`. Formats that can't be parsed (percentages, parenthesized negatives, locale separators) fall back to string comparison without erroring.
+
+> **Note:** `DOCUMENT.FIND` is not yet reachable via `execute_query_nl` / `NLQueryParser`. Use `execute_query` with the structured filter dict directly.
 
 Via `DocumentDataSource`:
 
@@ -192,7 +204,7 @@ docs = source.execute_query({
 })
 ```
 
-Schema records persist across restarts when `FileRecordStore` is used — ingest once, query forever.
+DocumentRecords persist across restarts when `FileRecordStore` is used — ingest once, query forever.
 
 **Two-step agent pattern** — `DOCUMENT.FIND` narrows the corpus to the right documents, then `DOCUMENT.SEARCH` retrieves text only within those documents:
 
@@ -427,7 +439,7 @@ pipeline.ingest("contract.pdf")
 results = pipeline.search("termination clause", filters={"document_type": "contract"})
 ```
 
-The schema record is not upserted to the vector store. Retrieve it via `pipeline.get_record(document_id)` or `DOCUMENT.GET_RECORD`. By default the schema is stored in `MemoryRecordStore` (in-process only). Pass `FileRecordStore(path)` to persist across restarts:
+The DocumentRecord is not upserted to the vector store. Retrieve it via `pipeline.get_record(document_id)` or `DOCUMENT.GET_RECORD`. By default records are stored in `MemoryRecordStore` (in-process only). Pass `FileRecordStore(path)` to persist across restarts:
 
 ```python
 from blue_data_doc_source import DocumentPipeline, FileRecordStore, KeywordClassifier, LLMFieldExtractor
