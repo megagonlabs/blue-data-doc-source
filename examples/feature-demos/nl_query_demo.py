@@ -11,9 +11,11 @@ This demo uses a simple regex parse_fn so it runs without an API key.
 The OpenAI-backed version is identical in interface; only parse quality differs.
 
 Op outputs:
-  search   → {"op": "DOCUMENT.SEARCH", "query": "…", "k": …}
-  ingest   → {"op": "DOCUMENT.INGEST",  "path": "…"}
-  delete   → {"op": "DOCUMENT.DELETE",  "path": "…"}
+  search          → {"op": "DOCUMENT.SEARCH",          "query": "…", "k": …}
+  find            → {"op": "DOCUMENT.FIND",             "filter": {…}}
+  find_then_search→ {"op": "DOCUMENT.FIND_THEN_SEARCH", "find_filter": {…}, "query": "…"}
+  ingest          → {"op": "DOCUMENT.INGEST",           "path": "…"}
+  delete          → {"op": "DOCUMENT.DELETE",           "path": "…"}
 
 Run:
     python3 examples/feature-demos/nl_query_demo.py
@@ -49,6 +51,22 @@ SEARCH_INPUTS = [
     "retrieve documents about enrollment periods",
 ]
 
+FIND_INPUTS = [
+    "list all contracts",
+    "show me invoices",
+    "which documents are policies?",
+    "find all research papers",
+]
+
+FIND_THEN_SEARCH_INPUTS = [
+    ("find the termination clause in our contracts",
+     "contract", "termination notice period"),
+    ("what does the policy say about deductibles",
+     "policy", "deductible out-of-pocket"),
+    ("show me payment terms in invoices",
+     "invoice", "payment due terms"),
+]
+
 INGEST_INPUTS = [
     "ingest report.pdf",
     "add document /docs/policy_2025.txt",
@@ -72,6 +90,29 @@ _DELETE_RE = re.compile(
     r"\b(?:delete|remove|drop)\b.*?([^\s]+\.(?:pdf|txt|docx|doc|md))",
     re.I,
 )
+_FIND_RE = re.compile(
+    r"\b(?:list|show me|find all|which documents are)\b.+?\b"
+    r"(contracts?|invoices?|polic(?:y|ies)|research papers?)\b",
+    re.I,
+)
+_TYPE_MAP = {
+    "contract": "contract", "contracts": "contract",
+    "invoice": "invoice", "invoices": "invoice",
+    "policy": "policy", "policies": "policy",
+    "research paper": "research_paper", "research papers": "research_paper",
+}
+# "find [query] in [our] [doc_type]" / "show me [query] in [doc_type]"
+_FTS_RE_B = re.compile(
+    r"\b(?:find|show\s+me|get)\b\s+(.+?)\s+\bin\b\s+(?:\w+\s+)?"
+    r"(contracts?|invoices?|polic(?:y|ies))\b",
+    re.I,
+)
+# "what does [doc_type] say about [query]" / "find [doc_type] about [query]"
+_FTS_RE_A = re.compile(
+    r"\b(?:what\s+does|find)\b.+?\b"
+    r"(contracts?|invoices?|polic(?:y|ies))\b.+?\b(?:about|say\s+about|for)\b(.+)",
+    re.I,
+)
 
 
 def _regex_parse(text: str) -> dict:
@@ -81,6 +122,33 @@ def _regex_parse(text: str) -> dict:
     m = _INGEST_RE.search(text)
     if m:
         return {"op": "DOCUMENT.INGEST", "path": m.group(1)}
+    m = _FTS_RE_B.search(text)
+    if m:
+        query    = m.group(1).strip()
+        raw_type = m.group(2).lower()
+        doc_type = _TYPE_MAP.get(raw_type, raw_type.rstrip("s"))
+        return {
+            "op": "DOCUMENT.FIND_THEN_SEARCH",
+            "find_filter": {"document_type": doc_type},
+            "query": query,
+            "k": 5,
+        }
+    m = _FTS_RE_A.search(text)
+    if m:
+        raw_type = m.group(1).lower()
+        doc_type = _TYPE_MAP.get(raw_type, raw_type.rstrip("s"))
+        query    = m.group(2).strip()
+        return {
+            "op": "DOCUMENT.FIND_THEN_SEARCH",
+            "find_filter": {"document_type": doc_type},
+            "query": query,
+            "k": 5,
+        }
+    m = _FIND_RE.search(text)
+    if m:
+        raw_type = m.group(1).lower()
+        doc_type = _TYPE_MAP.get(raw_type, raw_type.rstrip("s"))
+        return {"op": "DOCUMENT.FIND", "filter": {"document_type": doc_type}}
     return {"op": "DOCUMENT.SEARCH", "query": text, "k": 5}
 
 
@@ -122,6 +190,33 @@ def run(use_openai: bool) -> None:
     print(DIV2)
     print()
     for text in SEARCH_INPUTS:
+        op = parser.parse(text)
+        print(f"  Input : {text!r}")
+        print(f"  Op    : {fmt_op(op)}")
+        print()
+
+    # ── Find intent ────────────────────────────────────────────────────────
+    print(DIV2)
+    print("Find intent  →  DOCUMENT.FIND")
+    print(DIV2)
+    print()
+    print("  'List all contracts' → filter DocumentRecords by type, no embedding.")
+    print()
+    for text in FIND_INPUTS:
+        op = parser.parse(text)
+        print(f"  Input : {text!r}")
+        print(f"  Op    : {fmt_op(op)}")
+        print()
+
+    # ── Find-then-search intent ────────────────────────────────────────────
+    print(DIV2)
+    print("Find-then-search intent  →  DOCUMENT.FIND_THEN_SEARCH")
+    print(DIV2)
+    print()
+    print("  Two-part questions: identify document type AND retrieve specific text.")
+    print("  NLQueryParser emits FIND_THEN_SEARCH when it detects both intents.")
+    print()
+    for text, _doc_type, _query in FIND_THEN_SEARCH_INPUTS:
         op = parser.parse(text)
         print(f"  Input : {text!r}")
         print(f"  Op    : {fmt_op(op)}")

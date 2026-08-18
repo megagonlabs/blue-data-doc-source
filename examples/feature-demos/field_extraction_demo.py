@@ -29,10 +29,10 @@ What this demo covers:
   * DOCUMENT.GET_RECORD op via DocumentDataSource
 
 Run:
-    python3 examples/feature-demos/schema_inference_demo.py
+    python3 examples/feature-demos/field_extraction_demo.py
 
     # With LLM field extraction:
-    OPENAI_API_KEY=sk-... python3 examples/feature-demos/schema_inference_demo.py
+    OPENAI_API_KEY=sk-... python3 examples/feature-demos/field_extraction_demo.py
 """
 from __future__ import annotations
 

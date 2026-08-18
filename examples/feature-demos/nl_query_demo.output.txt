@@ -32,6 +32,40 @@ Search intent  →  DOCUMENT.SEARCH
   Op    : {op='DOCUMENT.SEARCH', query='retrieve documents about enrollment periods', k=5}
 
 --------------------------------------------------------------------
+Find intent  →  DOCUMENT.FIND
+--------------------------------------------------------------------
+
+  'List all contracts' → filter DocumentRecords by type, no embedding.
+
+  Input : 'list all contracts'
+  Op    : {op='DOCUMENT.FIND', filter={'document_type': 'contract'}}
+
+  Input : 'show me invoices'
+  Op    : {op='DOCUMENT.FIND', filter={'document_type': 'invoice'}}
+
+  Input : 'which documents are policies?'
+  Op    : {op='DOCUMENT.FIND', filter={'document_type': 'policy'}}
+
+  Input : 'find all research papers'
+  Op    : {op='DOCUMENT.FIND', filter={'document_type': 'research_paper'}}
+
+--------------------------------------------------------------------
+Find-then-search intent  →  DOCUMENT.FIND_THEN_SEARCH
+--------------------------------------------------------------------
+
+  Two-part questions: identify document type AND retrieve specific text.
+  NLQueryParser emits FIND_THEN_SEARCH when it detects both intents.
+
+  Input : 'find the termination clause in our contracts'
+  Op    : {op='DOCUMENT.FIND_THEN_SEARCH', find_filter={'document_type': 'contract'}, query='the termination clause', k=5}
+
+  Input : 'what does the policy say about deductibles'
+  Op    : {op='DOCUMENT.FIND_THEN_SEARCH', find_filter={'document_type': 'policy'}, query='deductibles', k=5}
+
+  Input : 'show me payment terms in invoices'
+  Op    : {op='DOCUMENT.FIND_THEN_SEARCH', find_filter={'document_type': 'invoice'}, query='payment terms', k=5}
+
+--------------------------------------------------------------------
 Ingest intent  →  DOCUMENT.INGEST
 --------------------------------------------------------------------
 

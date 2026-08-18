@@ -5,15 +5,16 @@ Document Schema Inference
 
   Four PDFs -- contract, invoice, research paper, policy.
   Layer 1: KeywordClassifier  (always, no API cost)
-  Layer 2: LLMSchemaExtractor (OPENAI_API_KEY detected -- field extraction enabled)
+  Layer 2: LLMFieldExtractor (no OPENAI_API_KEY -- field extraction skipped)
+           Set OPENAI_API_KEY to enable typed field extraction.
 
 ------------------------------------------------------------------------
-Step 1 -- Build pipeline with two-layer schema inference
+Step 1 -- Build pipeline with two-layer document classification and field extraction
 ------------------------------------------------------------------------
 
   pipeline = DocumentPipeline(
       classifier=KeywordClassifier(),
-      schema_extractor=LLMSchemaExtractor(),  # one API call per document
+      # field_extractor not set -- add LLMFieldExtractor() with OPENAI_API_KEY
       ...,
   )
 
@@ -68,58 +69,32 @@ Step 4 -- document_type on every chunk
 Step 5 -- Schema record per document
 ------------------------------------------------------------------------
 
-  pipeline.get_schema(document_id) retrieves the schema stored at
+  pipeline.get_record(document_id) retrieves the schema stored at
   ingest time. No re-read of the PDF needed.
 
   [sample_contract.pdf]
     document_id   : doc_50407085c00a7db3
     document_type : contract
-    confidence    : 0.7778  (classifier=llm)
-    fields extracted by LLMSchemaExtractor:
-      parties                    TechCorp Inc., BuildRight Solutions LLC
-      effective_date             2026-09-01
-      governing_law              State of Delaware
-      contract_value             $180,000 per annum
-      key_obligations            Vendor shall deliver software consulting services as described in...
+    confidence    : 0.7778  (classifier=keyword)
+    fields: (set OPENAI_API_KEY to enable LLM field extraction)
 
   [sample_invoice.pdf]
     document_id   : doc_2fc16c04f2141bc6
     document_type : invoice
-    confidence    : 0.8000  (classifier=llm)
-    fields extracted by LLMSchemaExtractor:
-      invoice_number             INV-2026-0891
-      invoice_date               2026-08-01
-      due_date                   2026-08-31
-      vendor                     Blue Solutions Inc.
-      bill_to                    Acme Manufacturing Corp
-      line_items                 {'description': 'Cloud Infrastructure Design & Architecture', 'qu...
-      subtotal                   $32,400
-      tax                        $2,754
-      total_due                  $35,154
+    confidence    : 0.8000  (classifier=keyword)
+    fields: (set OPENAI_API_KEY to enable LLM field extraction)
 
   [sample_research.pdf]
     document_id   : doc_0f196c538d60304a
     document_type : research_paper
-    confidence    : 0.5333  (classifier=llm)
-    fields extracted by LLMSchemaExtractor:
-      title                      HybridRank: Combining Sparse and Dense Retrieval for Open-Domain ...
-      authors                    Alexandra Chen, Marcus Williams, Priya Nair
-      abstract                   We present HybridRank, a retrieval architecture that combines spa...
-      keywords                   hybrid retrieval, BM25, dense embeddings  (+3 more)
-      methodology                We use BM25+ with tuned parameters k1=1.6, b=0.75 to retrieve the...
-      findings                   HybridRank achieves state-of-the-art results across all three ben...
-      doi                        
+    confidence    : 0.5333  (classifier=keyword)
+    fields: (set OPENAI_API_KEY to enable LLM field extraction)
 
   [sample_policy.pdf]
     document_id   : doc_6b20ed6b01efe68a
     document_type : policy
-    confidence    : 0.6429  (classifier=llm)
-    fields extracted by LLMSchemaExtractor:
-      policy_number              BSH-2024-004521
-      effective_date             2024-01-01
-      insured                    Jane Doe
-      coverage_types             preventive care, primary care visits, specialist consultations  (...
-      exclusions                 cosmetic procedures not medically necessary, experimental or inve...
+    confidence    : 0.6429  (classifier=keyword)
+    fields: (set OPENAI_API_KEY to enable LLM field extraction)
 
 
 ------------------------------------------------------------------------
@@ -143,28 +118,19 @@ Step 6 -- document_type in search results
 Step 7 -- DOCUMENT.FIND — filter documents by type
 ------------------------------------------------------------------------
 
-  pipeline.find_schemas() queries across all ingested documents.
+  pipeline.find_records() queries across all ingested documents.
   Filter by document_type to narrow instantly — no re-read needed.
 
-  find_schemas({'document_type': 'contract'})  ->  1 match(es)  ['sample_contract.pdf']
-  find_schemas({'document_type': 'invoice'})  ->  1 match(es)  ['sample_invoice.pdf']
-  find_schemas({'document_type': 'research_paper'})  ->  1 match(es)  ['sample_research.pdf']
-  find_schemas({'document_type': 'policy'})  ->  1 match(es)  ['sample_policy.pdf']
+  find_records({'document_type': 'contract'})  ->  1 match(es)  ['sample_contract.pdf']
+  find_records({'document_type': 'invoice'})  ->  1 match(es)  ['sample_invoice.pdf']
+  find_records({'document_type': 'research_paper'})  ->  1 match(es)  ['sample_research.pdf']
+  find_records({'document_type': 'policy'})  ->  1 match(es)  ['sample_policy.pdf']
 
 ------------------------------------------------------------------------
 Step 8 -- DOCUMENT.FIND — filter by extracted field values
 ------------------------------------------------------------------------
 
-  Filter on any field extracted by LLMSchemaExtractor:
-
-  find_schemas({'fields.governing_law': {'contains': 'Delaware'}}):
-    -> contract            governing_law='State of Delaware'
-
-  find_schemas({'fields.total_due': {'gt': 30000}}):
-    -> invoice             total_due='$35,154'
-
-  find_schemas({'document_type': 'contract', 'confidence': {'gte': 0.7}}):
-    -> contract            confidence=0.7778
+  (Set OPENAI_API_KEY to see field-level filtering — fields are empty without LLM extraction)
 
 ------------------------------------------------------------------------
 Step 9 -- Two-step query: DOCUMENT.FIND then DOCUMENT.SEARCH
@@ -174,31 +140,25 @@ Step 9 -- Two-step query: DOCUMENT.FIND then DOCUMENT.SEARCH
   Step 1: find matching documents by field value (deterministic).
   Step 2: retrieve specific text only within those documents.
 
-  Step 1 — find contract documents:
-    find_schemas({'document_type': 'contract'})  ->  1 document(s)
-    document_id=doc_50407085c00a7db3  governing_law='State of Delaware'
+  (Showing document_type-only filter — set OPENAI_API_KEY for field-level filters)
 
-  Step 2 — search for termination clause within contracts only:
-    search('termination obligations liability', filter=contract_id)  ->  3 chunk(s)
-    pg=2  section='2. TERMINATION'
-    2.1 Termination for Convenience. Either party may terminate ...
-    pg=2  section='1. OBLIGATIONS'
-    1.1 Vendor Obligations. Vendor shall deliver software consul...
-    pg=3  section='4. INDEMNIFICATION AND LIABILITY'
-    4.1 Indemnification. Each party (the "Indemnifying Party") s...
+  Step 1 — find contracts: 1 document(s) matched
 
-  Compare: unfiltered search across all 4 PDFs returns policy/invoice
-  chunks for this query. Filtered search goes directly to the right document.
+  Step 2 — search within contracts only:
+    3 chunk(s) from contract document only
+    pg=2  2.1 Termination for Convenience. Either party may terminate ...
+    pg=2  1.1 Vendor Obligations. Vendor shall deliver software consul...
+    pg=3  4.1 Indemnification. Each party (the "Indemnifying Party") s...
 
 ------------------------------------------------------------------------
-Step 10 -- DOCUMENT.GET_SCHEMA via DocumentDataSource
+Step 10 -- DOCUMENT.GET_RECORD via DocumentDataSource
 ------------------------------------------------------------------------
 
   When using DocumentDataSource (MCP / registry / API), the same
   schema is available as a structured op:
 
     schema = source.execute_query({
-        'op': 'DOCUMENT.GET_SCHEMA',
+        'op': 'DOCUMENT.GET_RECORD',
         'document_id': document_id,
     })
 
@@ -206,38 +166,29 @@ Step 10 -- DOCUMENT.GET_SCHEMA via DocumentDataSource
     document_type : invoice
     confidence    : 0.8000
     chunk_id      : doc_2fc16c04f2141bc6_schema
-    fields:
-      invoice_number             INV-2026-0891
-      invoice_date               2026-08-01
-      due_date                   2026-08-31
-      vendor                     Blue Solutions Inc.
-      bill_to                    Acme Manufacturing Corp
-      line_items                 [{'description': 'Cloud Infrastructure Design & Architecture', 'quantity': 1, 'unit_price': '$12,000', 'total': '$12,000'}, {'description': 'Security Audit (40 hours @ $250/hr)', 'quantity': 40, 'unit_price': '$250', 'total': '$10,000'}, {'description': 'Staff Training Workshop (full day, 3 groups)', 'quantity': 3, 'unit_price': '$800', 'total': '$2,400'}, {'description': 'Data Migration Planning & Documentation', 'quantity': 1, 'unit_price': '$4,500', 'total': '$4,500'}, {'description': 'Project Management (20 hours @ $175/hr)', 'quantity': 20, 'unit_price': '$175', 'total': '$3,500'}]
-      subtotal                   $32,400
-      tax                        $2,754
-      total_due                  $35,154
+    fields: {}  (add LLMFieldExtractor to populate)
 
 ========================================================================
 Summary
 ========================================================================
 
-  Two-layer schema inference + structured query:
+  Two-layer document classification and field extraction + structured query:
 
     Layer 1 -- type detection (no API cost, no extra deps):
       classifier=KeywordClassifier()
       -> chunk['document_type']  and  schema['confidence']
 
     Layer 2 -- field extraction (one API call per document):
-      schema_extractor=LLMSchemaExtractor()  # needs OPENAI_API_KEY
+      field_extractor=LLMFieldExtractor()  # needs OPENAI_API_KEY
       -> schema['fields']  e.g. parties, effective_date, total_due, ...
 
     DOCUMENT.FIND -- query across all ingested documents:
-      pipeline.find_schemas({'document_type': 'contract'})
-      pipeline.find_schemas({'fields.governing_law': {'contains': 'Delaware'}})
-      pipeline.find_schemas({'fields.total_due': {'gt': 30000}})
+      pipeline.find_records({'document_type': 'contract'})
+      pipeline.find_records({'fields.governing_law': {'contains': 'Delaware'}})
+      pipeline.find_records({'fields.total_due': {'gt': 30000}})
 
     Two-step pattern (structured filter + targeted text retrieval):
-      docs    = pipeline.find_schemas({'document_type': 'contract'})
+      docs    = pipeline.find_records({'document_type': 'contract'})
       doc_ids = [d['document_id'] for d in docs]
       chunks  = pipeline.search(query, filters={'document_id': doc_ids[0]})
 
@@ -248,4 +199,7 @@ Summary
     * research_paper
     * financial_report
     * unknown
+
+  To enable LLM field extraction and field-level filtering:
+    OPENAI_API_KEY=sk-... python3 examples/feature-demos/schema_inference_demo.py
 

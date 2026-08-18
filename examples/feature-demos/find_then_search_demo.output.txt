@@ -1,0 +1,122 @@
+
+========================================================================
+DOCUMENT.FIND_THEN_SEARCH — Compound Filter + Retrieval
+========================================================================
+
+  Corpus: 2 contracts, 1 invoice, 1 insurance policy
+  Query : 'termination notice period' — contracts only
+
+  No OPENAI_API_KEY — document_type filter used throughout
+
+------------------------------------------------------------------------
+Ingest corpus
+------------------------------------------------------------------------
+
+  acme_contract.txt           4 chunks  type=contract
+  beta_contract.txt           3 chunks  type=contract
+  invoice_aug26.txt           1 chunks  type=invoice
+  health_policy.txt           3 chunks  type=policy
+
+------------------------------------------------------------------------
+The manual two-step — verbose but equivalent
+------------------------------------------------------------------------
+
+  Without DOCUMENT.FIND_THEN_SEARCH the caller writes a loop:
+
+    matched = pipeline.find_records({'document_type': 'contract'})
+    seen, all_results = set(), []
+    for doc in matched:
+        chunks = pipeline.search(query, filters={'document_id': doc['document_id']})
+        for chunk in chunks:
+            if chunk['chunk_id'] not in seen:
+                seen.add(chunk['chunk_id'])
+                all_results.append(chunk)
+    all_results.sort(key=lambda c: c.get('score') or 0, reverse=True)
+    return all_results[:k]
+
+  Manual two-step result: 2 chunk(s) from 2 contract(s)
+
+  score     file                        section                     text preview
+  --------  --------------------------  --------------------------  ------------------------------
+  1.0000    acme_contract.txt           TERMINATION                 Either party may terminate this agr...
+  1.0000    beta_contract.txt           TERMINATION                 Either party may terminate this agr...
+
+------------------------------------------------------------------------
+DOCUMENT.FIND_THEN_SEARCH — same result, one call
+------------------------------------------------------------------------
+
+  source.execute_query({
+      'op': 'DOCUMENT.FIND_THEN_SEARCH',
+      'find_filter': {'document_type': 'contract'},
+      'query': 'termination notice period',
+      'k': 5,
+      'mode': 'bm25',
+  })
+
+  The op handles find → search-per-doc → merge → sort internally.
+
+  Result: 2 chunk(s)
+
+  score     file                        section                     text preview
+  --------  --------------------------  --------------------------  ------------------------------
+  1.0000    acme_contract.txt           TERMINATION                 Either party may terminate this agr...
+  1.0000    beta_contract.txt           TERMINATION                 Either party may terminate this agr...
+
+  Chunks from 2 matched document(s), merged and sorted by score.
+  No duplicate chunks — deduplication is built in.
+
+------------------------------------------------------------------------
+execute_query_nl — NLQueryParser dispatches to FIND_THEN_SEARCH
+------------------------------------------------------------------------
+
+  When NLQueryParser detects 'find documents of type X, then search
+  for Y within them', it emits DOCUMENT.FIND_THEN_SEARCH automatically.
+
+  source.execute_query_nl(
+      'find the termination clause in our contracts'
+  )
+
+  Simulated parse result (real NLQueryParser uses GPT):
+    op          = DOCUMENT.FIND_THEN_SEARCH
+    find_filter = {'document_type': 'contract'}
+    query       = 'termination notice period'
+
+  execute_query_nl(...)  ->  2 chunk(s)
+  score     file                        section                     text preview
+  --------  --------------------------  --------------------------  ------------------------------
+  1.0000    acme_contract.txt           TERMINATION                 Either party may terminate this agr...
+  1.0000    beta_contract.txt           TERMINATION                 Either party may terminate this agr...
+
+========================================================================
+Summary
+========================================================================
+
+  DOCUMENT.FIND_THEN_SEARCH replaces:
+
+    matched = pipeline.find_records(find_filter)
+    results = []
+    for doc in matched:
+        results += pipeline.search(query, filters={'document_id': doc['document_id']})
+    results = sorted(set(results), key=score)[:k]
+
+  With:
+
+    source.execute_query({
+        'op': 'DOCUMENT.FIND_THEN_SEARCH',
+        'find_filter': {'document_type': 'contract'},
+        'query': 'termination notice period',
+        'k': 5,
+    })
+
+  Key properties:
+    find_filter  — same filter dict as DOCUMENT.FIND (type, field values)
+    query        — text searched within matched documents only
+    k            — cap applied after merge across all matched documents
+    mode         — 'vector' (default), 'bm25', 'hybrid', or 'rerank'
+    collection   — vector store collection to search in
+
+  Zero matches on find_filter returns [] immediately — no search runs.
+
+  Enable field-level find_filter:
+    OPENAI_API_KEY=sk-... python3 examples/feature-demos/find_then_search_demo.py
+

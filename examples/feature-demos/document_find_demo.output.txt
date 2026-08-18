@@ -1,0 +1,119 @@
+
+========================================================================
+DOCUMENT.FIND — Structured Document Filtering
+========================================================================
+
+  Corpus: 2 contracts, 1 invoice, 1 insurance policy, 1 research paper
+  No OPENAI_API_KEY — document_type filters fully demonstrated
+  Set OPENAI_API_KEY to enable field-level filters (governing_law, total_due, ...)
+
+------------------------------------------------------------------------
+Ingest — one DocumentRecord written per document at ingest time
+------------------------------------------------------------------------
+
+  acme_contract.txt           type=contract          confidence=0.44  chunks=4
+  beta_contract.txt           type=contract          confidence=0.22  chunks=3
+  invoice_aug26.txt           type=invoice           confidence=0.67  chunks=1
+  health_policy.txt           type=policy            confidence=0.57  chunks=5
+  hybrid_rank.txt             type=research_paper    confidence=0.27  chunks=1
+
+  KeywordClassifier runs once per document at ingest — no API cost.
+  Each DocumentRecord is stored in-process (MemoryRecordStore by default).
+  LLMFieldExtractor runs after classification when OPENAI_API_KEY is set.
+
+------------------------------------------------------------------------
+Filter by document_type
+------------------------------------------------------------------------
+
+  pipeline.find_records({'document_type': 'contract'})
+
+  Returns every DocumentRecord where document_type == 'contract'.
+  Deterministic. No embedding. No LLM at query time.
+
+  ✓  find_records({'document_type': 'contract'})  ->  2 match(es)  ['acme_contract.txt', 'beta_contract.txt']
+  ✓  find_records({'document_type': 'invoice'})  ->  1 match(es)  ['invoice_aug26.txt']
+  ✓  find_records({'document_type': 'policy'})  ->  1 match(es)  ['health_policy.txt']
+  ✓  find_records({'document_type': 'research_paper'})  ->  1 match(es)  ['hybrid_rank.txt']
+
+------------------------------------------------------------------------
+Filter by confidence score
+------------------------------------------------------------------------
+
+  confidence is written by KeywordClassifier — no LLM needed.
+  Use it to narrow to high-confidence classifications only.
+
+  find_records({'confidence': {'gte': 0.3}})  ->  3 document(s)
+      contract            confidence=0.4444
+      invoice             confidence=0.6667
+      policy              confidence=0.5714
+  find_records({'confidence': {'gte': 0.5}})  ->  2 document(s)
+      invoice             confidence=0.6667
+      policy              confidence=0.5714
+  find_records({'confidence': {'gte': 0.7}})  ->  0 document(s)
+
+------------------------------------------------------------------------
+Filter by extracted field values
+------------------------------------------------------------------------
+
+  Without OPENAI_API_KEY, fields dict is empty and field-level filters
+  return no matches. document_type and confidence filters work without it.
+
+  Filter operators available once fields are populated:
+
+  Operator    Meaning                                   Example filter
+  ----------  ----------------------------------------  ----------------------------------------
+  contains    substring match (case-insensitive)        {'fields.governing_law': {'contains': 'California'}}
+  gt          greater than (numeric or lexicographic)   {'fields.total_due': {'gt': 30000}}
+  gte         greater than or equal                     {'fields.total_due': {'gte': 30000}}
+  lt          less than                                 {'fields.total_due': {'lt': 100000}}
+  lte         less than or equal                        {'fields.total_due': {'lte': 100000}}
+
+  Numeric coercion: strips $€£¥ and commas before comparison.
+  All conditions in a filter dict are ANDed.
+
+------------------------------------------------------------------------
+DOCUMENT.FIND via DocumentDataSource op interface
+------------------------------------------------------------------------
+
+  When using DocumentDataSource (MCP / registry / API), FIND is an op:
+
+    source.execute_query({
+        'op': 'DOCUMENT.FIND',
+        'filter': {'document_type': 'contract'},
+    })
+
+  Result: 2 DocumentRecord(s)
+    document_type='contract'  document_id=doc_9ea52cc9a0bfab92...  confidence=0.4444
+    document_type='contract'  document_id=doc_f06cf91781999865...  confidence=0.2222
+
+========================================================================
+Summary
+========================================================================
+
+  DOCUMENT.FIND characteristics:
+
+    Deterministic   — same filter always returns the same documents
+    No embedding    — runs without an embedding model
+    No query LLM    — field values are extracted once at ingest
+    O(n) scan       — not indexed; suitable for corpora up to ~10k documents
+
+  What it returns:
+    One DocumentRecord per matched document — not chunks.
+    Each record: document_id, document_type, confidence, classifier, fields
+
+  Filter syntax (all conditions ANDed):
+    {'document_type': 'contract'}                     exact match
+    {'fields.governing_law': {'contains': 'CA'}}      substring
+    {'fields.total_due': {'gt': 30000}}               numeric (strips $,£,€,¥,comma)
+    {'confidence': {'gte': 0.5}}                      classifier confidence
+
+  Next step after FIND — retrieve text from matched documents:
+    docs   = pipeline.find_records({'document_type': 'contract'})
+    chunks = pipeline.search('termination', filters={'document_id': docs[0]['document_id']})
+
+  Or in one call — see find_then_search_demo.py:
+    source.execute_query({'op': 'DOCUMENT.FIND_THEN_SEARCH', ...})
+
+  Enable field-level filters:
+    OPENAI_API_KEY=sk-... python3 examples/feature-demos/document_find_demo.py
+

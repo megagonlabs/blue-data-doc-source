@@ -54,7 +54,28 @@ results = pipeline.search(
 # → all results from contracts; policy and invoice noise eliminated
 ```
 
-See the runnable demo: `python3 examples/scenario-demos/structured_doc_query_demo.py`
+**Both steps in one call**
+
+The two-step pattern can be collapsed into a single op. `DOCUMENT.FIND_THEN_SEARCH` runs the structured filter, searches text within each matched document, merges the results, and returns a single ranked list — with deduplication handled internally.
+
+```python
+# Equivalent to the two-step above — one call, same result
+chunks = source.execute_query({
+    "op": "DOCUMENT.FIND_THEN_SEARCH",
+    "find_filter": {"fields.parties": {"contains": "Acme Corp"}},
+    "query": "termination clause",
+    "k": 5,
+})
+
+# Or in plain English via NLQueryParser:
+chunks = source.execute_query_nl("find the termination clause in Acme Corp contracts")
+# NLQueryParser detects FIND_THEN_SEARCH intent and builds the op dict automatically
+```
+
+See the runnable demos:
+- `python3 examples/scenario-demos/structured_doc_query_demo.py` — all three failures end-to-end
+- `python3 examples/feature-demos/document_find_demo.py` — DOCUMENT.FIND in depth
+- `python3 examples/feature-demos/find_then_search_demo.py` — DOCUMENT.FIND_THEN_SEARCH in depth
 
 **The integration story: documents alongside your other data sources**
 
