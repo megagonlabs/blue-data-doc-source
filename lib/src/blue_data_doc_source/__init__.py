@@ -8,12 +8,12 @@ from .source.document.enrichment import Enricher, BasicEnricher, LLMEnricher
 from .source.document.parsers import Parser, TextParser, PDFParser, DocxParser, PlumberPDFParser
 from .source.document.schema import (
     DocumentClassifier,
-    SchemaExtractor,
+    FieldExtractor,
     KeywordClassifier,
-    LLMSchemaExtractor,
-    SchemaStore,
-    MemorySchemaStore,
-    FileSchemaStore,
+    LLMFieldExtractor,
+    RecordStore,
+    MemoryRecordStore,
+    FileRecordStore,
 )
 
 __all__ = [
@@ -37,10 +37,10 @@ __all__ = [
     "PlumberPDFParser",
     "NLQueryParser",
     "DocumentClassifier",
-    "SchemaExtractor",
+    "FieldExtractor",
     "KeywordClassifier",
-    "LLMSchemaExtractor",
-    "SchemaStore",
-    "MemorySchemaStore",
-    "FileSchemaStore",
+    "LLMFieldExtractor",
+    "RecordStore",
+    "MemoryRecordStore",
+    "FileRecordStore",
 ]

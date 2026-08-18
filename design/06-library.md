@@ -20,8 +20,8 @@ DocumentPipeline(
     collection: str = "documents",
     ocr_fallback: bool = False,
     classifier: DocumentClassifier | None = None,
-    schema_extractor: SchemaExtractor | None = None,
-    schema_store: SchemaStore | None = None,
+    field_extractor: FieldExtractor | None = None,
+    record_store: RecordStore | None = None,
 )
 ```
 
@@ -29,8 +29,8 @@ DocumentPipeline(
 - `parser` — when provided, overrides built-in extension detection; all extensions are routed through the custom parser
 - `ocr_fallback` — passes `ocr_fallback=True` to the built-in `PDFParser`; has no effect when a custom `parser` is set
 - `classifier` — when set, classifies the document type once per ingest (before the chunk loop) and propagates `document_type` to every `ChunkRecord`; defaults to `None` (no classification)
-- `schema_extractor` — when set alongside `classifier`, extracts typed fields from the document text via a single call per ingest; result stored in `schema_store`; defaults to `None`
-- `schema_store` — backend for schema records; defaults to `MemorySchemaStore()` (in-process); pass `FileSchemaStore(path)` for persistence across restarts
+- `field_extractor` — when set alongside `classifier`, extracts typed fields from the document text via a single call per ingest; result stored in `record_store`; defaults to `None`
+- `record_store` — backend for schema records; defaults to `MemoryRecordStore()` (in-process); pass `FileRecordStore(path)` for persistence across restarts
 
 ### Methods
 
@@ -42,8 +42,8 @@ DocumentPipeline(
 | `search(query, k=5, collection=None, filters=None)` | `list[dict]` | Embed query and run KNN; raises if `embedding_model` or `vector_source` is not set |
 | `ensure_index(collection=None)` | `None` | Create vector index for the collection; idempotent — safe to call multiple times |
 | `delete(path=None, document_id=None, chunk_count=None, collection=None)` | `int` | Delete all chunks for a document; returns count of successful delete calls |
-| `get_schema(document_id)` | `dict \| None` | Return the schema record stored during ingest; `None` if no `classifier` was set or the document is unknown |
-| `find_schemas(filter=None)` | `list[dict]` | Return all schema records matching the filter dict; see `SchemaStore.find()` for filter syntax; returns `[]` when no classifier is set |
+| `get_record(document_id)` | `dict \| None` | Return the schema record stored during ingest; `None` if no `classifier` was set or the document is unknown |
+| `find_records(filter=None)` | `list[dict]` | Return all schema records matching the filter dict; see `RecordStore.find()` for filter syntax; returns `[]` when no classifier is set |
 | `search_rich(query, k=5, collection=None, filters=None, context_chunks=1)` | `dict` | Enriched search response: ranked results with citation, neighbor context, and `by_document` grouping |
 
 ### Document identity and deduplication
@@ -71,8 +71,8 @@ DocumentDataSource(
     properties: dict | None = None,
     ocr_fallback: bool = False,
     classifier: DocumentClassifier | None = None,
-    schema_extractor: SchemaExtractor | None = None,
-    schema_store: SchemaStore | None = None,
+    field_extractor: FieldExtractor | None = None,
+    record_store: RecordStore | None = None,
 )
 ```
 
@@ -84,8 +84,8 @@ DocumentDataSource(
 | `DOCUMENT.SEARCH` | `query` | `collection`, `k` (default 5), `filter` (dict) | `list[dict]` — ranked chunks |
 | `DOCUMENT.ENSURE_INDEX` | — | `collection` | `None` |
 | `DOCUMENT.DELETE` | `path` OR (`document_id` + `chunk_count`) | `collection` | `int` — deleted chunk count |
-| `DOCUMENT.GET_SCHEMA` | `document_id` | — | `dict` — schema record; raises if unknown |
-| `DOCUMENT.FIND` | — | `filter` (dict) | `list[dict]` — schema records matching filter; see `SchemaStore.find()` for filter syntax |
+| `DOCUMENT.GET_RECORD` | `document_id` | — | `dict` — schema record; raises if unknown |
+| `DOCUMENT.FIND` | — | `filter` (dict) | `list[dict]` — schema records matching filter; see `RecordStore.find()` for filter syntax |
 | `DOCUMENT.SEARCH_RICH` | `query` | `collection`, `k` (default 5), `filter` (dict), `context_chunks` (int, default 1) | `dict` — enriched results with citation, neighbor context, and `by_document` grouping |
 
 ### Methods
@@ -323,12 +323,12 @@ Supported document types and representative signals:
 
 ---
 
-## SchemaExtractor (ABC)
+## FieldExtractor (ABC)
 
-Extracts typed fields from a document given its classified type. Called once per document during ingest when both `classifier` and `schema_extractor` are set.
+Extracts typed fields from a document given its classified type. Called once per document during ingest when both `classifier` and `field_extractor` are set.
 
 ```python
-class SchemaExtractor(ABC):
+class FieldExtractor(ABC):
     def extract(self, text: str, document_type: str) -> dict: ...
     # Returns a plain dict of type-specific field names → values.
     # Omit fields that cannot be determined; do not set them to None.
@@ -336,10 +336,10 @@ class SchemaExtractor(ABC):
 
 ### Built-in extractor
 
-**`LLMSchemaExtractor`** — one GPT-4o-mini call per document. Requires `openai>=1.0` and `OPENAI_API_KEY`.
+**`LLMFieldExtractor`** — one GPT-4o-mini call per document. Requires `openai>=1.0` and `OPENAI_API_KEY`.
 
 ```python
-LLMSchemaExtractor(
+LLMFieldExtractor(
     model: str = "gpt-4o-mini",
     sample_chars: int = 4000,   # truncates input sent to the LLM
 )
@@ -349,7 +349,7 @@ Builds a type-specific prompt from the document text and returns a JSON dict of 
 
 ### Schema record format
 
-The schema stored in `pipeline.schema_store` (and returned by `get_schema` / `DOCUMENT.GET_SCHEMA`) has the following shape:
+The schema stored in `pipeline.record_store` (and returned by `get_record` / `DOCUMENT.GET_RECORD`) has the following shape:
 
 ```python
 {
@@ -357,8 +357,8 @@ The schema stored in `pipeline.schema_store` (and returned by `get_schema` / `DO
     "chunk_id":      "doc_abc123_schema",   # keyed but not upserted to vector store
     "document_type": "contract",
     "confidence":    0.78,
-    "classifier":    "keyword",             # "llm" when schema_extractor is set
-    "fields":        {                      # {} when no schema_extractor
+    "classifier":    "keyword",             # "llm" when field_extractor is set
+    "fields":        {                      # {} when no field_extractor
         "parties":       ["TechCorp Inc.", "BuildRight Solutions LLC"],
         "governing_law": "Delaware",
         "effective_date": "September 1, 2026",
@@ -366,16 +366,16 @@ The schema stored in `pipeline.schema_store` (and returned by `get_schema` / `DO
 }
 ```
 
-Schema persistence is controlled by the injected `SchemaStore`. The default `MemorySchemaStore` is in-process only. Pass `FileSchemaStore(path)` to persist across restarts — the file is written atomically on every upsert.
+Schema persistence is controlled by the injected `RecordStore`. The default `MemoryRecordStore` is in-process only. Pass `FileRecordStore(path)` to persist across restarts — the file is written atomically on every upsert.
 
 ---
 
-## SchemaStore (ABC)
+## RecordStore (ABC)
 
-Pluggable backend for per-document schema records. Injected into `DocumentPipeline` and `DocumentDataSource` via `schema_store=`. Defaults to `MemorySchemaStore()` when omitted.
+Pluggable backend for per-document schema records. Injected into `DocumentPipeline` and `DocumentDataSource` via `record_store=`. Defaults to `MemoryRecordStore()` when omitted.
 
 ```python
-class SchemaStore(ABC):
+class RecordStore(ABC):
     def upsert(self, record: dict) -> None: ...
     def get(self, document_id: str) -> dict | None: ...
     def find(self, filter: dict | None = None) -> list[dict]: ...
@@ -384,9 +384,9 @@ class SchemaStore(ABC):
 
 ### Built-in implementations
 
-**`MemorySchemaStore`** — in-process dict; default when no `schema_store=` is passed.
+**`MemoryRecordStore`** — in-process dict; default when no `record_store=` is passed.
 
-**`FileSchemaStore(path)`** — JSON file backend; reads on init, writes atomically on every `upsert` and `delete` (write-to-tmp then `os.replace`). Survives process restarts. Creates the file on first write; handles empty or missing files safely.
+**`FileRecordStore(path)`** — JSON file backend; reads on init, writes atomically on every `upsert` and `delete` (write-to-tmp then `os.replace`). Survives process restarts. Creates the file on first write; handles empty or missing files safely.
 
 ### `find()` filter syntax
 

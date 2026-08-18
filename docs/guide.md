@@ -99,7 +99,7 @@ results = source.execute_query({
 | `DOCUMENT.SEARCH_RICH` | `query` | `dict` — ranked results with provenance, context, and grouping |
 | `DOCUMENT.ENSURE_INDEX` | — | `None` |
 | `DOCUMENT.DELETE` | `path` OR (`document_id` + `chunk_count`) | `int` — deleted chunk count |
-| `DOCUMENT.GET_SCHEMA` | `document_id` | `dict` — schema record; raises if unknown |
+| `DOCUMENT.GET_RECORD` | `document_id` | `dict` — schema record; raises if unknown |
 | `DOCUMENT.FIND` | — | `list[dict]` — schema records matching `filter`; no embedding, no LLM, deterministic |
 
 ---
@@ -426,9 +426,9 @@ All `Parser` subclasses inherit a default `parse_blocks()` that wraps `parse()` 
 
 ---
 
-## Document schema inference
+## Document classification and field extraction
 
-`KeywordClassifier` and `LLMSchemaExtractor` run once per document at ingest time to identify its type and extract typed fields. `document_type` is then propagated to every chunk produced from that document.
+`KeywordClassifier` and `LLMFieldExtractor` run once per document at ingest time to identify its type and extract typed fields. `document_type` is then propagated to every chunk produced from that document.
 
 ### Layer 1 — KeywordClassifier (no API cost)
 
@@ -458,16 +458,16 @@ KeywordClassifier(min_confidence=0.25)   # stricter — more unknowns
 KeywordClassifier(sample_words=200)      # faster — score fewer words
 ```
 
-### Layer 2 — LLMSchemaExtractor (optional, one call per document)
+### Layer 2 — LLMFieldExtractor (optional, one call per document)
 
 Calls GPT-4o-mini with a type-specific prompt to extract typed fields from the document. Requires `OPENAI_API_KEY`.
 
 ```python
-from blue_data_doc_source import LLMSchemaExtractor
+from blue_data_doc_source import LLMFieldExtractor
 
 pipeline = DocumentPipeline(
     classifier=KeywordClassifier(),
-    schema_extractor=LLMSchemaExtractor(),  # one API call per document
+    field_extractor=LLMFieldExtractor(),  # one API call per document
     ...
 )
 ```
@@ -488,7 +488,7 @@ The schema is stored in-process at ingest time. Retrieve it without re-reading t
 
 ```python
 doc_id = records[0]["document_id"]
-schema = pipeline.get_schema(doc_id)
+schema = pipeline.get_record(doc_id)
 ```
 
 Schema record format:
@@ -499,7 +499,7 @@ Schema record format:
     "chunk_id":    "doc_abc123_schema",
     "document_type": "contract",
     "confidence":    0.78,
-    "classifier":    "llm",       # "keyword" when no schema_extractor is set
+    "classifier":    "llm",       # "keyword" when no field_extractor is set
     "fields": {
         "parties":       ["TechCorp Inc.", "BuildRight Solutions LLC"],
         "governing_law": "Delaware",
@@ -512,36 +512,36 @@ Via `DocumentDataSource`:
 
 ```python
 schema = source.execute_query({
-    "op": "DOCUMENT.GET_SCHEMA",
+    "op": "DOCUMENT.GET_RECORD",
     "document_id": "doc_abc123",
 })
 ```
 
-### Schema persistence (FileSchemaStore)
+### Schema persistence (FileRecordStore)
 
-By default schemas are stored in `MemorySchemaStore` — in-process only. Pass `FileSchemaStore` to persist across restarts:
+By default schemas are stored in `MemoryRecordStore` — in-process only. Pass `FileRecordStore` to persist across restarts:
 
 ```python
-from blue_data_doc_source import DocumentPipeline, FileSchemaStore, KeywordClassifier, LLMSchemaExtractor
+from blue_data_doc_source import DocumentPipeline, FileRecordStore, KeywordClassifier, LLMFieldExtractor
 
 pipeline = DocumentPipeline(
     classifier=KeywordClassifier(),
-    schema_extractor=LLMSchemaExtractor(),
-    schema_store=FileSchemaStore("schemas.json"),  # written atomically on every ingest
+    field_extractor=LLMFieldExtractor(),
+    record_store=FileRecordStore("schemas.json"),  # written atomically on every ingest
 )
 # After restart, schemas.json is reloaded — DOCUMENT.FIND works immediately
 ```
 
 ### Structured corpus query (DOCUMENT.FIND)
 
-`find_schemas()` filters across all ingested documents by schema field values — no embedding, no LLM call at query time:
+`find_records()` filters across all ingested documents by schema field values — no embedding, no LLM call at query time:
 
 ```python
 # All contracts governed by California
-docs = pipeline.find_schemas({"document_type": "contract", "fields.governing_law": {"contains": "California"}})
+docs = pipeline.find_records({"document_type": "contract", "fields.governing_law": {"contains": "California"}})
 
 # Invoices over $30,000 — currency symbols stripped automatically
-docs = pipeline.find_schemas({"document_type": "invoice", "fields.total_due": {"gt": 30000}})
+docs = pipeline.find_records({"document_type": "invoice", "fields.total_due": {"gt": 30000}})
 ```
 
 Via `DocumentDataSource`:
@@ -556,7 +556,7 @@ docs = source.execute_query({
 **Two-step pattern** — combine with `DOCUMENT.SEARCH` for precise, noise-free retrieval:
 
 ```python
-docs   = pipeline.find_schemas({"fields.parties": {"contains": "Acme Corp"}})
+docs   = pipeline.find_records({"fields.parties": {"contains": "Acme Corp"}})
 chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["document_id"]})
 ```
 
@@ -565,21 +565,21 @@ chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["
 Implement either ABC to replace the built-in logic:
 
 ```python
-from blue_data_doc_source import DocumentClassifier, SchemaExtractor
+from blue_data_doc_source import DocumentClassifier, FieldExtractor
 
 class MyClassifier(DocumentClassifier):
     def classify(self, text: str) -> tuple[str, float]:
         # return (document_type, confidence)
         ...
 
-class MyExtractor(SchemaExtractor):
+class MyExtractor(FieldExtractor):
     def extract(self, text: str, document_type: str) -> dict:
         # return a dict of typed fields
         ...
 
 pipeline = DocumentPipeline(
     classifier=MyClassifier(),
-    schema_extractor=MyExtractor(),
+    field_extractor=MyExtractor(),
     ...
 )
 ```

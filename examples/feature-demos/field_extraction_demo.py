@@ -2,7 +2,7 @@
 Document Schema Inference
 =========================
 Shows how KeywordClassifier identifies document types from PDF content and
-LLMSchemaExtractor extracts typed fields -- no manual labelling, no file
+LLMFieldExtractor extracts typed fields -- no manual labelling, no file
 re-reading after ingest.
 
 Story:
@@ -16,17 +16,17 @@ Two-layer approach:
     Scores the first 500 words against signal phrase sets for each document
     type and returns (document_type, confidence). Zero dependencies.
 
-  Layer 2 -- LLMSchemaExtractor (optional, requires OPENAI_API_KEY)
+  Layer 2 -- LLMFieldExtractor (optional, requires OPENAI_API_KEY)
     Calls GPT-4o-mini once per document with a type-specific prompt and
     extracts typed fields (parties, effective_date, invoice_number, ...).
 
 What this demo covers:
   * pipeline.ingest(path)  -- real PDF files, page-by-page parsing
   * document_type on every chunk after ingest
-  * pipeline.get_schema(document_id)  -- schema stored at ingest time
+  * pipeline.get_record(document_id)  -- schema stored at ingest time
   * confidence scores from KeywordClassifier
-  * Typed fields from LLMSchemaExtractor (when OPENAI_API_KEY is set)
-  * DOCUMENT.GET_SCHEMA op via DocumentDataSource
+  * Typed fields from LLMFieldExtractor (when OPENAI_API_KEY is set)
+  * DOCUMENT.GET_RECORD op via DocumentDataSource
 
 Run:
     python3 examples/feature-demos/schema_inference_demo.py
@@ -47,7 +47,7 @@ from blue_data_doc_source import (
     DocumentPipeline,
     DummyEmbeddingModel,
     KeywordClassifier,
-    LLMSchemaExtractor,
+    LLMFieldExtractor,
 )
 
 DATA_DIR = Path(__file__).parent.parent.parent / "data"
@@ -95,16 +95,16 @@ def run() -> None:
     print("  Four PDFs -- contract, invoice, research paper, policy.")
     print("  Layer 1: KeywordClassifier  (always, no API cost)")
     if has_openai:
-        print("  Layer 2: LLMSchemaExtractor (OPENAI_API_KEY detected -- field extraction enabled)")
+        print("  Layer 2: LLMFieldExtractor (OPENAI_API_KEY detected -- field extraction enabled)")
     else:
-        print("  Layer 2: LLMSchemaExtractor (no OPENAI_API_KEY -- field extraction skipped)")
+        print("  Layer 2: LLMFieldExtractor (no OPENAI_API_KEY -- field extraction skipped)")
         print("           Set OPENAI_API_KEY to enable typed field extraction.")
 
     # ── Step 1: Build pipeline ────────────────────────────────────────────
-    _step(1, "Build pipeline with two-layer schema inference")
+    _step(1, "Build pipeline with two-layer document classification and field extraction")
     print()
 
-    schema_extractor = LLMSchemaExtractor() if has_openai else None
+    field_extractor = LLMFieldExtractor() if has_openai else None
 
     store    = LocalMemoryVectorStore()
     pipeline = DocumentPipeline(
@@ -114,16 +114,16 @@ def run() -> None:
         overlap=25,
         collection="mixed_docs",
         classifier=KeywordClassifier(),
-        schema_extractor=schema_extractor,
+        field_extractor=field_extractor,
     )
     pipeline.ensure_index("mixed_docs")
 
     print("  pipeline = DocumentPipeline(")
     print("      classifier=KeywordClassifier(),")
     if has_openai:
-        print("      schema_extractor=LLMSchemaExtractor(),  # one API call per document")
+        print("      field_extractor=LLMFieldExtractor(),  # one API call per document")
     else:
-        print("      # schema_extractor not set -- add LLMSchemaExtractor() with OPENAI_API_KEY")
+        print("      # field_extractor not set -- add LLMFieldExtractor() with OPENAI_API_KEY")
     print("      ...,")
     print("  )")
 
@@ -159,7 +159,7 @@ def run() -> None:
         if not records:
             continue
         doc_id   = records[0]["document_id"]
-        schema   = pipeline.get_schema(doc_id)
+        schema   = pipeline.get_record(doc_id)
         doc_type = schema["document_type"] if schema else "?"
         conf     = f"{schema['confidence']:.4f}" if schema else "?"
         print(f"  {pdf_name:<28}  {doc_type:<18}  {conf:<10}  {len(records)}")
@@ -186,7 +186,7 @@ def run() -> None:
     # ── Step 5: Schema per document ───────────────────────────────────────
     _step(5, "Schema record per document")
     print()
-    print("  pipeline.get_schema(document_id) retrieves the schema stored at")
+    print("  pipeline.get_record(document_id) retrieves the schema stored at")
     print("  ingest time. No re-read of the PDF needed.")
     print()
 
@@ -194,7 +194,7 @@ def run() -> None:
         if not records:
             continue
         doc_id = records[0]["document_id"]
-        schema = pipeline.get_schema(doc_id)
+        schema = pipeline.get_record(doc_id)
         if not schema:
             continue
 
@@ -205,7 +205,7 @@ def run() -> None:
               f"(classifier={schema['classifier']})")
 
         if schema["fields"]:
-            print(f"    fields extracted by LLMSchemaExtractor:")
+            print(f"    fields extracted by LLMFieldExtractor:")
             for k, v in schema["fields"].items():
                 v_str = str(v)
                 if isinstance(v, list):
@@ -240,45 +240,45 @@ def run() -> None:
     # ── Step 7: DOCUMENT.FIND — filter by document_type ──────────────────
     _step(7, "DOCUMENT.FIND — filter documents by type")
     print()
-    print("  pipeline.find_schemas() queries across all ingested documents.")
+    print("  pipeline.find_records() queries across all ingested documents.")
     print("  Filter by document_type to narrow instantly — no re-read needed.")
     print()
 
     for doc_type in ["contract", "invoice", "research_paper", "policy"]:
-        matches = pipeline.find_schemas({"document_type": doc_type})
+        matches = pipeline.find_records({"document_type": doc_type})
         names   = [ingested_name
                    for ingested_name, recs in ingested.items()
-                   if recs and pipeline.get_schema(recs[0]["document_id"]) and
-                   pipeline.get_schema(recs[0]["document_id"])["document_type"] == doc_type]
-        print(f"  find_schemas({{'document_type': {doc_type!r}}})  ->  {len(matches)} match(es)  {names}")
+                   if recs and pipeline.get_record(recs[0]["document_id"]) and
+                   pipeline.get_record(recs[0]["document_id"])["document_type"] == doc_type]
+        print(f"  find_records({{'document_type': {doc_type!r}}})  ->  {len(matches)} match(es)  {names}")
 
     # ── Step 8: DOCUMENT.FIND — filter by extracted field ────────────────
     _step(8, "DOCUMENT.FIND — filter by extracted field values")
     print()
 
     if has_openai:
-        print("  Filter on any field extracted by LLMSchemaExtractor:")
+        print("  Filter on any field extracted by LLMFieldExtractor:")
         print()
 
         # governing_law
-        results = pipeline.find_schemas({"fields.governing_law": {"contains": "Delaware"}})
-        print(f"  find_schemas({{'fields.governing_law': {{'contains': 'Delaware'}}}}):")
+        results = pipeline.find_records({"fields.governing_law": {"contains": "Delaware"}})
+        print(f"  find_records({{'fields.governing_law': {{'contains': 'Delaware'}}}}):")
         for r in results:
             print(f"    -> {r['document_type']:<18}  governing_law={r['fields'].get('governing_law')!r}")
 
         print()
 
         # total_due > $30,000
-        results = pipeline.find_schemas({"fields.total_due": {"gt": 30000}})
-        print(f"  find_schemas({{'fields.total_due': {{'gt': 30000}}}}):")
+        results = pipeline.find_records({"fields.total_due": {"gt": 30000}})
+        print(f"  find_records({{'fields.total_due': {{'gt': 30000}}}}):")
         for r in results:
             print(f"    -> {r['document_type']:<18}  total_due={r['fields'].get('total_due')!r}")
 
         print()
 
         # multiple conditions: contract + confidence >= 0.7
-        results = pipeline.find_schemas({"document_type": "contract", "confidence": {"gte": 0.7}})
-        print(f"  find_schemas({{'document_type': 'contract', 'confidence': {{'gte': 0.7}}}}):")
+        results = pipeline.find_records({"document_type": "contract", "confidence": {"gte": 0.7}})
+        print(f"  find_records({{'document_type': 'contract', 'confidence': {{'gte': 0.7}}}}):")
         for r in results:
             print(f"    -> {r['document_type']:<18}  confidence={r['confidence']:.4f}")
     else:
@@ -294,9 +294,9 @@ def run() -> None:
 
     if has_openai:
         print("  Step 1 — find contract documents:")
-        contracts = pipeline.find_schemas({"document_type": "contract"})
+        contracts = pipeline.find_records({"document_type": "contract"})
         contract_ids = [r["document_id"] for r in contracts]
-        print(f"    find_schemas({{'document_type': 'contract'}})  ->  {len(contracts)} document(s)")
+        print(f"    find_records({{'document_type': 'contract'}})  ->  {len(contracts)} document(s)")
         for r in contracts:
             print(f"    document_id={r['document_id']}  governing_law={r['fields'].get('governing_law')!r}")
 
@@ -320,7 +320,7 @@ def run() -> None:
     else:
         print("  (Showing document_type-only filter — set OPENAI_API_KEY for field-level filters)")
         print()
-        contracts = pipeline.find_schemas({"document_type": "contract"})
+        contracts = pipeline.find_records({"document_type": "contract"})
         contract_ids = [r["document_id"] for r in contracts]
         print(f"  Step 1 — find contracts: {len(contracts)} document(s) matched")
         print()
@@ -338,19 +338,19 @@ def run() -> None:
                 snippet = r.get("text", "").replace("\n", " ")[:60]
                 print(f"    pg={r.get('page_start', '-')}  {snippet}...")
 
-    # ── Step 10: DOCUMENT.GET_SCHEMA op ──────────────────────────────────
-    _step(10, "DOCUMENT.GET_SCHEMA via DocumentDataSource")
+    # ── Step 10: DOCUMENT.GET_RECORD op ──────────────────────────────────
+    _step(10, "DOCUMENT.GET_RECORD via DocumentDataSource")
     print()
     print("  When using DocumentDataSource (MCP / registry / API), the same")
     print("  schema is available as a structured op:")
     print()
     print("    schema = source.execute_query({")
-    print("        'op': 'DOCUMENT.GET_SCHEMA',")
+    print("        'op': 'DOCUMENT.GET_RECORD',")
     print("        'document_id': document_id,")
     print("    })")
     print()
     invoice_doc_id = ingested["sample_invoice.pdf"][0]["document_id"]
-    invoice_schema = pipeline.get_schema(invoice_doc_id)
+    invoice_schema = pipeline.get_record(invoice_doc_id)
     print("  Example response for sample_invoice.pdf:")
     print(f"    document_type : {invoice_schema['document_type']}")
     print(f"    confidence    : {invoice_schema['confidence']:.4f}")
@@ -360,28 +360,28 @@ def run() -> None:
         for k, v in invoice_schema["fields"].items():
             print(f"      {k:<26} {v}")
     else:
-        print("    fields: {}  (add LLMSchemaExtractor to populate)")
+        print("    fields: {}  (add LLMFieldExtractor to populate)")
 
     # ── Summary ───────────────────────────────────────────────────────────
     _banner("Summary")
     print()
-    print("  Two-layer schema inference + structured query:")
+    print("  Two-layer document classification and field extraction + structured query:")
     print()
     print("    Layer 1 -- type detection (no API cost, no extra deps):")
     print("      classifier=KeywordClassifier()")
     print("      -> chunk['document_type']  and  schema['confidence']")
     print()
     print("    Layer 2 -- field extraction (one API call per document):")
-    print("      schema_extractor=LLMSchemaExtractor()  # needs OPENAI_API_KEY")
+    print("      field_extractor=LLMFieldExtractor()  # needs OPENAI_API_KEY")
     print("      -> schema['fields']  e.g. parties, effective_date, total_due, ...")
     print()
     print("    DOCUMENT.FIND -- query across all ingested documents:")
-    print("      pipeline.find_schemas({'document_type': 'contract'})")
-    print("      pipeline.find_schemas({'fields.governing_law': {'contains': 'Delaware'}})")
-    print("      pipeline.find_schemas({'fields.total_due': {'gt': 30000}})")
+    print("      pipeline.find_records({'document_type': 'contract'})")
+    print("      pipeline.find_records({'fields.governing_law': {'contains': 'Delaware'}})")
+    print("      pipeline.find_records({'fields.total_due': {'gt': 30000}})")
     print()
     print("    Two-step pattern (structured filter + targeted text retrieval):")
-    print("      docs    = pipeline.find_schemas({'document_type': 'contract'})")
+    print("      docs    = pipeline.find_records({'document_type': 'contract'})")
     print("      doc_ids = [d['document_id'] for d in docs]")
     print("      chunks  = pipeline.search(query, filters={'document_id': doc_ids[0]})")
     print()

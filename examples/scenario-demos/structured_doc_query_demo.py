@@ -45,7 +45,7 @@ from blue_data_doc_source import (
     DocumentPipeline,
     DummyEmbeddingModel,
     KeywordClassifier,
-    LLMSchemaExtractor,
+    LLMFieldExtractor,
 )
 
 DIV  = "=" * 72
@@ -237,10 +237,10 @@ def run() -> None:
         print("  OPENAI_API_KEY detected — field-level filters enabled (Failure 2 + 3)")
     else:
         print("  No OPENAI_API_KEY — core story runs fully; field-level filters skipped")
-        print("  Set OPENAI_API_KEY to unlock: find_schemas({'fields.total_due': {'gt': 30000}})")
+        print("  Set OPENAI_API_KEY to unlock: find_records({'fields.total_due': {'gt': 30000}})")
 
     # ── Build pipeline ────────────────────────────────────────────────────
-    schema_extractor = LLMSchemaExtractor() if has_openai else None
+    field_extractor = LLMFieldExtractor() if has_openai else None
 
     store    = LocalMemoryVectorStore()
     pipeline = DocumentPipeline(
@@ -250,7 +250,7 @@ def run() -> None:
         overlap=20,
         collection="legal_corpus",
         classifier=KeywordClassifier(),
-        schema_extractor=schema_extractor,
+        field_extractor=field_extractor,
     )
     pipeline.ensure_index("legal_corpus")
 
@@ -263,7 +263,7 @@ def run() -> None:
         )
         doc_id = records[0]["document_id"]
         doc_ids[fname] = doc_id
-        schema    = pipeline.get_schema(doc_id)
+        schema    = pipeline.get_record(doc_id)
         doc_type  = schema["document_type"] if schema else "unknown"
         n_chunks  = len(records)
         print(f"  {fname:<26}  {n_chunks} chunks  type={doc_type}")
@@ -316,7 +316,7 @@ def run() -> None:
     print(f"  {TICK}  FIX: Two-step — DOCUMENT.FIND narrows to Acme's contract, then SEARCH")
     print()
     print("  Step 1 — find Acme Corp's document deterministically:")
-    print("    contracts = pipeline.find_schemas({'document_type': 'contract'})")
+    print("    contracts = pipeline.find_records({'document_type': 'contract'})")
     acme_id = doc_ids["acme_contract.txt"]
     print()
     print(f"  Step 2 — search ONLY within that document:")
@@ -368,12 +368,12 @@ def run() -> None:
         print()
         print(f"  {TICK}  FIX: DOCUMENT.FIND with a numeric field filter")
         print()
-        print("    pipeline.find_schemas({")
+        print("    pipeline.find_records({")
         print("        'document_type': 'invoice',")
         print("        'fields.total_due': {'gt': 30000},  # '$35,154' parsed numerically")
         print("    })")
         print()
-        results = pipeline.find_schemas({
+        results = pipeline.find_records({
             "document_type": "invoice",
             "fields.total_due": {"gt": 30000},
         })
@@ -383,15 +383,15 @@ def run() -> None:
                 print(f"     vendor={r['fields'].get('vendor')!r}")
                 print(f"     bill_to={r['fields'].get('bill_to')!r}")
         else:
-            print("  (No invoices matched — check that LLMSchemaExtractor extracted total_due)")
+            print("  (No invoices matched — check that LLMFieldExtractor extracted total_due)")
         print()
         print("  Deterministic. No embedding. No hallucination. Returns exactly the right set.")
     else:
         print()
         print(f"  {TICK}  FIX (requires OPENAI_API_KEY):")
         print()
-        print("    pipeline.find_schemas({'document_type': 'invoice', 'fields.total_due': {'gt': 30000}})")
-        print("    # LLMSchemaExtractor extracts total_due='$35,154' at ingest time")
+        print("    pipeline.find_records({'document_type': 'invoice', 'fields.total_due': {'gt': 30000}})")
+        print("    # LLMFieldExtractor extracts total_due='$35,154' at ingest time")
         print("    # DOCUMENT.FIND strips '$' and ',' then compares 35154 > 30000 → match")
         print("    # Returns: [{document_type: 'invoice', fields: {total_due: '$35,154', ...}}]")
 
@@ -425,12 +425,12 @@ def run() -> None:
         print()
         print(f"  {TICK}  FIX: DOCUMENT.FIND returns the exact document")
         print()
-        print("    pipeline.find_schemas({")
+        print("    pipeline.find_records({")
         print("        'document_type': 'contract',")
         print("        'fields.governing_law': {'contains': 'California'},")
         print("    })")
         print()
-        results = pipeline.find_schemas({
+        results = pipeline.find_records({
             "document_type": "contract",
             "fields.governing_law": {"contains": "California"},
         })
@@ -448,7 +448,7 @@ def run() -> None:
         print()
         print(f"  {TICK}  FIX (requires OPENAI_API_KEY):")
         print()
-        print("    pipeline.find_schemas({'document_type': 'contract',")
+        print("    pipeline.find_records({'document_type': 'contract',")
         print("                           'fields.governing_law': {'contains': 'California'}})")
         print("    # -> [{document_type: 'contract', fields: {governing_law: 'State of California', ...}}]")
         print("    # One document. One answer. No LLM at query time.")
@@ -466,10 +466,10 @@ def run() -> None:
         print("  Agent task: 'Summarize the termination terms in Acme Corp's contract.'")
         print()
         print("  Step 1 — pin the document (no embedding, deterministic):")
-        print("    contracts = pipeline.find_schemas({'fields.parties': {'contains': 'Acme Corp'}})")
-        acme_matches = pipeline.find_schemas({"fields.parties": {"contains": "Acme Corp"}})
+        print("    contracts = pipeline.find_records({'fields.parties': {'contains': 'Acme Corp'}})")
+        acme_matches = pipeline.find_records({"fields.parties": {"contains": "Acme Corp"}})
         if not acme_matches:
-            acme_matches = pipeline.find_schemas({"document_type": "contract"})
+            acme_matches = pipeline.find_records({"document_type": "contract"})
             acme_matches = [r for r in acme_matches if "acme" in str(r.get("fields", {})).lower()]
         if acme_matches:
             print(f"    -> matched: {acme_matches[0].get('document_type')} — {list(acme_matches[0]['fields'].get('parties', []))}")
@@ -495,8 +495,8 @@ def run() -> None:
         print("  Agent task: 'What is the termination clause in the contract that expires soonest?'")
         print()
         print("  Step 1 — find all contracts (deterministic, type filter):")
-        contracts = pipeline.find_schemas({"document_type": "contract"})
-        print(f"    find_schemas({{'document_type': 'contract'}})  ->  {len(contracts)} contract(s)")
+        contracts = pipeline.find_records({"document_type": "contract"})
+        print(f"    find_records({{'document_type': 'contract'}})  ->  {len(contracts)} contract(s)")
         for r in contracts:
             print(f"    document_id={r['document_id'][:20]}...")
         print()
@@ -536,14 +536,14 @@ def run() -> None:
     print()
     print("  Layer 1 — At ingest time (one API call per document):")
     print("    KeywordClassifier → document_type (contract/invoice/policy/...)")
-    print("    LLMSchemaExtractor → typed fields (parties, governing_law, total_due, ...)")
+    print("    LLMFieldExtractor → typed fields (parties, governing_law, total_due, ...)")
     print()
     print("  Layer 2 — At query time (no API calls for filtering):")
     print("    DOCUMENT.FIND → deterministic structured filter over extracted fields")
     print("    DOCUMENT.SEARCH → text retrieval scoped to the matched documents")
     print()
     print("  The pattern:")
-    print("    docs   = pipeline.find_schemas({'fields.parties': {'contains': 'Acme Corp'}})")
+    print("    docs   = pipeline.find_records({'fields.parties': {'contains': 'Acme Corp'}})")
     print("    chunks = pipeline.search('termination', filters={'document_id': docs[0]['document_id']})")
     print()
     if not has_openai:

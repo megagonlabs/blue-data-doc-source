@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 
-class SchemaStore(ABC):
+class RecordStore(ABC):
     """Pluggable storage backend for per-document schema records.
 
     Each record is the dict produced by the classification + extraction
@@ -47,7 +47,7 @@ class SchemaStore(ABC):
         raise NotImplementedError
 
 
-class MemorySchemaStore(SchemaStore):
+class MemoryRecordStore(RecordStore):
     """In-process schema store — default, zero dependencies."""
 
     def __init__(self) -> None:
@@ -66,7 +66,7 @@ class MemorySchemaStore(SchemaStore):
         self._store.pop(document_id, None)
 
 
-class FileSchemaStore(SchemaStore):
+class FileRecordStore(RecordStore):
     """JSON-file-backed schema store — survives process restarts.
 
     Writes atomically (write to ``<path>.tmp`` then ``os.replace``) so a

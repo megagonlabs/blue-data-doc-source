@@ -12,10 +12,10 @@ Parser              extract raw text or page-by-page text
 DocumentClassifier  classify document type — contract, invoice, policy, … (optional)
   │
   ▼
-SchemaExtractor     extract typed fields — parties, total_due, governing_law, … (optional)
+FieldExtractor     extract typed fields — parties, total_due, governing_law, … (optional)
   │
   ▼
-SchemaStore         persist schema record — MemorySchemaStore or FileSchemaStore (optional)
+RecordStore         persist schema record — MemoryRecordStore or FileRecordStore (optional)
   │
   ▼
 Chunker             split into overlapping word-windows, section-aware
@@ -222,7 +222,7 @@ The registry is in-process only. Cross-process stale-chunk cleanup requires an e
 | Enrichment logic | `DocumentPipeline(enricher=MyEnricher())` |
 | Embedding model | `DocumentPipeline(embedding_model=MyModel())` |
 | Vector store backend | `DocumentPipeline(vector_source=MyVectorSource())` |
-| Schema storage backend | `DocumentPipeline(schema_store=FileSchemaStore("schemas.json"))` |
+| Schema storage backend | `DocumentPipeline(record_store=FileRecordStore("schemas.json"))` |
 | NL query parsing | `DocumentDataSource(nl_parser=NLQueryParser(parse_fn=...))` |
 
 Pre-extracted text or pages can be fed directly to `pipeline.ingest_text()` or `pipeline.ingest_pages()`, bypassing file I/O entirely.

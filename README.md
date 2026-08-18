@@ -14,11 +14,11 @@ The genuine differentiator is not any single feature — it is the combination: 
 
 A corpus of 100 vendor contracts. The agent asks *"what does Acme Corp's termination clause say?"* A conventional vector-search pipeline embeds the query and retrieves the most semantically similar chunks across the corpus. Without document-level filtering, chunks from unrelated contracts may outrank the relevant Acme Corp clause — particularly when that contract uses "cancellation" rather than "termination."
 
-blue-data-doc-source adds a two-step pattern. At ingest time, `LLMSchemaExtractor` extracts `parties`, `governing_law`, and `effective_date` from each contract — one API call per document, not per query. At query time, `DOCUMENT.FIND` evaluates filters over the persisted extracted fields, then `DOCUMENT.SEARCH` retrieves the clause within the matched document only.
+blue-data-doc-source adds a two-step pattern. At ingest time, `LLMFieldExtractor` extracts `parties`, `governing_law`, and `effective_date` from each contract — one API call per document, not per query. At query time, `DOCUMENT.FIND` evaluates filters over the persisted extracted fields, then `DOCUMENT.SEARCH` retrieves the clause within the matched document only.
 
 ```python
 # Step 1 — structured filter: no embedding, no LLM, deterministic
-docs = pipeline.find_schemas({"fields.parties": {"contains": "Acme Corp"}})
+docs = pipeline.find_records({"fields.parties": {"contains": "Acme Corp"}})
 
 # Step 2 — text retrieval scoped to the matched document only
 chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["document_id"]})
@@ -32,7 +32,7 @@ chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["
 blue-data-doc-source extracts `vendor` and `total_due` from each invoice at ingest. The query becomes a direct filter — no query-time LLM comparison, no embedding cost. (Field values are extracted by an LLM at ingest; the filter evaluation itself is deterministic over those persisted values.)
 
 ```python
-pipeline.find_schemas({
+pipeline.find_records({
     "document_type": "invoice",
     "fields.vendor":    {"contains": "Blue Solutions"},
     "fields.total_due": {"gt": 30000},   # "$35,154" → 35154 → 35154 > 30000 ✓
@@ -66,7 +66,7 @@ Documents don't exist in isolation. A contract references parties that exist in 
 from blue_data import DataRegistry
 from blue_data_doc_source import (
     DocumentDataSource, OpenAIEmbeddingModel,
-    KeywordClassifier, LLMSchemaExtractor,
+    KeywordClassifier, LLMFieldExtractor,
 )
 from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
 
@@ -75,7 +75,7 @@ doc_source = DocumentDataSource(
     embedding_model=OpenAIEmbeddingModel(),
     vector_source=RedisVectorSource(host="localhost", port=6379),
     classifier=KeywordClassifier(),
-    schema_extractor=LLMSchemaExtractor(),
+    field_extractor=LLMFieldExtractor(),
 )
 
 # All sources share one registry — same registration model, source-specific query ops
@@ -104,16 +104,16 @@ for doc in contracts:
 
 Every document gets a SHA-256 content hash as its `document_id`. Re-ingesting the same file always produces the same document ID — upsert, not duplicate. Chunk IDs are also stable provided the parser, chunker, and chunk size remain unchanged between ingests.
 
-Extracted schema fields persist across process restarts via `FileSchemaStore`. Ingest once, the schema survives the restart — `DOCUMENT.FIND` works immediately with no re-extraction.
+Extracted schema fields persist across process restarts via `FileRecordStore`. Ingest once, the schema survives the restart — `DOCUMENT.FIND` works immediately with no re-extraction.
 
 ```python
-from blue_data_doc_source import DocumentDataSource, FileSchemaStore, KeywordClassifier, LLMSchemaExtractor
+from blue_data_doc_source import DocumentDataSource, FileRecordStore, KeywordClassifier, LLMFieldExtractor
 
 source = DocumentDataSource(
     name="legal_corpus",
-    schema_store=FileSchemaStore("schemas.json"),  # atomic JSON write — survives restarts
+    record_store=FileRecordStore("schemas.json"),  # atomic JSON write — survives restarts
     classifier=KeywordClassifier(),
-    schema_extractor=LLMSchemaExtractor(),
+    field_extractor=LLMFieldExtractor(),
     embedding_model=OpenAIEmbeddingModel(),
     vector_source=redis_source,
 )
@@ -121,7 +121,7 @@ source = DocumentDataSource(
 # Ingest once — schema written atomically to schemas.json
 source.execute_query({"op": "DOCUMENT.INGEST", "path": "contract.pdf"})
 
-# After restart: FileSchemaStore reloads schemas.json — no re-extraction needed
+# After restart: FileRecordStore reloads schemas.json — no re-extraction needed
 docs = source.execute_query({
     "op": "DOCUMENT.FIND",
     "filter": {"fields.parties": {"contains": "Acme Corp"}},
@@ -133,9 +133,9 @@ docs = source.execute_query({
 ### What differentiates this from LangChain / LlamaIndex / Haystack
 
 - **blue-data DataRegistry integration** — `DocumentDataSource` extends blue-data's `DataSource` ABC; registers in the same `DataRegistry` as SQL, graph, and JSON sources using a shared registration and metadata model; each source type retains its own query vocabulary
-- **Document schema inference** — `KeywordClassifier` assigns a document type (`contract`, `invoice`, `policy`, `research_paper`, `financial_report`) at ingest using configurable keyword rules, with zero API cost; `LLMSchemaExtractor` extracts typed fields (`parties`, `effective_date`, `total_due`, `governing_law`, …) via a single LLM call per document; `document_type` propagates to every chunk and is filterable in KNN search
+- **Document classification and field extraction** — `KeywordClassifier` assigns a document type (`contract`, `invoice`, `policy`, `research_paper`, `financial_report`) at ingest using configurable keyword rules, with zero API cost; `LLMFieldExtractor` extracts typed fields (`parties`, `effective_date`, `total_due`, `governing_law`, …) via a single LLM call per document; `document_type` propagates to every chunk and is filterable in KNN search
 - **Structured corpus query (`DOCUMENT.FIND`)** — filter across all ingested documents by extracted field values (`{"fields.governing_law": {"contains": "California"}}`, `{"fields.total_due": {"gt": 30000}}`); currency symbols (`$€£¥`) and commas are stripped before numeric comparison — other formats (percentages, locale separators, parenthesized negatives) are not normalised and will fall back to lexicographic comparison; all conditions ANDed; filter evaluation is deterministic over persisted extracted fields — no embedding, no query-time LLM call (note: extracted field values are LLM outputs and may not be perfectly accurate)
-- **Persistent schema store** — `SchemaStore` ABC with `MemorySchemaStore` (default) and `FileSchemaStore` (atomic JSON write, survives process restarts); injectable — pass any backend
+- **Persistent schema store** — `RecordStore` ABC with `MemoryRecordStore` (default) and `FileRecordStore` (atomic JSON write, survives process restarts); injectable — pass any backend
 - **Content-addressed ingestion** — SHA-256 hash of file bytes is the `document_id`; re-ingesting the same file is always a safe upsert; chunk IDs are stable provided the parser, chunker, and chunk size remain unchanged
 
 ### Standard pipeline (solid foundation, not unique)
@@ -363,7 +363,7 @@ DocumentDataSource (extends blue-data DataSource)  ← public entry point
        │    └─ WindowChunker ← word-based sliding window fallback
        ├─ BasicEnricher      ← regex entity/keyword extraction (optional)
        ├─ KeywordClassifier  ← document type detection (no API cost) (optional)
-       ├─ LLMSchemaExtractor ← typed field extraction via GPT-4o-mini (optional)
+       ├─ LLMFieldExtractor ← typed field extraction via GPT-4o-mini (optional)
        ├─ OpenAIEmbeddingModel / DummyEmbeddingModel  (optional)
        ├─ ChunkRecord        ← canonical chunk schema with provenance fields
        └─ VectorSource       ← blue-data VectorSource injected by caller (optional)
@@ -411,20 +411,20 @@ pipeline = DocumentPipeline(chunker=WindowChunker(chunk_size=500, overlap=50))
 - **Entities:** `DATE`, `EMAIL`, `PERCENT`, `MONEY`, `PROPER_NOUN`
 - **Semantic hints:** word/sentence count, top keywords (stopword-filtered), boolean flags
 
-### Document schema inference
+### Document classification and field extraction
 
 Two-layer classification runs once per document at ingest time, before the chunk loop:
 
 **Layer 1 — `KeywordClassifier`** (no API cost, no extra deps): scores the first 500 words against signal phrase sets for each document type and returns `(document_type, confidence)`.
 
-**Layer 2 — `LLMSchemaExtractor`** (optional, one GPT-4o-mini call per document): extracts typed fields — `parties`, `effective_date`, `invoice_number`, `policy_number`, `keywords`, etc. — from the document text given its classified type.
+**Layer 2 — `LLMFieldExtractor`** (optional, one GPT-4o-mini call per document): extracts typed fields — `parties`, `effective_date`, `invoice_number`, `policy_number`, `keywords`, etc. — from the document text given its classified type.
 
 ```python
-from blue_data_doc_source import DocumentPipeline, KeywordClassifier, LLMSchemaExtractor
+from blue_data_doc_source import DocumentPipeline, KeywordClassifier, LLMFieldExtractor
 
 pipeline = DocumentPipeline(
     classifier=KeywordClassifier(),
-    schema_extractor=LLMSchemaExtractor(),  # optional; requires OPENAI_API_KEY
+    field_extractor=LLMFieldExtractor(),  # optional; requires OPENAI_API_KEY
     embedding_model=...,
     vector_source=...,
 )
@@ -437,7 +437,7 @@ records[0]["metadata"]["document_type"] # → "contract"
 
 # schema stored at ingest — no re-read needed
 doc_id = records[0]["document_id"]
-schema = pipeline.get_schema(doc_id)
+schema = pipeline.get_record(doc_id)
 # {
 #   "document_id": "doc_abc123",
 #   "document_type": "contract",
@@ -451,14 +451,14 @@ Via `DocumentDataSource`:
 
 ```python
 schema = source.execute_query({
-    "op": "DOCUMENT.GET_SCHEMA",
+    "op": "DOCUMENT.GET_RECORD",
     "document_id": doc_id,
 })
 ```
 
 Supported types: `contract`, `invoice`, `policy`, `research_paper`, `financial_report`, `unknown`.
 
-See the runnable demo: `python3 examples/feature-demos/schema_inference_demo.py`
+See the runnable demo: `python3 examples/feature-demos/field_extraction_demo.py`
 
 ### Embeddings
 

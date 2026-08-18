@@ -1,14 +1,14 @@
-from .base import DocumentClassifier, SchemaExtractor
+from .base import DocumentClassifier, FieldExtractor
 from .keyword_classifier import KeywordClassifier
-from .llm_extractor import LLMSchemaExtractor
-from .schema_store import SchemaStore, MemorySchemaStore, FileSchemaStore
+from .llm_extractor import LLMFieldExtractor
+from .schema_store import RecordStore, MemoryRecordStore, FileRecordStore
 
 __all__ = [
     "DocumentClassifier",
-    "SchemaExtractor",
+    "FieldExtractor",
     "KeywordClassifier",
-    "LLMSchemaExtractor",
-    "SchemaStore",
-    "MemorySchemaStore",
-    "FileSchemaStore",
+    "LLMFieldExtractor",
+    "RecordStore",
+    "MemoryRecordStore",
+    "FileRecordStore",
 ]

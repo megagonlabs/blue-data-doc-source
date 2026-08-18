@@ -165,16 +165,16 @@ Fields added to `semantic_hints`: `keyphrases`, `relationships` (subject/predica
 
 ```python
 # Filter by document type
-docs = pipeline.find_schemas({"document_type": "contract"})
+docs = pipeline.find_records({"document_type": "contract"})
 
 # Filter by nested extracted field
-docs = pipeline.find_schemas({"fields.governing_law": {"contains": "California"}})
+docs = pipeline.find_records({"fields.governing_law": {"contains": "California"}})
 
 # Numeric comparison — currency symbols and commas stripped automatically
-docs = pipeline.find_schemas({"fields.total_due": {"gt": 30000}})
+docs = pipeline.find_records({"fields.total_due": {"gt": 30000}})
 
 # Multiple conditions ANDed
-docs = pipeline.find_schemas({
+docs = pipeline.find_records({
     "document_type": "invoice",
     "fields.vendor":    {"contains": "Blue Solutions"},
     "fields.total_due": {"gt": 10000},
@@ -192,13 +192,13 @@ docs = source.execute_query({
 })
 ```
 
-Schema records persist across restarts when `FileSchemaStore` is used — ingest once, query forever.
+Schema records persist across restarts when `FileRecordStore` is used — ingest once, query forever.
 
 **Two-step agent pattern** — `DOCUMENT.FIND` narrows the corpus to the right documents, then `DOCUMENT.SEARCH` retrieves text only within those documents:
 
 ```python
 # Step 1: find by structured field — deterministic
-docs = pipeline.find_schemas({"fields.parties": {"contains": "Acme Corp"}})
+docs = pipeline.find_records({"fields.parties": {"contains": "Acme Corp"}})
 
 # Step 2: retrieve text scoped to matched document only
 chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["document_id"]})
@@ -369,7 +369,7 @@ pipeline.ingest_pages(
 
 ---
 
-## Document schema inference
+## Document classification and field extraction
 
 Two-layer classification runs once per document at ingest time, before the chunk loop.
 
@@ -385,14 +385,14 @@ Signal phrases per type (sample):
 | `research_paper` | abstract, methodology, references, conclusion, hypothesis, doi, we propose |
 | `financial_report` | revenue, net income, balance sheet, earnings per share, fiscal year, ebitda |
 
-**Layer 2 — `LLMSchemaExtractor`** (optional) runs after the type is known. It sends the first 4000 characters of the document to GPT-4o-mini with a type-specific field prompt and parses the JSON response into a `fields` dict. One API call per document, not per chunk.
+**Layer 2 — `LLMFieldExtractor`** (optional) runs after the type is known. It sends the first 4000 characters of the document to GPT-4o-mini with a type-specific field prompt and parses the JSON response into a `fields` dict. One API call per document, not per chunk.
 
 ```python
-from blue_data_doc_source import DocumentPipeline, KeywordClassifier, LLMSchemaExtractor
+from blue_data_doc_source import DocumentPipeline, KeywordClassifier, LLMFieldExtractor
 
 pipeline = DocumentPipeline(
     classifier=KeywordClassifier(),
-    schema_extractor=LLMSchemaExtractor(),  # optional — requires OPENAI_API_KEY
+    field_extractor=LLMFieldExtractor(),  # optional — requires OPENAI_API_KEY
     embedding_model=...,
     vector_source=...,
 )
@@ -402,8 +402,8 @@ records = pipeline.ingest("invoice.pdf")
 # document_type is on every chunk
 print(records[0]["document_type"])   # "invoice"
 
-# full schema (type + extracted fields) via GET_SCHEMA
-schema = pipeline.get_schema(records[0]["document_id"])
+# full schema (type + extracted fields) via GET_RECORD
+schema = pipeline.get_record(records[0]["document_id"])
 # {
 #   "document_id": "doc_abc123",
 #   "document_type": "invoice",
@@ -418,7 +418,7 @@ schema = pipeline.get_schema(records[0]["document_id"])
 # }
 ```
 
-`KeywordClassifier` alone (without `schema_extractor`) costs nothing — no API key, no extra deps. You still get `document_type` on every chunk and can filter search results by type:
+`KeywordClassifier` alone (without `field_extractor`) costs nothing — no API key, no extra deps. You still get `document_type` on every chunk and can filter search results by type:
 
 ```python
 pipeline = DocumentPipeline(classifier=KeywordClassifier(), ...)
@@ -427,15 +427,15 @@ pipeline.ingest("contract.pdf")
 results = pipeline.search("termination clause", filters={"document_type": "contract"})
 ```
 
-The schema record is not upserted to the vector store. Retrieve it via `pipeline.get_schema(document_id)` or `DOCUMENT.GET_SCHEMA`. By default the schema is stored in `MemorySchemaStore` (in-process only). Pass `FileSchemaStore(path)` to persist across restarts:
+The schema record is not upserted to the vector store. Retrieve it via `pipeline.get_record(document_id)` or `DOCUMENT.GET_RECORD`. By default the schema is stored in `MemoryRecordStore` (in-process only). Pass `FileRecordStore(path)` to persist across restarts:
 
 ```python
-from blue_data_doc_source import DocumentPipeline, FileSchemaStore, KeywordClassifier, LLMSchemaExtractor
+from blue_data_doc_source import DocumentPipeline, FileRecordStore, KeywordClassifier, LLMFieldExtractor
 
 pipeline = DocumentPipeline(
     classifier=KeywordClassifier(),
-    schema_extractor=LLMSchemaExtractor(),
-    schema_store=FileSchemaStore("schemas.json"),  # survives process restarts
+    field_extractor=LLMFieldExtractor(),
+    record_store=FileRecordStore("schemas.json"),  # survives process restarts
 )
 ```
 

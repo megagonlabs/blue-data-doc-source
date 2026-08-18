@@ -12,8 +12,8 @@ from .embeddings import EmbeddingModel
 from .enrichment import Enricher
 from .chunk_record import ChunkRecord
 from .parsers import DocxParser, Parser, PDFParser, TextParser
-from .schema.base import DocumentClassifier, SchemaExtractor
-from .schema.schema_store import MemorySchemaStore, SchemaStore
+from .schema.base import DocumentClassifier, FieldExtractor
+from .schema.schema_store import MemoryRecordStore, RecordStore
 
 # Chars that need escaping inside Redis Search TAG filter values.
 _TAG_SPECIAL_RE = re.compile(r'([,.<>{}\[\]"\'`:;!@#$%^&*\-+=~|/ ])')
@@ -96,8 +96,8 @@ class DocumentPipeline:
         collection: str = "documents",
         ocr_fallback: bool = False,
         classifier: Optional[DocumentClassifier] = None,
-        schema_extractor: Optional[SchemaExtractor] = None,
-        schema_store: Optional[SchemaStore] = None,
+        field_extractor: Optional[FieldExtractor] = None,
+        record_store: Optional[RecordStore] = None,
     ):
         """
         Args:
@@ -130,8 +130,8 @@ class DocumentPipeline:
         self.vector_source = vector_source
         self.enricher = enricher
         self.classifier = classifier
-        self.schema_extractor = schema_extractor
-        self.schema_store: SchemaStore = schema_store or MemorySchemaStore()
+        self.field_extractor = field_extractor
+        self.record_store: RecordStore = record_store or MemoryRecordStore()
         self.collection = collection
         self.chunk_size = chunk_size
         self.overlap = overlap
@@ -413,12 +413,12 @@ class DocumentPipeline:
             full_text = " ".join(p.get("text", "") for p in pages)
             document_type, confidence = self.classifier.classify(full_text)
             extracted_fields: Dict[str, Any] = {}
-            if self.schema_extractor is not None:
-                extracted_fields = self.schema_extractor.extract(full_text, document_type)
+            if self.field_extractor is not None:
+                extracted_fields = self.field_extractor.extract(full_text, document_type)
             classifier_name = (
-                "llm" if self.schema_extractor is not None else "keyword"
+                "llm" if self.field_extractor is not None else "keyword"
             )
-            self.schema_store.upsert({
+            self.record_store.upsert({
                 "document_id": document_id,
                 "chunk_id": f"{document_id}_schema",
                 "document_type": document_type,
@@ -488,10 +488,10 @@ class DocumentPipeline:
             full_text = " ".join(b.get("text", "") for b in blocks)
             document_type, confidence = self.classifier.classify(full_text)
             extracted_fields: Dict[str, Any] = {}
-            if self.schema_extractor is not None:
-                extracted_fields = self.schema_extractor.extract(full_text, document_type)
-            classifier_name = "llm" if self.schema_extractor is not None else "keyword"
-            self.schema_store.upsert({
+            if self.field_extractor is not None:
+                extracted_fields = self.field_extractor.extract(full_text, document_type)
+            classifier_name = "llm" if self.field_extractor is not None else "keyword"
+            self.record_store.upsert({
                 "document_id": document_id,
                 "chunk_id": f"{document_id}_schema",
                 "document_type": document_type,
@@ -559,20 +559,20 @@ class DocumentPipeline:
 
         return records
 
-    def get_schema(self, document_id: str) -> Optional[Dict[str, Any]]:
-        """Return the schema record for a document, or ``None`` if not available.
+    def get_record(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Return the DocumentRecord for a document, or ``None`` if not available.
 
-        Schema records are populated during ingest when a ``classifier`` is set.
+        Records are populated during ingest when a ``classifier`` is set.
         """
-        return self.schema_store.get(document_id)
+        return self.record_store.get(document_id)
 
-    def find_schemas(self, filter: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        """Return all schema records matching *filter*.
+    def find_records(self, filter: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Return all DocumentRecords matching *filter*.
 
-        See ``SchemaStore.find`` for the filter syntax (dot notation, operators).
+        See ``RecordStore.find`` for the filter syntax (dot notation, operators).
         Returns every record when *filter* is ``None`` or ``{}``.
         """
-        return self.schema_store.find(filter)
+        return self.record_store.find(filter)
 
     def _ingest_txt(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
         text = self.text_parser.parse(str(file_path))

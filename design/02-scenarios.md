@@ -239,7 +239,7 @@ A legal team has ingested 200 contracts, invoices, and policies into one corpus.
 ```python
 from blue_data_doc_source import (
     DocumentDataSource, OpenAIEmbeddingModel, KeywordClassifier,
-    LLMSchemaExtractor, FileSchemaStore,
+    LLMFieldExtractor, FileRecordStore,
 )
 from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
 
@@ -248,8 +248,8 @@ source = DocumentDataSource(
     embedding_model=OpenAIEmbeddingModel(),
     vector_source=RedisVectorSource(host="localhost", port=6379),
     classifier=KeywordClassifier(),
-    schema_extractor=LLMSchemaExtractor(),
-    schema_store=FileSchemaStore("schemas.json"),
+    field_extractor=LLMFieldExtractor(),
+    record_store=FileRecordStore("schemas.json"),
     default_collection="legal_corpus",
 )
 
@@ -289,12 +289,12 @@ A developer runs nightly ingestion jobs that add new documents to a corpus. Agen
 
 ```python
 # --- Ingest job (runs nightly) ---
-from blue_data_doc_source import DocumentPipeline, FileSchemaStore, KeywordClassifier, LLMSchemaExtractor
+from blue_data_doc_source import DocumentPipeline, FileRecordStore, KeywordClassifier, LLMFieldExtractor
 
 pipeline = DocumentPipeline(
     classifier=KeywordClassifier(),
-    schema_extractor=LLMSchemaExtractor(),
-    schema_store=FileSchemaStore("/data/schemas.json"),  # atomic write on every ingest
+    field_extractor=LLMFieldExtractor(),
+    record_store=FileRecordStore("/data/schemas.json"),  # atomic write on every ingest
     embedding_model=...,
     vector_source=...,
 )
@@ -304,11 +304,11 @@ pipeline.ingest("new_contract.pdf")
 # --- Agent query (next morning, new process) ---
 pipeline2 = DocumentPipeline(
     classifier=KeywordClassifier(),
-    schema_store=FileSchemaStore("/data/schemas.json"),  # reloads existing schemas on init
+    record_store=FileRecordStore("/data/schemas.json"),  # reloads existing schemas on init
 )
 
 # All previously extracted schemas are immediately queryable
-docs = pipeline2.find_schemas({
+docs = pipeline2.find_records({
     "document_type": "contract",
     "fields.effective_date": {"gte": "2026-01-01"},
 })
@@ -316,4 +316,4 @@ print(f"{len(docs)} contracts effective in 2026")
 # → No re-extraction. No API calls. Just a filter over the loaded store.
 ```
 
-`FileSchemaStore` writes atomically (write-to-tmp, then `os.replace`) — a crash mid-write never corrupts the file. The store reloads cleanly from disk on every new process.
+`FileRecordStore` writes atomically (write-to-tmp, then `os.replace`) — a crash mid-write never corrupts the file. The store reloads cleanly from disk on every new process.

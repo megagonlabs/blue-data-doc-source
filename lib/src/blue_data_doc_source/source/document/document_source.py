@@ -9,22 +9,27 @@ from .embeddings import EmbeddingModel
 from .enrichment import Enricher
 from .nl_parser import NLQueryParser
 from .pipeline import DocumentPipeline
-from .schema.base import DocumentClassifier, SchemaExtractor
-from .schema.schema_store import SchemaStore
+from .schema.base import DocumentClassifier, FieldExtractor
+from .schema.schema_store import RecordStore
 
 
 class DocumentDataSource(DataSource):
     """Top-level entry point for document ingestion and retrieval.
 
-    Exposes an ``execute_query`` interface consistent with Blue's DataSource
-    abstraction, dispatching on the ``"op"`` field of the request dict.
+    Extends blue-data's ``DataSource`` ABC and registers in the same
+    ``DataRegistry`` as SQL, graph, and JSON sources. Exposes an
+    ``execute_query`` interface that dispatches on the ``"op"`` field of the
+    request dict.
 
     Supported ops:
 
     - ``DOCUMENT.INGEST`` — parse, chunk, enrich, embed, and upsert a document
     - ``DOCUMENT.SEARCH`` — embed a query and return matching chunks via KNN
+    - ``DOCUMENT.SEARCH_RICH`` — KNN search with per-chunk provenance, neighbor context, and ``by_document`` grouping
     - ``DOCUMENT.ENSURE_INDEX`` — create the vector index (idempotent)
     - ``DOCUMENT.DELETE`` — remove all chunks for a document from the vector store
+    - ``DOCUMENT.GET_RECORD`` — retrieve the schema record extracted at ingest time
+    - ``DOCUMENT.FIND`` — filter schema records by extracted field values (no embedding, deterministic)
 
     Natural language queries are supported via ``execute_query_nl`` when an
     ``NLQueryParser`` is provided::
@@ -52,8 +57,8 @@ class DocumentDataSource(DataSource):
         properties: Optional[Dict[str, Any]] = None,
         ocr_fallback: bool = False,
         classifier: Optional[DocumentClassifier] = None,
-        schema_extractor: Optional[SchemaExtractor] = None,
-        schema_store: Optional[SchemaStore] = None,
+        field_extractor: Optional[FieldExtractor] = None,
+        record_store: Optional[RecordStore] = None,
     ):
         """
         Args:
@@ -73,6 +78,15 @@ class DocumentDataSource(DataSource):
             properties: Optional metadata properties passed to DataSource.
             ocr_fallback: When ``True``, enables Tesseract OCR for scanned PDF
                 pages with no text layer. Requires the ``[ocr]`` extras.
+            classifier: Optional document type classifier run once per document
+                at ingest time. When set, ``document_type`` is propagated to
+                every chunk and schema records are written to ``record_store``.
+            field_extractor: Optional field extractor run after classification.
+                Makes one LLM call per document to populate ``fields`` (parties,
+                governing_law, total_due, etc.) in the schema record.
+            record_store: Backend for schema records. Defaults to
+                ``MemoryRecordStore`` (in-process). Pass ``FileRecordStore(path)``
+                to persist records across restarts.
         """
         super().__init__(name, properties)
         self.properties["connection"]["protocol"] = "document"
@@ -87,11 +101,27 @@ class DocumentDataSource(DataSource):
             collection=default_collection,
             ocr_fallback=ocr_fallback,
             classifier=classifier,
-            schema_extractor=schema_extractor,
-            schema_store=schema_store,
+            field_extractor=field_extractor,
+            record_store=record_store,
         )
 
     def execute_query(self, query, database=None, collection=None, optional_properties=None):
+        """Dispatch a structured op request to the appropriate pipeline method.
+
+        Args:
+            query: Dict with an ``"op"`` key and op-specific fields. See class
+                docstring for the full list of supported ops and their required
+                fields.
+            collection: Overrides ``query["collection"]`` when provided.
+
+        Returns:
+            Op-specific result: ``list[dict]`` for INGEST/SEARCH/FIND,
+            ``dict`` for SEARCH_RICH/GET_RECORD, ``None`` for ENSURE_INDEX,
+            ``int`` (deleted count) for DELETE.
+
+        Raises:
+            ValueError: For unsupported ops or missing required fields.
+        """
         op = query.get("op")
 
         if op == "DOCUMENT.INGEST":
@@ -102,8 +132,8 @@ class DocumentDataSource(DataSource):
             return self._ensure_index(query, collection)
         elif op == "DOCUMENT.DELETE":
             return self._delete(query, collection)
-        elif op == "DOCUMENT.GET_SCHEMA":
-            return self._get_schema(query)
+        elif op == "DOCUMENT.GET_RECORD":
+            return self._get_record(query)
         elif op == "DOCUMENT.FIND":
             return self._find(query)
         elif op == "DOCUMENT.SEARCH_RICH":
@@ -112,7 +142,7 @@ class DocumentDataSource(DataSource):
             raise ValueError(
                 f"Unsupported op: {op!r}. "
                 "Expected DOCUMENT.INGEST, DOCUMENT.SEARCH, DOCUMENT.ENSURE_INDEX, "
-                "DOCUMENT.DELETE, DOCUMENT.GET_SCHEMA, DOCUMENT.FIND, or DOCUMENT.SEARCH_RICH"
+                "DOCUMENT.DELETE, DOCUMENT.GET_RECORD, DOCUMENT.FIND, or DOCUMENT.SEARCH_RICH"
             )
 
     _PROTOCOL_BY_SUFFIX = {
@@ -133,6 +163,15 @@ class DocumentDataSource(DataSource):
         return self._pipeline.ingest(path, collection=collection)
 
     def _search(self, request: Dict[str, Any], collection_override=None) -> List[Dict[str, Any]]:
+        """Implement DOCUMENT.SEARCH.
+
+        Optional request fields:
+            ``k`` — number of results (default 5)
+            ``filter`` — pre-filter dict applied before KNN scoring
+            ``mode`` — ``"vector"`` (default, KNN) or ``"bm25"`` (keyword);
+                ``"bm25"`` uses the in-process chunk index and respects filters
+                reliably regardless of embedding quality
+        """
         query_text = request.get("query")
         if not query_text:
             raise ValueError("DOCUMENT.SEARCH requires a 'query' field")
@@ -220,6 +259,14 @@ class DocumentDataSource(DataSource):
         return schema.get_entities()
 
     def _search_rich(self, request: Dict[str, Any], collection_override=None) -> Dict[str, Any]:
+        """Implement DOCUMENT.SEARCH_RICH.
+
+        Optional request fields:
+            ``k`` — number of results (default 5)
+            ``filter`` — pre-filter dict applied before KNN scoring
+            ``context_chunks`` — neighbor chunks to include before/after each result (default 1)
+            ``mode`` — ``"vector"`` (default) or ``"bm25"``; see ``_search`` for details
+        """
         query_text = request.get("query")
         if not query_text:
             raise ValueError("DOCUMENT.SEARCH_RICH requires a 'query' field")
@@ -251,13 +298,13 @@ class DocumentDataSource(DataSource):
         Each record includes ``document_id``, ``document_type``, ``confidence``,
         ``classifier``, and ``fields``.
         """
-        return self._pipeline.find_schemas(request.get("filter"))
+        return self._pipeline.find_records(request.get("filter"))
 
-    def _get_schema(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _get_record(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         document_id = request.get("document_id")
         if not document_id:
-            raise ValueError("DOCUMENT.GET_SCHEMA requires a 'document_id' field")
-        schema = self._pipeline.get_schema(document_id)
+            raise ValueError("DOCUMENT.GET_RECORD requires a 'document_id' field")
+        schema = self._pipeline.get_record(document_id)
         if schema is None:
             raise ValueError(
                 f"No schema found for document_id={document_id!r}. "

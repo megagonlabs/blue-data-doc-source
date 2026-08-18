@@ -14,7 +14,7 @@ class DocumentClassifier(ABC):
         raise NotImplementedError
 
 
-class SchemaExtractor(ABC):
+class FieldExtractor(ABC):
     """Extract typed fields from a document given its classified type.
 
     Returns a plain dict whose keys are type-specific field names. Absent or

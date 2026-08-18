@@ -1,4 +1,4 @@
-"""Tests for DOCUMENT.FIND op and SchemaStore."""
+"""Tests for DOCUMENT.FIND op and RecordStore."""
 from __future__ import annotations
 
 import json
@@ -11,10 +11,10 @@ from blue_data_doc_source import (
     DocumentDataSource,
     DocumentPipeline,
     DummyEmbeddingModel,
-    FileSchemaStore,
+    FileRecordStore,
     KeywordClassifier,
-    MemorySchemaStore,
-    SchemaStore,
+    MemoryRecordStore,
+    RecordStore,
 )
 from blue_data_doc_source.source.document.schema.schema_store import _matches
 
@@ -84,42 +84,42 @@ POLICY = {
 ALL_RECORDS = [CONTRACT_A, CONTRACT_B, INVOICE, POLICY]
 
 
-def _store_with_all() -> MemorySchemaStore:
-    store = MemorySchemaStore()
+def _store_with_all() -> MemoryRecordStore:
+    store = MemoryRecordStore()
     for r in ALL_RECORDS:
         store.upsert(r)
     return store
 
 
 # ---------------------------------------------------------------------------
-# MemorySchemaStore basics
+# MemoryRecordStore basics
 # ---------------------------------------------------------------------------
 
-class TestMemorySchemaStore:
+class TestMemoryRecordStore:
     def test_upsert_and_get(self):
-        store = MemorySchemaStore()
+        store = MemoryRecordStore()
         store.upsert(CONTRACT_A)
         assert store.get("doc_contract_a") == CONTRACT_A
 
     def test_get_missing_returns_none(self):
-        store = MemorySchemaStore()
+        store = MemoryRecordStore()
         assert store.get("nonexistent") is None
 
     def test_upsert_overwrites(self):
-        store = MemorySchemaStore()
+        store = MemoryRecordStore()
         store.upsert(CONTRACT_A)
         updated = dict(CONTRACT_A, confidence=0.99)
         store.upsert(updated)
         assert store.get("doc_contract_a")["confidence"] == 0.99
 
     def test_delete_removes_record(self):
-        store = MemorySchemaStore()
+        store = MemoryRecordStore()
         store.upsert(CONTRACT_A)
         store.delete("doc_contract_a")
         assert store.get("doc_contract_a") is None
 
     def test_delete_missing_is_noop(self):
-        store = MemorySchemaStore()
+        store = MemoryRecordStore()
         store.delete("nonexistent")  # must not raise
 
     def test_find_no_filter_returns_all(self):
@@ -132,18 +132,18 @@ class TestMemorySchemaStore:
 
 
 # ---------------------------------------------------------------------------
-# FileSchemaStore persistence
+# FileRecordStore persistence
 # ---------------------------------------------------------------------------
 
-class TestFileSchemaStore:
+class TestFileRecordStore:
     def test_survives_reload(self):
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             path = f.name
         try:
-            store = FileSchemaStore(path)
+            store = FileRecordStore(path)
             store.upsert(CONTRACT_A)
             # reload from disk
-            store2 = FileSchemaStore(path)
+            store2 = FileRecordStore(path)
             assert store2.get("doc_contract_a")["document_type"] == "contract"
         finally:
             os.unlink(path)
@@ -154,27 +154,27 @@ class TestFileSchemaStore:
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             path = f.name
         try:
-            store = FileSchemaStore(path)
+            store = FileRecordStore(path)
             store.upsert(CONTRACT_A)
             store.delete("doc_contract_a")
-            store2 = FileSchemaStore(path)
+            store2 = FileRecordStore(path)
             assert store2.get("doc_contract_a") is None
         finally:
             os.unlink(path)
 
     def test_missing_file_starts_empty(self):
         path = tempfile.mktemp(suffix=".json")
-        store = FileSchemaStore(path)
+        store = FileRecordStore(path)
         assert store.find() == []
 
     def test_find_works_after_reload(self):
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             path = f.name
         try:
-            store = FileSchemaStore(path)
+            store = FileRecordStore(path)
             for r in ALL_RECORDS:
                 store.upsert(r)
-            store2 = FileSchemaStore(path)
+            store2 = FileRecordStore(path)
             results = store2.find({"document_type": "contract"})
             assert len(results) == 2
         finally:
@@ -304,7 +304,7 @@ class TestFilterMissingField:
 
 
 # ---------------------------------------------------------------------------
-# DocumentPipeline.find_schemas
+# DocumentPipeline.find_records
 # ---------------------------------------------------------------------------
 
 class TestPipelineFindSchemas:
@@ -315,7 +315,7 @@ class TestPipelineFindSchemas:
             classifier=KeywordClassifier(),
         )
 
-    def test_find_schemas_returns_ingested_types(self):
+    def test_find_records_returns_ingested_types(self):
         pipeline = self._pipeline_with_classifier()
         pipeline.ingest_text(
             "This agreement is between parties. Termination requires 30 days notice. "
@@ -323,10 +323,10 @@ class TestPipelineFindSchemas:
             "Arbitration for disputes. Intellectual property owned by client. Liability capped.",
             file_name="c.txt",
         )
-        results = pipeline.find_schemas({"document_type": "contract"})
+        results = pipeline.find_records({"document_type": "contract"})
         assert len(results) == 1
 
-    def test_find_schemas_no_filter_returns_all(self):
+    def test_find_records_no_filter_returns_all(self):
         pipeline = self._pipeline_with_classifier()
         pipeline.ingest_text(
             "Invoice #001. Bill to: Acme. Due date: 2026-08-31. Amount due: $1000. "
@@ -340,13 +340,13 @@ class TestPipelineFindSchemas:
             "Arbitration required. Force majeure included. Intellectual property clause.",
             file_name="c.txt",
         )
-        results = pipeline.find_schemas()
+        results = pipeline.find_records()
         assert len(results) == 2
 
-    def test_find_schemas_empty_when_no_classifier(self):
+    def test_find_records_empty_when_no_classifier(self):
         pipeline = DocumentPipeline(chunk_size=100, overlap=10)
         pipeline.ingest_text("Some text.", file_name="t.txt")
-        assert pipeline.find_schemas() == []
+        assert pipeline.find_records() == []
 
 
 # ---------------------------------------------------------------------------
@@ -395,14 +395,14 @@ class TestDocumentFindOp:
         results = source.execute_query({"op": "DOCUMENT.FIND"})
         assert results == []
 
-    def test_schema_store_injected_into_source(self):
-        store = MemorySchemaStore()
+    def test_record_store_injected_into_source(self):
+        store = MemoryRecordStore()
         store.upsert(CONTRACT_A)
         source = DocumentDataSource(
             name="test",
             chunk_size=100,
             overlap=10,
-            schema_store=store,
+            record_store=store,
         )
         results = source.execute_query({
             "op": "DOCUMENT.FIND",

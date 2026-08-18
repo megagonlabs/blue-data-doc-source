@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .base import SchemaExtractor
+from .base import FieldExtractor
 
 _FIELD_SPECS: dict[str, str] = {
     "contract": (
@@ -45,8 +45,8 @@ _DEFAULT_PROMPT = (
 )
 
 
-class LLMSchemaExtractor(SchemaExtractor):
-    """OpenAI-backed schema extractor — optional dependency.
+class LLMFieldExtractor(FieldExtractor):
+    """OpenAI-backed field extractor — optional dependency.
 
     Requires ``openai>=1.0`` to be installed and ``OPENAI_API_KEY`` set.
     """
@@ -66,7 +66,7 @@ class LLMSchemaExtractor(SchemaExtractor):
                 from openai import OpenAI  # type: ignore[import]
             except ImportError as exc:
                 raise ImportError(
-                    "openai package is required for LLMSchemaExtractor. "
+                    "openai package is required for LLMFieldExtractor. "
                     "Install with: pip install 'blue-data-doc-source[openai]'"
                 ) from exc
             self._client = OpenAI()

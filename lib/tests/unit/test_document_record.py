@@ -1,5 +1,5 @@
-"""Tests for document schema inference: KeywordClassifier, pipeline integration,
-DOCUMENT.GET_SCHEMA op, and document_type propagation to ChunkRecord."""
+"""Tests for document document classification and field extraction: KeywordClassifier, pipeline integration,
+DOCUMENT.GET_RECORD op, and document_type propagation to ChunkRecord."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from blue_data_doc_source import (
     DocumentPipeline,
     DummyEmbeddingModel,
     KeywordClassifier,
-    LLMSchemaExtractor,
-    SchemaExtractor,
+    LLMFieldExtractor,
+    FieldExtractor,
 )
 from blue_data_doc_source.source.document.chunk_record import ChunkRecord
 
@@ -223,7 +223,7 @@ class TestPipelineWithClassifier:
     def test_schema_registry_populated_after_ingest(self):
         records = self.pipeline.ingest_text(CONTRACT_TEXT, file_name="contract.txt")
         doc_id = records[0]["document_id"]
-        schema = self.pipeline.get_schema(doc_id)
+        schema = self.pipeline.get_record(doc_id)
         assert schema is not None
         assert schema["document_type"] == "contract"
         assert schema["document_id"] == doc_id
@@ -234,11 +234,11 @@ class TestPipelineWithClassifier:
     def test_schema_fields_empty_without_extractor(self):
         records = self.pipeline.ingest_text(CONTRACT_TEXT, file_name="contract.txt")
         doc_id = records[0]["document_id"]
-        schema = self.pipeline.get_schema(doc_id)
+        schema = self.pipeline.get_record(doc_id)
         assert schema["fields"] == {}
 
-    def test_get_schema_returns_none_for_unknown_id(self):
-        schema = self.pipeline.get_schema("doc_nonexistent")
+    def test_get_record_returns_none_for_unknown_id(self):
+        schema = self.pipeline.get_record("doc_nonexistent")
         assert schema is None
 
     def test_no_classifier_means_no_document_type(self):
@@ -258,41 +258,41 @@ class TestPipelineWithClassifier:
 
 
 # ---------------------------------------------------------------------------
-# Pipeline with schema_extractor (stub)
+# Pipeline with field_extractor (stub)
 # ---------------------------------------------------------------------------
 
-class _StubExtractor(SchemaExtractor):
+class _StubExtractor(FieldExtractor):
     """Returns a fixed dict without calling any API."""
 
     def extract(self, text: str, document_type: str) -> dict:
         return {"parties": ["Alpha Corp", "Beta Inc"], "governing_law": "California"}
 
 
-class TestPipelineWithSchemaExtractor:
+class TestPipelineWithFieldExtractor:
     def setup_method(self):
         self.pipeline = DocumentPipeline(
             chunk_size=200,
             overlap=20,
             classifier=KeywordClassifier(),
-            schema_extractor=_StubExtractor(),
+            field_extractor=_StubExtractor(),
         )
 
     def test_schema_fields_populated_by_extractor(self):
         records = self.pipeline.ingest_text(CONTRACT_TEXT, file_name="contract.txt")
         doc_id = records[0]["document_id"]
-        schema = self.pipeline.get_schema(doc_id)
+        schema = self.pipeline.get_record(doc_id)
         assert schema["fields"]["parties"] == ["Alpha Corp", "Beta Inc"]
         assert schema["fields"]["governing_law"] == "California"
 
     def test_classifier_label_is_llm_when_extractor_present(self):
         records = self.pipeline.ingest_text(CONTRACT_TEXT, file_name="contract.txt")
         doc_id = records[0]["document_id"]
-        schema = self.pipeline.get_schema(doc_id)
+        schema = self.pipeline.get_record(doc_id)
         assert schema["classifier"] == "llm"
 
 
 # ---------------------------------------------------------------------------
-# DocumentDataSource — DOCUMENT.GET_SCHEMA op
+# DocumentDataSource — DOCUMENT.GET_RECORD op
 # ---------------------------------------------------------------------------
 
 class TestDocumentDataSourceGetSchema:
@@ -310,7 +310,7 @@ class TestDocumentDataSourceGetSchema:
         )
         self.source.execute_query({"op": "DOCUMENT.ENSURE_INDEX", "collection": "contracts"})
 
-    def test_get_schema_returns_schema_after_ingest(self):
+    def test_get_record_returns_schema_after_ingest(self):
         records = self.source.execute_query({
             "op": "DOCUMENT.INGEST_TEXT",
             # INGEST_TEXT not implemented as op — ingest via pipeline directly
@@ -322,20 +322,20 @@ class TestDocumentDataSourceGetSchema:
         doc_id = records[0]["document_id"]
 
         schema = self.source.execute_query({
-            "op": "DOCUMENT.GET_SCHEMA",
+            "op": "DOCUMENT.GET_RECORD",
             "document_id": doc_id,
         })
         assert schema["document_type"] == "contract"
         assert schema["document_id"] == doc_id
 
-    def test_get_schema_raises_without_document_id(self):
+    def test_get_record_raises_without_document_id(self):
         with pytest.raises(ValueError, match="document_id"):
-            self.source.execute_query({"op": "DOCUMENT.GET_SCHEMA"})
+            self.source.execute_query({"op": "DOCUMENT.GET_RECORD"})
 
-    def test_get_schema_raises_for_unknown_document(self):
+    def test_get_record_raises_for_unknown_document(self):
         with pytest.raises(ValueError, match="No schema found"):
             self.source.execute_query({
-                "op": "DOCUMENT.GET_SCHEMA",
+                "op": "DOCUMENT.GET_RECORD",
                 "document_id": "doc_nonexistent",
             })
 
