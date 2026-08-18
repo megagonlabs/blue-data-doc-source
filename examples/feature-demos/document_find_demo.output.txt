@@ -86,6 +86,25 @@ DOCUMENT.FIND via DocumentDataSource op interface
     document_type='contract'  document_id=doc_9ea52cc9a0bfab92...  confidence=0.4444
     document_type='contract'  document_id=doc_f06cf91781999865...  confidence=0.2222
 
+------------------------------------------------------------------------
+Custom document types — extra_types
+------------------------------------------------------------------------
+
+  The built-in classifier recognises 5 types. Pass extra_types to extend
+  without subclassing — signal phrases and field specs merged at init time.
+
+  KeywordClassifier(extra_types={'lease': ['lessor', 'lessee', 'rent', ...]})
+  LLMFieldExtractor(extra_types={'lease': 'Extract: lessor, lessee, monthly_rent, ...'})
+
+  Ingested: lease_123main.txt
+    document_type = 'lease'
+    confidence    = 1.0000
+
+  find_records({'document_type': 'lease'})    -> 1 match(es)
+  find_records({'document_type': 'contract'}) -> 1 match(es)
+
+  Built-in types and custom types coexist — extra_types only adds, never removes.
+
 ========================================================================
 Summary
 ========================================================================
@@ -113,6 +132,11 @@ Summary
 
   Or in one call — see find_then_search_demo.py:
     source.execute_query({'op': 'DOCUMENT.FIND_THEN_SEARCH', ...})
+
+  Adding custom document types (no subclassing needed):
+    KeywordClassifier(extra_types={'lease': ['lessor', 'lessee', 'rent', ...]})
+    LLMFieldExtractor(extra_types={'lease': 'Extract: lessor, lessee, ...'})
+    # Custom types coexist with built-in types — same DOCUMENT.FIND interface
 
   Enable field-level filters:
     OPENAI_API_KEY=sk-... python3 examples/feature-demos/document_find_demo.py

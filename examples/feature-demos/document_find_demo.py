@@ -347,6 +347,66 @@ def run() -> None:
               f"document_id={r['document_id'][:20]}...  "
               f"confidence={r['confidence']:.4f}")
 
+    # ── Custom document types (extra_types) ──────────────────────────────
+    _step("Custom document types — extra_types")
+    print()
+    print("  The built-in classifier recognises 5 types. Pass extra_types to extend")
+    print("  without subclassing — signal phrases and field specs merged at init time.")
+    print()
+    print("  KeywordClassifier(extra_types={'lease': ['lessor', 'lessee', 'rent', ...]})")
+    print("  LLMFieldExtractor(extra_types={'lease': 'Extract: lessor, lessee, monthly_rent, ...'})")
+    print()
+
+    LEASE_TEXT = (
+        "LEASE AGREEMENT\n"
+        "lessor: Alice Smith  lessee: Bob Jones\n"
+        "premises: 123 Main St  monthly rent: $2,000\n"
+        "landlord maintains premises  tenant pays on time\n"
+        "lease term: 12 months  security deposit: $4,000"
+    )
+
+    lease_classifier = KeywordClassifier(
+        extra_types={
+            "lease": ["lessor", "lessee", "rent", "premises", "landlord",
+                      "tenant", "lease term", "security deposit"],
+        }
+    )
+    lease_pipeline = DocumentPipeline(
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=LocalMemoryVectorStore(),
+        chunk_size=60,
+        overlap=5,
+        collection="lease_demo",
+        classifier=lease_classifier,
+    )
+    lease_pipeline.ensure_index("lease_demo")
+
+    lease_records = lease_pipeline.ingest_text(
+        LEASE_TEXT, file_name="lease_123main.txt",
+        mime_type="text/plain", collection="lease_demo"
+    )
+    lease_doc_id = lease_records[0]["document_id"]
+    lease_record = lease_pipeline.get_record(lease_doc_id)
+
+    print(f"  Ingested: lease_123main.txt")
+    print(f"    document_type = {lease_record['document_type']!r}")
+    print(f"    confidence    = {lease_record['confidence']:.4f}")
+    print()
+
+    # Ingest an existing corpus doc alongside — they coexist without interference
+    lease_pipeline.ingest_text(
+        CORPUS["acme_contract.txt"], file_name="acme_contract.txt",
+        mime_type="text/plain", collection="lease_demo"
+    )
+
+    lease_matches    = lease_pipeline.find_records({"document_type": "lease"})
+    contract_matches = lease_pipeline.find_records({"document_type": "contract"})
+
+    print(f"  find_records({{'document_type': 'lease'}})    -> {len(lease_matches)} match(es)")
+    print(f"  find_records({{'document_type': 'contract'}}) -> {len(contract_matches)} match(es)")
+    print()
+    print("  Built-in types and custom types coexist — extra_types only adds, never removes.")
+
     # ── Summary ───────────────────────────────────────────────────────────
     _banner("Summary")
     print()
@@ -373,6 +433,11 @@ def run() -> None:
     print()
     print("  Or in one call — see find_then_search_demo.py:")
     print("    source.execute_query({'op': 'DOCUMENT.FIND_THEN_SEARCH', ...})")
+    print()
+    print("  Adding custom document types (no subclassing needed):")
+    print("    KeywordClassifier(extra_types={'lease': ['lessor', 'lessee', 'rent', ...]})")
+    print("    LLMFieldExtractor(extra_types={'lease': 'Extract: lessor, lessee, ...'})")
+    print("    # Custom types coexist with built-in types — same DOCUMENT.FIND interface")
     print()
     if not has_openai:
         print("  Enable field-level filters:")

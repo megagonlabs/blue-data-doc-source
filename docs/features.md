@@ -408,6 +408,19 @@ Signal phrases per type (sample):
 | `research_paper` | abstract, methodology, references, conclusion, hypothesis, doi, we propose |
 | `financial_report` | revenue, net income, balance sheet, earnings per share, fiscal year, ebitda |
 
+Both `KeywordClassifier` and `LLMFieldExtractor` accept an `extra_types` parameter to extend the built-in set without subclassing. Pass a dict of `{type_name: signal_phrases}` to the classifier and `{type_name: field_spec_string}` to the extractor — built-in types are unchanged and user-supplied types take precedence on name collision:
+
+```python
+KeywordClassifier(
+    extra_types={"lease": ["lessor", "lessee", "rent", "premises", "landlord",
+                           "tenant", "lease term", "security deposit"]}
+)
+LLMFieldExtractor(
+    extra_types={"lease": "Extract: lessor (string), lessee (string), "
+                          "monthly_rent (string with currency), lease_term (string)."}
+)
+```
+
 **Layer 2 — `LLMFieldExtractor`** (optional) runs after the type is known. It sends the first 4000 characters of the document to GPT-4o-mini with a type-specific field prompt and parses the JSON response into a `fields` dict. One API call per document, not per chunk.
 
 ```python

@@ -459,6 +459,33 @@ KeywordClassifier(min_confidence=0.25)   # stricter — more unknowns
 KeywordClassifier(sample_words=200)      # faster — score fewer words
 ```
 
+**Adding custom document types** — pass `extra_types` with a mapping of type name to signal phrase list. Merged with the built-in types; user-supplied entries take precedence on name collision. Built-in types are unchanged.
+
+```python
+classifier = KeywordClassifier(
+    extra_types={
+        "lease": [
+            "lessor", "lessee", "rent", "premises", "landlord",
+            "tenant", "lease term", "security deposit",
+        ],
+        "employment": [
+            "employer", "employee", "salary", "at-will",
+            "benefits", "job title", "probation period",
+        ],
+    }
+)
+pipeline = DocumentPipeline(classifier=classifier, ...)
+records = pipeline.ingest("lease_agreement.pdf")
+records[0]["document_type"]  # → "lease"
+```
+
+Custom types work end-to-end with `DOCUMENT.FIND` and pre-filters — no other changes needed:
+
+```python
+pipeline.find_records({"document_type": "lease"})
+pipeline.search("security deposit", filters={"document_type": "lease"})
+```
+
 ### Layer 2 — LLMFieldExtractor (optional, one call per document)
 
 Calls GPT-4o-mini with a type-specific prompt to extract typed fields from the document. Requires `OPENAI_API_KEY`.
@@ -482,6 +509,38 @@ Fields extracted per type:
 | `policy` | `policy_number`, `effective_date`, `expiration_date`, `insured`, `coverage_types`, `deductible`, `premium`, `exclusions` |
 | `research_paper` | `title`, `authors`, `abstract`, `keywords`, `methodology`, `findings`, `doi` |
 | `financial_report` | `company`, `fiscal_period`, `revenue`, `net_income`, `earnings_per_share`, `total_assets`, `total_liabilities`, `highlights` |
+
+**Adding fields for custom types** — pair `extra_types` on `LLMFieldExtractor` with the same type name used in `KeywordClassifier`. The value is a plain-English extraction instruction in the same format as the built-in specs.
+
+```python
+extractor = LLMFieldExtractor(
+    extra_types={
+        "lease": (
+            "Extract: lessor (string), lessee (string), "
+            "monthly_rent (string with currency), lease_term (string), "
+            "security_deposit (string), premises_address (string)."
+        ),
+        "employment": (
+            "Extract: employer (string), employee (string), "
+            "job_title (string), start_date (ISO date string), "
+            "salary (string with currency), jurisdiction (string)."
+        ),
+    }
+)
+pipeline = DocumentPipeline(
+    classifier=KeywordClassifier(extra_types={"lease": [...], "employment": [...]}),
+    field_extractor=extractor,
+    ...
+)
+```
+
+After ingest, `DOCUMENT.FIND` field filters work for custom types exactly as for built-in ones:
+
+```python
+pipeline.find_records({"document_type": "lease", "fields.lessor": {"contains": "Alice"}})
+```
+
+For document types with no matching spec (including `"unknown"`), `LLMFieldExtractor` falls back to a generic prompt: `"Extract any structured metadata you can find."`.
 
 ### Schema retrieval
 
