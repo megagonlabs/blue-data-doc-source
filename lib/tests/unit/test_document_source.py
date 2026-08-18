@@ -178,3 +178,109 @@ def test_document_source_ocr_fallback_wired_to_pipeline():
 def test_document_source_ocr_fallback_defaults_to_false():
     source = DocumentDataSource()
     assert source._pipeline.pdf_parser._ocr_fallback is False
+
+
+# --- DOCUMENT.FIND_THEN_SEARCH ---
+
+def make_doc(tmp_path, name, content):
+    f = tmp_path / name
+    f.write_text(content, encoding="utf-8")
+    return str(f)
+
+
+def test_find_then_search_returns_chunks_from_matched_doc(tmp_path):
+    from blue_data_doc_source import KeywordClassifier
+    invoice_content = (
+        "invoice number INV-001 due date amount due bill to line item payment "
+        "subtotal tax total remit vendor quantity unit price invoice number "
+    ) * 4
+    path = make_doc(tmp_path, "inv.txt", invoice_content)
+    source = DocumentDataSource(
+        chunk_size=20, overlap=2,
+        classifier=KeywordClassifier(),
+    )
+    source.execute_query({"op": "DOCUMENT.INGEST", "path": path})
+    results = source.execute_query({
+        "op": "DOCUMENT.FIND_THEN_SEARCH",
+        "find_filter": {"document_type": "invoice"},
+        "query": "payment due",
+        "k": 3,
+        "mode": "bm25",
+    })
+    assert isinstance(results, list)
+    assert len(results) <= 3
+    for r in results:
+        assert "text" in r
+        assert "score" in r
+
+
+def test_find_then_search_empty_when_no_match(tmp_path):
+    from blue_data_doc_source import KeywordClassifier
+    path = make_doc(tmp_path, "doc.txt", " ".join(["invoice"] * 30))
+    source = DocumentDataSource(
+        chunk_size=20, overlap=2,
+        classifier=KeywordClassifier(),
+    )
+    source.execute_query({"op": "DOCUMENT.INGEST", "path": path})
+    results = source.execute_query({
+        "op": "DOCUMENT.FIND_THEN_SEARCH",
+        "find_filter": {"document_type": "contract"},
+        "query": "termination",
+        "k": 3,
+        "mode": "bm25",
+    })
+    assert results == []
+
+
+def test_find_then_search_searches_multiple_matched_docs(tmp_path):
+    from blue_data_doc_source import KeywordClassifier
+    base = "invoice number due date amount due bill to line item payment subtotal tax total remit vendor quantity unit price "
+    inv1 = make_doc(tmp_path, "inv1.txt", (base + "alpha payment alpha ") * 4)
+    inv2 = make_doc(tmp_path, "inv2.txt", (base + "beta payment beta ") * 4)
+    source = DocumentDataSource(
+        chunk_size=20, overlap=2,
+        classifier=KeywordClassifier(),
+    )
+    source.execute_query({"op": "DOCUMENT.INGEST", "path": inv1})
+    source.execute_query({"op": "DOCUMENT.INGEST", "path": inv2})
+    results = source.execute_query({
+        "op": "DOCUMENT.FIND_THEN_SEARCH",
+        "find_filter": {"document_type": "invoice"},
+        "query": "payment",
+        "k": 10,
+        "mode": "bm25",
+    })
+    doc_ids = {r["document_id"] for r in results}
+    assert len(doc_ids) == 2
+
+
+def test_find_then_search_missing_query_raises():
+    source = DocumentDataSource()
+    with pytest.raises(ValueError, match="query"):
+        source.execute_query({
+            "op": "DOCUMENT.FIND_THEN_SEARCH",
+            "find_filter": {"document_type": "invoice"},
+        })
+
+
+def test_find_then_search_results_sorted_by_score(tmp_path):
+    from blue_data_doc_source import KeywordClassifier
+    invoice_content = (
+        "invoice number INV-001 due date amount due bill to line item payment "
+        "subtotal tax total remit vendor quantity unit price invoice number "
+    ) * 4
+    path = make_doc(tmp_path, "inv.txt", invoice_content)
+    source = DocumentDataSource(
+        chunk_size=20, overlap=2,
+        classifier=KeywordClassifier(),
+    )
+    source.execute_query({"op": "DOCUMENT.INGEST", "path": path})
+    results = source.execute_query({
+        "op": "DOCUMENT.FIND_THEN_SEARCH",
+        "find_filter": {"document_type": "invoice"},
+        "query": "payment",
+        "k": 5,
+        "mode": "bm25",
+    })
+    scores = [r.get("score") or 0 for r in results]
+    assert scores == sorted(scores, reverse=True)

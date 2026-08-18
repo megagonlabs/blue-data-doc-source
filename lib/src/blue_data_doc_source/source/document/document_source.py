@@ -28,8 +28,9 @@ class DocumentDataSource(DataSource):
     - ``DOCUMENT.SEARCH_RICH`` — KNN search with per-chunk provenance, neighbor context, and ``by_document`` grouping
     - ``DOCUMENT.ENSURE_INDEX`` — create the vector index (idempotent)
     - ``DOCUMENT.DELETE`` — remove all chunks for a document from the vector store
-    - ``DOCUMENT.GET_RECORD`` — retrieve the schema record extracted at ingest time
-    - ``DOCUMENT.FIND`` — filter schema records by extracted field values (no embedding, deterministic)
+    - ``DOCUMENT.GET_RECORD`` — retrieve the DocumentRecord extracted at ingest time
+    - ``DOCUMENT.FIND`` — filter DocumentRecords by extracted field values (no embedding, deterministic)
+    - ``DOCUMENT.FIND_THEN_SEARCH`` — filter DocumentRecords by field values, then search text within matched documents
 
     Natural language queries are supported via ``execute_query_nl`` when an
     ``NLQueryParser`` is provided::
@@ -138,11 +139,14 @@ class DocumentDataSource(DataSource):
             return self._find(query)
         elif op == "DOCUMENT.SEARCH_RICH":
             return self._search_rich(query, collection)
+        elif op == "DOCUMENT.FIND_THEN_SEARCH":
+            return self._find_then_search(query, collection)
         else:
             raise ValueError(
                 f"Unsupported op: {op!r}. "
                 "Expected DOCUMENT.INGEST, DOCUMENT.SEARCH, DOCUMENT.ENSURE_INDEX, "
-                "DOCUMENT.DELETE, DOCUMENT.GET_RECORD, DOCUMENT.FIND, or DOCUMENT.SEARCH_RICH"
+                "DOCUMENT.DELETE, DOCUMENT.GET_RECORD, DOCUMENT.FIND, "
+                "DOCUMENT.SEARCH_RICH, or DOCUMENT.FIND_THEN_SEARCH"
             )
 
     _PROTOCOL_BY_SUFFIX = {
@@ -299,6 +303,57 @@ class DocumentDataSource(DataSource):
         ``classifier``, and ``fields``.
         """
         return self._pipeline.find_records(request.get("filter"))
+
+    def _find_then_search(self, request: Dict[str, Any], collection_override=None) -> List[Dict[str, Any]]:
+        """Implement DOCUMENT.FIND_THEN_SEARCH.
+
+        Filters DocumentRecords by ``find_filter``, then runs a text search
+        scoped to each matched document. Results from all matched documents are
+        merged and returned sorted by score, capped at ``k``.
+
+        Required request fields:
+            ``query`` — text to search for within matched documents
+
+        Optional request fields:
+            ``find_filter`` — same filter dict accepted by DOCUMENT.FIND
+            ``k`` — number of results (default 5)
+            ``collection`` — collection to search in
+            ``mode`` — search mode passed to ``pipeline.search`` (default ``"vector"``)
+        """
+        query_text = request.get("query")
+        if not query_text:
+            raise ValueError("DOCUMENT.FIND_THEN_SEARCH requires a 'query' field")
+
+        find_filter = request.get("find_filter")
+        collection = collection_override or request.get("collection")
+        k = request.get("k", 5)
+        mode = request.get("mode", "vector")
+
+        matched = self._pipeline.find_records(find_filter)
+        if not matched:
+            return []
+
+        seen: set = set()
+        all_results: List[Dict[str, Any]] = []
+        for doc in matched:
+            doc_id = doc.get("document_id")
+            if not doc_id:
+                continue
+            chunks = self._pipeline.search(
+                query_text,
+                k=k,
+                collection=collection,
+                filters={"document_id": doc_id},
+                mode=mode,
+            )
+            for chunk in chunks:
+                chunk_id = chunk.get("chunk_id", "")
+                if chunk_id not in seen:
+                    seen.add(chunk_id)
+                    all_results.append(chunk)
+
+        all_results.sort(key=lambda c: c.get("score") or 0, reverse=True)
+        return all_results[:k]
 
     def _get_record(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         document_id = request.get("document_id")

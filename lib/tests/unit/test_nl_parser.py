@@ -71,3 +71,50 @@ def test_execute_query_nl_passes_collection():
     )
     source.execute_query_nl("find eligibility info", collection="contracts")
     assert vector_source.knn.call_args.kwargs["index_name"] == "contracts"
+
+
+def test_execute_query_nl_dispatches_find(tmp_path):
+    from blue_data_doc_source import KeywordClassifier
+    path = make_txt(tmp_path, "invoice number INV-001 vendor Acme total due $500")
+    parser = NLQueryParser(
+        parse_fn=lambda text: {
+            "op": "DOCUMENT.FIND",
+            "filter": {"document_type": "invoice"},
+        }
+    )
+    source = DocumentDataSource(
+        chunk_size=20,
+        overlap=2,
+        classifier=KeywordClassifier(),
+        nl_parser=parser,
+    )
+    source.execute_query({"op": "DOCUMENT.INGEST", "path": path})
+    results = source.execute_query_nl("list all invoices")
+    assert isinstance(results, list)
+
+
+def test_execute_query_nl_dispatches_find_then_search(tmp_path):
+    from blue_data_doc_source import KeywordClassifier
+    content = (
+        "invoice number due date amount due bill to line item payment "
+        "subtotal tax total remit vendor quantity unit price "
+    ) * 4
+    path = make_txt(tmp_path, content)
+    parser = NLQueryParser(
+        parse_fn=lambda text: {
+            "op": "DOCUMENT.FIND_THEN_SEARCH",
+            "find_filter": {"document_type": "invoice"},
+            "query": "payment due",
+            "k": 3,
+            "mode": "bm25",
+        }
+    )
+    source = DocumentDataSource(
+        chunk_size=20,
+        overlap=2,
+        classifier=KeywordClassifier(),
+        nl_parser=parser,
+    )
+    source.execute_query({"op": "DOCUMENT.INGEST", "path": path})
+    results = source.execute_query_nl("find payment terms in invoices")
+    assert isinstance(results, list)
