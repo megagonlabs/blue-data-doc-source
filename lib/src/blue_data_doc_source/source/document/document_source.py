@@ -35,6 +35,7 @@ class DocumentDataSource(DataSource):
     - ``DOCUMENT.FIND`` — filter DocumentRecords by extracted field values (no embedding, deterministic)
     - ``DOCUMENT.FIND_THEN_SEARCH`` — filter DocumentRecords by field values, then search text within matched documents
     - ``DOCUMENT.GRAPH_NEIGHBORS`` — find chunks mentioning a named entity via graph traversal (requires ``graph_source``)
+    - ``DOCUMENT.GRAPH_QUERY`` — general graph traversal from any node ID; returns neighbouring nodes (requires ``graph_source``)
 
     Natural language queries are supported via ``execute_query_nl`` when an
     ``NLQueryParser`` is provided::
@@ -155,13 +156,15 @@ class DocumentDataSource(DataSource):
             return self._find_then_search(query, collection)
         elif op == "DOCUMENT.GRAPH_NEIGHBORS":
             return self._graph_neighbors(query)
+        elif op == "DOCUMENT.GRAPH_QUERY":
+            return self._graph_query(query)
         else:
             raise ValueError(
                 f"Unsupported op: {op!r}. "
                 "Expected DOCUMENT.INGEST, DOCUMENT.SEARCH, DOCUMENT.ENSURE_INDEX, "
                 "DOCUMENT.DELETE, DOCUMENT.GET_RECORD, DOCUMENT.FIND, "
-                "DOCUMENT.SEARCH_RICH, DOCUMENT.FIND_THEN_SEARCH, or "
-                "DOCUMENT.GRAPH_NEIGHBORS"
+                "DOCUMENT.SEARCH_RICH, DOCUMENT.FIND_THEN_SEARCH, "
+                "DOCUMENT.GRAPH_NEIGHBORS, or DOCUMENT.GRAPH_QUERY"
             )
 
     _PROTOCOL_BY_SUFFIX = {
@@ -411,4 +414,31 @@ class DocumentDataSource(DataSource):
             entity_name=entity,
             entity_type=request.get("entity_type"),
             k=request.get("k", 10),
+        )
+
+    def _graph_query(self, request: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Implement DOCUMENT.GRAPH_QUERY — general graph traversal.
+
+        Required request fields:
+            ``node_id`` — graph node to start from
+                (e.g. ``"doc:doc_abc123"``, ``"entity:PROPER_NOUN:acme corp"``)
+
+        Optional request fields:
+            ``edge_type`` — edge type to follow (e.g. ``"HAS_CHUNK"``, ``"NEXT"``,
+                ``"APPEARS_IN"``). ``None`` / omitted traverses all edge types.
+            ``direction`` — ``"out"``, ``"in"``, or ``"both"`` (default)
+            ``k`` — maximum number of results (default: all)
+
+        Returns:
+            List of dicts with ``node_id``, ``label``, ``properties``,
+            ``edge_type``, and ``direction``.
+        """
+        node_id = request.get("node_id")
+        if not node_id:
+            raise ValueError("DOCUMENT.GRAPH_QUERY requires a 'node_id' field")
+        return self._pipeline.graph_query(
+            node_id=node_id,
+            edge_type=request.get("edge_type"),
+            direction=request.get("direction", "both"),
+            k=request.get("k"),
         )

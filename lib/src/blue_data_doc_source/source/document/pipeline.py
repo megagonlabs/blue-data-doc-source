@@ -640,6 +640,43 @@ class DocumentPipeline:
             )
         return self._graph_indexer.graph_neighbors(entity_name, entity_type=entity_type, k=k)
 
+    def graph_query(
+        self,
+        node_id: str,
+        edge_type: Optional[str] = None,
+        direction: str = "both",
+        k: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """General graph traversal from *node_id*.
+
+        Delegates directly to ``GraphSource.get_neighbors`` via
+        ``GraphIndexer.get_neighbors``. Use this for arbitrary traversal:
+        walking NEXT/PREV chains, inspecting Section nodes, finding all
+        documents an entity appears in via APPEARS_IN, etc.
+
+        Args:
+            node_id: Graph node ID to start from (e.g. ``doc:doc_abc123``,
+                ``chunk:...``, ``entity:PROPER_NOUN:acme corp``).
+            edge_type: Edge type to follow. ``None`` traverses all types.
+            direction: ``"out"``, ``"in"``, or ``"both"`` (default).
+            k: Maximum number of results. ``None`` returns all.
+
+        Returns:
+            List of dicts with ``node_id``, ``label``, ``properties``,
+            ``edge_type``, and ``direction``.
+
+        Raises:
+            ValueError: If no ``graph_source`` was configured.
+        """
+        if self._graph_indexer is None:
+            raise ValueError(
+                "graph_query requires a graph_source. "
+                "Pass graph_source= when constructing DocumentPipeline."
+            )
+        return self._graph_indexer.get_neighbors(
+            node_id, edge_type=edge_type, direction=direction, k=k
+        )
+
     def _ingest_txt(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
         text = self.text_parser.parse(str(file_path))
         document_id = self._file_document_id(file_path)
