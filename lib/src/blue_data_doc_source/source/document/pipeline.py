@@ -2,7 +2,7 @@ import re
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 from blue_data.core.utils.similarity_utils import compute_bm25_score, normalize_bm25_scores, compute_vector_score
 from blue_data.source.vector.vector_source import VectorSource
@@ -11,9 +11,13 @@ from .chunkers import Chunker, SectionChunker
 from .embeddings import EmbeddingModel
 from .enrichment import Enricher
 from .chunk_record import ChunkRecord
+from .graph import GraphIndexer
 from .parsers import DocxParser, Parser, PDFParser, TextParser
 from .schema.base import DocumentClassifier, FieldExtractor
 from .schema.schema_store import MemoryRecordStore, RecordStore
+
+if TYPE_CHECKING:
+    from blue_data.source.graph.graph_source import GraphSource
 
 # Chars that need escaping inside Redis Search TAG filter values.
 _TAG_SPECIAL_RE = re.compile(r'([,.<>{}\[\]"\'`:;!@#$%^&*\-+=~|/ ])')
@@ -98,6 +102,8 @@ class DocumentPipeline:
         classifier: Optional[DocumentClassifier] = None,
         field_extractor: Optional[FieldExtractor] = None,
         record_store: Optional[RecordStore] = None,
+        graph_source: Optional["GraphSource"] = None,
+        graph_database: str = "documents",
     ):
         """
         Args:
@@ -120,6 +126,15 @@ class DocumentPipeline:
                 built-in ``PDFParser`` so scanned PDF pages are OCR'd via
                 Tesseract. Has no effect when a custom ``parser=`` is provided.
                 Requires the ``[ocr]`` extras.
+            graph_source: Optional blue-data ``GraphSource`` backend
+                (``MemoryGraphSource``, ``FileGraphSource``, or
+                ``NEO4JSource``). When set, every ingested document is indexed
+                into the graph with ``Document``, ``Chunk``, and ``Entity``
+                nodes. Enables ``graph_neighbors()`` retrieval. When ``None``
+                (default) the graph layer is disabled and no existing behaviour
+                changes.
+            graph_database: Graph database name used by ``graph_source``.
+                Defaults to ``"documents"``.
         """
         self.text_parser = TextParser()
         self.pdf_parser = PDFParser(ocr_fallback=ocr_fallback)
@@ -145,6 +160,11 @@ class DocumentPipeline:
         self._chunk_collection: Dict[str, str] = {}
         # chunk_id → embedding vector — used by rerank mode to avoid re-embedding candidates
         self._chunk_embeddings: Dict[str, List[float]] = {}
+        # optional graph indexer — None when graph_source is not configured
+        self._graph_indexer: Optional[GraphIndexer] = None
+        if graph_source is not None:
+            self._graph_indexer = GraphIndexer(graph_source, database=graph_database)
+            self._graph_indexer.ensure_database()
 
     def ingest(self, path: str, collection: Optional[str] = None) -> List[Dict[str, Any]]:
         """Parse, chunk, enrich, and embed a file.
@@ -313,6 +333,8 @@ class DocumentPipeline:
         old_doc_id, old_count, old_collection = self._doc_registry[key]
         if old_doc_id == new_doc_id:
             return  # same content — upsert will overwrite in place
+        if self._graph_indexer is not None:
+            self._graph_indexer.delete_document(old_doc_id)
         if self.vector_source is None:
             return
         for idx in range(old_count):
@@ -465,6 +487,9 @@ class DocumentPipeline:
                 self._upsert(chunk_id, record_dict, collection)
                 chunk_index += 1
 
+        if self._graph_indexer is not None:
+            self._graph_indexer.index_document(document_id, file_name, document_type, records)
+
         return records
 
     def _ingest_from_blocks(
@@ -563,6 +588,9 @@ class DocumentPipeline:
                     self._upsert(chunk_id, record_dict, collection)
                     chunk_index += 1
 
+        if self._graph_indexer is not None:
+            self._graph_indexer.index_document(document_id, file_name, document_type, records)
+
         return records
 
     def get_record(self, document_id: str) -> Optional[Dict[str, Any]]:
@@ -579,6 +607,38 @@ class DocumentPipeline:
         Returns every record when *filter* is ``None`` or ``{}``.
         """
         return self.record_store.find(filter)
+
+    def graph_neighbors(
+        self,
+        entity_name: str,
+        entity_type: Optional[str] = None,
+        k: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """Find chunks that mention *entity_name* via graph traversal.
+
+        Requires ``graph_source`` to have been set at construction time.
+
+        Args:
+            entity_name: Entity text to search for (case-insensitive).
+            entity_type: Optional — restrict to one entity type
+                (``"PROPER_NOUN"``, ``"DATE"``, ``"MONEY"``, etc.).
+                When ``None``, all known entity types are tried.
+            k: Maximum number of chunk results to return.
+
+        Returns:
+            List of dicts with ``chunk_id``, ``document_id``,
+            ``text_preview``, ``entity``, ``entity_type``, and optionally
+            ``section_title``.
+
+        Raises:
+            ValueError: If no ``graph_source`` was configured.
+        """
+        if self._graph_indexer is None:
+            raise ValueError(
+                "graph_neighbors requires a graph_source. "
+                "Pass graph_source= when constructing DocumentPipeline."
+            )
+        return self._graph_indexer.graph_neighbors(entity_name, entity_type=entity_type, k=k)
 
     def _ingest_txt(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
         text = self.text_parser.parse(str(file_path))
@@ -697,6 +757,9 @@ class DocumentPipeline:
 
         if path is not None:
             self._doc_registry.pop(str(Path(path)), None)
+
+        if self._graph_indexer is not None:
+            self._graph_indexer.delete_document(doc_id)
 
         return deleted
 

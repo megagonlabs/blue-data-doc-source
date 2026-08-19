@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from blue_data.core.schema import DataSchema
 from blue_data.source.source import DataSource
@@ -11,6 +11,9 @@ from .nl_parser import NLQueryParser
 from .pipeline import DocumentPipeline
 from .schema.base import DocumentClassifier, FieldExtractor
 from .schema.schema_store import RecordStore
+
+if TYPE_CHECKING:
+    from blue_data.source.graph.graph_source import GraphSource
 
 
 class DocumentDataSource(DataSource):
@@ -31,6 +34,7 @@ class DocumentDataSource(DataSource):
     - ``DOCUMENT.GET_RECORD`` — retrieve the DocumentRecord extracted at ingest time
     - ``DOCUMENT.FIND`` — filter DocumentRecords by extracted field values (no embedding, deterministic)
     - ``DOCUMENT.FIND_THEN_SEARCH`` — filter DocumentRecords by field values, then search text within matched documents
+    - ``DOCUMENT.GRAPH_NEIGHBORS`` — find chunks mentioning a named entity via graph traversal (requires ``graph_source``)
 
     Natural language queries are supported via ``execute_query_nl`` when an
     ``NLQueryParser`` is provided::
@@ -60,6 +64,8 @@ class DocumentDataSource(DataSource):
         classifier: Optional[DocumentClassifier] = None,
         field_extractor: Optional[FieldExtractor] = None,
         record_store: Optional[RecordStore] = None,
+        graph_source: Optional["GraphSource"] = None,
+        graph_database: str = "documents",
     ):
         """
         Args:
@@ -88,6 +94,10 @@ class DocumentDataSource(DataSource):
             record_store: Backend for schema records. Defaults to
                 ``MemoryRecordStore`` (in-process). Pass ``FileRecordStore(path)``
                 to persist records across restarts.
+            graph_source: Optional blue-data ``GraphSource`` backend. When set,
+                every ingested document is indexed into the graph and
+                ``DOCUMENT.GRAPH_NEIGHBORS`` queries are enabled.
+            graph_database: Graph database name. Defaults to ``"documents"``.
         """
         super().__init__(name, properties)
         self.properties["connection"]["protocol"] = "document"
@@ -104,6 +114,8 @@ class DocumentDataSource(DataSource):
             classifier=classifier,
             field_extractor=field_extractor,
             record_store=record_store,
+            graph_source=graph_source,
+            graph_database=graph_database,
         )
 
     def execute_query(self, query, database=None, collection=None, optional_properties=None):
@@ -141,12 +153,15 @@ class DocumentDataSource(DataSource):
             return self._search_rich(query, collection)
         elif op == "DOCUMENT.FIND_THEN_SEARCH":
             return self._find_then_search(query, collection)
+        elif op == "DOCUMENT.GRAPH_NEIGHBORS":
+            return self._graph_neighbors(query)
         else:
             raise ValueError(
                 f"Unsupported op: {op!r}. "
                 "Expected DOCUMENT.INGEST, DOCUMENT.SEARCH, DOCUMENT.ENSURE_INDEX, "
                 "DOCUMENT.DELETE, DOCUMENT.GET_RECORD, DOCUMENT.FIND, "
-                "DOCUMENT.SEARCH_RICH, or DOCUMENT.FIND_THEN_SEARCH"
+                "DOCUMENT.SEARCH_RICH, DOCUMENT.FIND_THEN_SEARCH, or "
+                "DOCUMENT.GRAPH_NEIGHBORS"
             )
 
     _PROTOCOL_BY_SUFFIX = {
@@ -377,4 +392,23 @@ class DocumentDataSource(DataSource):
             document_id=document_id,
             chunk_count=chunk_count,
             collection=collection,
+        )
+
+    def _graph_neighbors(self, request: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Implement DOCUMENT.GRAPH_NEIGHBORS.
+
+        Required request fields:
+            ``entity`` — entity name to search for
+
+        Optional request fields:
+            ``entity_type`` — restrict to one type (PROPER_NOUN, DATE, …)
+            ``k`` — maximum results (default 10)
+        """
+        entity = request.get("entity")
+        if not entity:
+            raise ValueError("DOCUMENT.GRAPH_NEIGHBORS requires an 'entity' field")
+        return self._pipeline.graph_neighbors(
+            entity_name=entity,
+            entity_type=request.get("entity_type"),
+            k=request.get("k", 10),
         )
