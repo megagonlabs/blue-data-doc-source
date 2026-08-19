@@ -69,6 +69,9 @@ OPENAI_API_KEY=sk-... python3 examples/scenario-demos/semantic_search_demo.py
 | `feature-demos/field_extraction_demo.py` | KeywordClassifier type detection + LLMFieldExtractor field extraction on four real PDFs; document_type on chunks; DOCUMENT.GET_RECORD | none (OpenAI optional) |
 | `feature-demos/pdf_formats_demo.py` | PlumberPDFParser structured table extraction vs pypdf flat text; embedded images silently skipped; multi-page docs; real arXiv + Berkshire annual report PDFs; scanned image-only PDFs via Tesseract OCR | pdfplumber (OCR: tesseract + poppler) |
 | `feature-demos/rich_search_demo.py` | DOCUMENT.SEARCH_RICH vs plain DOCUMENT.SEARCH side-by-side; provenance block anatomy; neighbor context (context_chunks); by_document grouping with top_sections; in-process caveat | none |
+| `feature-demos/graph_backend_demo.py` | Full graph schema written during ingest (Document/Section/Chunk/Entity nodes + HAS_SECTION, HAS_CHUNK, NEXT, PREV, MENTIONS, APPEARS_IN, CO_OCCURS_WITH edges); graph_neighbors() O(1) entity lookup; graph_query() general traversal; DOCUMENT.GRAPH_NEIGHBORS and DOCUMENT.GRAPH_QUERY ops; sequential chunk navigation; delete cascade; Neo4j production path | none (Neo4j optional) |
+| `feature-demos/structured_extractor_demo.py` | StructuredFieldExtractor with Pydantic model, TypedDict, and JSON Schema; auto-generated extraction prompt; DOCUMENT.FIND syntax on extracted fields | OpenAI optional |
+| `feature-demos/generic_extraction_demo.py` | field_extractor without a classifier; extraction from unknown-type corpora; decision guide (when to use field_extractor vs classifier+extractor) | OpenAI optional |
 
 ```bash
 python3 examples/feature-demos/chunking_demo.py
@@ -77,6 +80,16 @@ python3 examples/feature-demos/content_addressing_demo.py
 python3 examples/feature-demos/nl_query_demo.py
 python3 examples/feature-demos/document_find_demo.py
 python3 examples/feature-demos/find_then_search_demo.py
+
+# Graph backend — entity-centric retrieval, structural navigation, no API key:
+python3 examples/feature-demos/graph_backend_demo.py
+
+# Structured field extraction:
+python3 examples/feature-demos/structured_extractor_demo.py
+OPENAI_API_KEY=sk-... python3 examples/feature-demos/structured_extractor_demo.py
+
+# Generic extraction from unknown-type corpora:
+python3 examples/feature-demos/generic_extraction_demo.py
 
 # Parser raw output — all four parsers, no API key needed:
 python3 examples/feature-demos/parsers_demo.py
@@ -175,8 +188,12 @@ All operations are dispatched via `DocumentDataSource.execute_query(op_dict)`.
 | `DOCUMENT.FIND` | — | `filter` (dict) | `list[dict]` (schema records matching filter) |
 | `DOCUMENT.FIND_THEN_SEARCH` | `query` | `find_filter` (dict), `collection`, `k` (default 5), `mode` | `list[dict]` (chunks from matched documents, merged and sorted by score) |
 | `DOCUMENT.SEARCH_RICH` | `query` | `collection`, `k` (default 5), `filter` (dict), `context_chunks` (int, default 1) | `dict` (enriched results with provenance, context, grouping) |
+| `DOCUMENT.GRAPH_NEIGHBORS` | `entity` | `entity_type`, `k` (default 10) | `list[dict]` (chunks mentioning entity; requires `graph_source`) |
+| `DOCUMENT.GRAPH_QUERY` | `node_id` | `edge_type`, `direction` (default `"both"`), `k` | `list[dict]` (neighbouring nodes with `node_id`, `label`, `properties`; requires `graph_source`) |
 
 `DOCUMENT.FIND` filter syntax: `{"document_type": "contract"}`, `{"fields.total_due": {"gt": 30000}}`, `{"fields.vendor": {"contains": "Acme"}}`. Currency symbols and commas are stripped before numeric comparison. All conditions are ANDed. Requires a classifier set at pipeline construction.
+
+`DOCUMENT.GRAPH_NEIGHBORS` / `DOCUMENT.GRAPH_QUERY` require `graph_source=` at construction. Node IDs follow the pattern: `doc:{document_id}`, `section:{document_id}:{title.lower()}`, `chunk:{chunk_id}`, `entity:{entity_type}:{name.lower()}`.
 
 `execute_query_nl(nl_string, collection=...)` parses a natural-language string and dispatches the corresponding op. Requires `nl_parser=NLQueryParser()` at construction.
 

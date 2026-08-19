@@ -574,6 +574,137 @@ See `examples/feature-demos/rich_search_demo.py` for a runnable side-by-side com
 
 ---
 
+## Graph backend — entity-centric retrieval and structural navigation
+
+Pass any blue-data `GraphSource` as `graph_source=` to populate a knowledge graph automatically during every ingest. The graph layer is optional — omit `graph_source` and the pipeline is unchanged.
+
+### Full graph schema
+
+```
+(Document {document_id, file_name, document_type, mime_type, ingested_at, chunk_count})
+    -[:HAS_SECTION]->
+(Section {section_id, title, document_id, position})
+    -[:HAS_CHUNK]->
+(Chunk {chunk_id, document_id, text_preview, chunk_index, page?, section_title?})
+    -[:MENTIONS]->
+(Entity {name, entity_type})
+
+Additional edges:
+  Document  -[:HAS_CHUNK]->       Chunk    (direct, regardless of section)
+  Chunk     -[:NEXT]->            Chunk    (sequential forward reading order)
+  Chunk     -[:PREV]->            Chunk    (sequential backward)
+  Entity    -[:CO_OCCURS_WITH]->  Entity   (pairs co-occurring in the same chunk)
+  Entity    -[:APPEARS_IN]->      Document (direct document-level presence — one-hop)
+```
+
+Node IDs are deterministic: `doc:{document_id}`, `section:{document_id}:{title.lower()}`, `chunk:{chunk_id}`, `entity:{entity_type}:{name.lower()}`. Re-ingesting the same file is a no-op for the graph (Document node exists → skip).
+
+### Setup
+
+```python
+from blue_data.source.graph.memory_graph_source import MemoryGraphSource
+from blue_data_doc_source import DocumentPipeline, BasicEnricher
+
+graph = MemoryGraphSource("prod")
+pipeline = DocumentPipeline(
+    enricher=BasicEnricher(),   # extracts entities added as graph nodes
+    graph_source=graph,
+    graph_database="documents",
+)
+pipeline.ingest_text(
+    "Acme Corp and Sarah Chen co-signed the agreement on January 15, 2026.",
+    file_name="agreement.txt",
+)
+```
+
+### Entity-centric retrieval — `graph_neighbors()`
+
+O(1) exact lookup by entity name — no embeddings required. Uses deterministic node-ID lookup, not a full scan.
+
+```python
+# Find all chunks that mention "Acme Corp" across the entire corpus
+results = pipeline.graph_neighbors("Acme Corp")
+# → [{"chunk_id": "...", "document_id": "...", "text_preview": "...",
+#     "entity": "Acme Corp", "entity_type": "PROPER_NOUN"}, ...]
+
+# Restrict to one entity type
+results = pipeline.graph_neighbors("January 15, 2026", entity_type="DATE")
+```
+
+Via `DocumentDataSource`:
+
+```python
+source.execute_query({
+    "op": "DOCUMENT.GRAPH_NEIGHBORS",
+    "entity": "Acme Corp",
+    "entity_type": "PROPER_NOUN",  # optional
+    "k": 10,
+})
+```
+
+### General graph traversal — `graph_query()` / `DOCUMENT.GRAPH_QUERY`
+
+Start from any node ID and follow any edge type in any direction.
+
+```python
+# All chunks directly owned by a document
+pipeline.graph_query("doc:doc_abc123", edge_type="HAS_CHUNK", direction="out")
+
+# Documents that mention an entity directly (APPEARS_IN — one hop)
+pipeline.graph_query(
+    "entity:PROPER_NOUN:acme corp",
+    edge_type="APPEARS_IN",
+    direction="out",
+)
+
+# Walk reading order — next chunk
+pipeline.graph_query(
+    "chunk:doc_abc123_chunk_000003",
+    edge_type="NEXT",
+    direction="out",
+    k=1,
+)
+
+# Sections in a document
+pipeline.graph_query("doc:doc_abc123", edge_type="HAS_SECTION", direction="out")
+```
+
+Via `DocumentDataSource`:
+
+```python
+source.execute_query({
+    "op": "DOCUMENT.GRAPH_QUERY",
+    "node_id": "entity:PROPER_NOUN:acme corp",
+    "edge_type": "APPEARS_IN",
+    "direction": "out",
+})
+```
+
+Returns a list of dicts: `{"node_id", "label", "properties", "edge_type", "direction"}`.
+
+### Backends
+
+| Backend | Use case |
+|---|---|
+| `MemoryGraphSource` | Dev/test — in-process, no infra required |
+| `FileGraphSource` | Local persistence |
+| `NEO4JSource` | Production — Bolt protocol, Cypher, full graph query language |
+
+Swap backends by changing the `graph_source=` argument — no other code changes.
+
+```python
+from blue_data.source.graph.neo4j.neo4j_graph_source import NEO4JSource
+
+neo4j = NEO4JSource("neo4j", properties={
+    "connection": {"host": "localhost", "port": 7687, "user": "neo4j", "password": "..."}
+})
+pipeline = DocumentPipeline(enricher=BasicEnricher(), graph_source=neo4j)
+```
+
+See `examples/feature-demos/graph_backend_demo.py` for a full runnable demo.
+
+---
+
 ## MCP server
 
 `platform/document-mcp` exposes `DocumentDataSource` as tools for Claude and other MCP clients. Each tool maps to a `DOCUMENT.*` op and returns structured JSON.

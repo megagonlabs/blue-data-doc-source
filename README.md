@@ -72,6 +72,52 @@ chunks = source.execute_query_nl("find the termination clause in Acme Corp contr
 # NLQueryParser detects FIND_THEN_SEARCH intent and builds the op dict automatically
 ```
 
+**Failure 4 — Exact entity lookup returns wrong results or misses mentions**
+
+An audit team needs every chunk that explicitly names "Acme Corp" — not the 5 most semantically similar chunks, but every occurrence, regardless of surrounding context. Vector search embeds "Acme Corp" and returns the k nearest chunks, missing exact mentions in short passages or tables where the entity name appears without rich surrounding prose to drive embedding quality.
+
+blue-data-doc-source adds optional graph indexing. Every entity extracted by `BasicEnricher` becomes a shared node; every chunk that mentions it gets a `MENTIONS` edge. "Acme Corp" is a graph node with O(1) lookup — returns all chunks across all documents in one hop, regardless of how many there are.
+
+```python
+from blue_data.source.graph.memory_graph_source import MemoryGraphSource
+from blue_data_doc_source import DocumentPipeline, BasicEnricher
+
+pipeline = DocumentPipeline(
+    enricher=BasicEnricher(),
+    graph_source=MemoryGraphSource("prod"),  # or NEO4JSource for persistence
+)
+pipeline.ingest("contract_a.pdf")
+pipeline.ingest("vendor_b.pdf")
+pipeline.ingest("incident_c.txt")
+
+# O(1) entity lookup — returns every chunk that mentions "Acme Corp",
+# across all three documents, with no embedding call
+results = pipeline.graph_neighbors("Acme Corp")
+# → [{"chunk_id": "...", "document_id": "...", "text_preview": "...", "entity_type": "PROPER_NOUN"}, ...]
+
+# Walk the graph structurally — next chunk in reading order, section hierarchy,
+# or which documents an entity directly appears in
+docs_with_acme = pipeline.graph_query(
+    "entity:PROPER_NOUN:acme corp",
+    edge_type="APPEARS_IN",  # direct entity → document edge (one hop)
+    direction="out",
+)
+```
+
+The graph layer is **fully optional**. Omit `graph_source` and the pipeline is unchanged. When set, every ingest automatically populates:
+
+| Edge | Meaning |
+|---|---|
+| `Document -[:HAS_SECTION]→ Section` | Document structure |
+| `Section -[:HAS_CHUNK]→ Chunk` | Section membership |
+| `Document -[:HAS_CHUNK]→ Chunk` | Direct chunk ownership |
+| `Chunk -[:NEXT/PREV]→ Chunk` | Reading-order navigation |
+| `Chunk -[:MENTIONS]→ Entity` | Entity occurrence |
+| `Entity -[:APPEARS_IN]→ Document` | Direct document membership |
+| `Entity -[:CO_OCCURS_WITH]→ Entity` | Co-occurrence within a chunk |
+
+See the runnable demo: `python3 examples/feature-demos/graph_backend_demo.py`
+
 See the runnable demos:
 - `python3 examples/scenario-demos/structured_doc_query_demo.py` — all three failures end-to-end
 - `python3 examples/feature-demos/document_find_demo.py` — DOCUMENT.FIND in depth
@@ -156,6 +202,7 @@ docs = source.execute_query({
 - **blue-data DataRegistry integration** — `DocumentDataSource` extends blue-data's `DataSource` ABC; registers in the same `DataRegistry` as SQL, graph, and JSON sources using a shared registration and metadata model; each source type retains its own query vocabulary
 - **Document classification and field extraction** — `KeywordClassifier` assigns a document type at ingest using keyword rules (zero API cost); `LLMFieldExtractor` extracts typed fields via one LLM call per document; `StructuredFieldExtractor` extracts against a caller-supplied Pydantic model, TypedDict, or JSON Schema with automatic prompt generation and output validation; all three work without a pre-configured classifier — pass only a `field_extractor` for generic extraction from unknown corpora; `document_type` propagates to every chunk and is filterable in KNN search
 - **Structured corpus query (`DOCUMENT.FIND`)** — filter across all ingested documents by extracted field values (`{"fields.governing_law": {"contains": "California"}}`, `{"fields.total_due": {"gt": 30000}}`); currency symbols (`$€£¥`) and commas are stripped before numeric comparison; all conditions ANDed; deterministic — no embedding, no query-time LLM call
+- **Graph backend — entity-centric retrieval and structural navigation** — pass any blue-data `GraphSource` as `graph_source=` to populate a full knowledge graph during ingest; nodes: `Document` (with `mime_type`, `ingested_at`, `chunk_count`), `Section`, `Chunk`, `Entity`; edges: `HAS_SECTION`, `HAS_CHUNK`, `NEXT`, `PREV`, `MENTIONS`, `APPEARS_IN`, `CO_OCCURS_WITH`; query via `DOCUMENT.GRAPH_NEIGHBORS` (O(1) exact entity lookup, no embeddings) or `DOCUMENT.GRAPH_QUERY` (general traversal from any node); fully optional — `graph_source=None` (the default) disables with zero overhead; backends: `MemoryGraphSource` (dev), `NEO4JSource` (production)
 - **Persistent schema store** — `RecordStore` ABC backed by any blue-data `JSONSource`; `MemoryRecordStore` (default, in-process), `FileRecordStore` (atomic JSON write, survives restarts), `JsonSourceRecordStore(RedisJSONSource(...))` (multi-process-safe, no last-writer-wins race)
 - **Content-addressed ingestion** — SHA-256 hash of file bytes is the `document_id`; re-ingesting the same file is always a safe upsert; chunk IDs are stable provided the parser, chunker, and chunk size remain unchanged
 
@@ -390,10 +437,12 @@ DocumentDataSource (extends blue-data DataSource)  ← public entry point
        │    └─ WindowChunker ← word-based sliding window fallback
        ├─ BasicEnricher      ← regex entity/keyword extraction (optional)
        ├─ KeywordClassifier  ← document type detection (no API cost) (optional)
-       ├─ LLMFieldExtractor ← typed field extraction via GPT-4o-mini (optional)
+       ├─ LLMFieldExtractor  ← typed field extraction via GPT-4o-mini (optional)
        ├─ OpenAIEmbeddingModel / DummyEmbeddingModel  (optional)
        ├─ ChunkRecord        ← canonical chunk schema with provenance fields
-       └─ VectorSource       ← blue-data VectorSource injected by caller (optional)
+       ├─ VectorSource       ← blue-data VectorSource injected by caller (optional)
+       └─ GraphIndexer       ← writes Document/Section/Chunk/Entity nodes + edges
+            └─ GraphSource   ← blue-data GraphSource (MemoryGraphSource, NEO4JSource, …) (optional)
 ```
 
 ### ChunkRecord schema

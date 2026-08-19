@@ -479,3 +479,98 @@ clauses = source.execute_query({
 ```
 
 `extra_types` entries are merged at init time — built-in types (`contract`, `invoice`, `policy`, `research_paper`, `financial_report`) coexist with user-defined types. If a user-defined name collides with a built-in, the user-defined entry takes precedence. No restart or subclassing required.
+
+---
+
+## Scenario 13: Entity-Centric Retrieval via Graph Backend
+
+A compliance team has 300 documents — contracts, vendor agreements, and incident reports — all mentioning overlapping entities: company names, people, dates. They need to answer questions like "which documents mention Acme Corp?" and "show me every chunk where Sarah Chen appears, with the surrounding chunks for context" — without relying on embedding similarity.
+
+Vector search embeds the entity name and returns the k most semantically similar chunks. This misses exact mentions in short passages or tables where the entity name appears without rich surrounding prose, and cannot answer "how many documents mention this entity" without reading all results.
+
+**Solution — graph backend:**
+
+```python
+from blue_data.source.graph.memory_graph_source import MemoryGraphSource
+from blue_data_doc_source import DocumentPipeline, BasicEnricher
+
+graph = MemoryGraphSource("compliance")
+pipeline = DocumentPipeline(
+    enricher=BasicEnricher(),   # extracts PROPER_NOUN and DATE entities
+    graph_source=graph,
+    graph_database="documents",
+)
+
+# Ingest — graph nodes and edges created automatically alongside chunks
+for path in document_paths:
+    pipeline.ingest(path)
+
+# O(1) entity lookup — all chunks that mention "Acme Corp", across all 300 docs
+results = pipeline.graph_neighbors("Acme Corp")
+print(f"Found in {len({r['document_id'] for r in results})} documents")
+
+# Walk reading order — expand context around a hit via NEXT/PREV edges
+chunk_id = results[0]["chunk_id"]
+node_id  = f"chunk:{chunk_id}"
+
+next_chunk = pipeline.graph_query(node_id, edge_type="NEXT", direction="out", k=1)
+prev_chunk = pipeline.graph_query(node_id, edge_type="PREV", direction="out", k=1)
+
+# Which documents does "Acme Corp" appear in directly — one hop via APPEARS_IN
+doc_refs = pipeline.graph_query(
+    "entity:PROPER_NOUN:acme corp",
+    edge_type="APPEARS_IN",
+    direction="out",
+)
+print(f"Acme Corp directly appears in {len(doc_refs)} document(s):")
+for ref in doc_refs:
+    print(f"  {ref['node_id']}  ({ref['properties'].get('file_name')})")
+```
+
+**Via `DocumentDataSource` ops:**
+
+```python
+# Entity-centric chunk retrieval
+results = source.execute_query({
+    "op": "DOCUMENT.GRAPH_NEIGHBORS",
+    "entity": "Acme Corp",
+    "entity_type": "PROPER_NOUN",
+    "k": 50,
+})
+
+# General traversal — sections in a document
+source.execute_query({
+    "op": "DOCUMENT.GRAPH_QUERY",
+    "node_id": "doc:doc_abc123",
+    "edge_type": "HAS_SECTION",
+    "direction": "out",
+})
+
+# Next chunk in reading order
+source.execute_query({
+    "op": "DOCUMENT.GRAPH_QUERY",
+    "node_id": "chunk:doc_abc123_chunk_000003",
+    "edge_type": "NEXT",
+    "direction": "out",
+    "k": 1,
+})
+```
+
+**Production — swap to Neo4j with no code change:**
+
+```python
+from blue_data.source.graph.neo4j.neo4j_graph_source import NEO4JSource
+
+neo4j = NEO4JSource("neo4j", properties={
+    "connection": {"host": "localhost", "port": 7687, "user": "neo4j", "password": "..."}
+})
+pipeline = DocumentPipeline(enricher=BasicEnricher(), graph_source=neo4j)
+```
+
+The same `GraphIndexer`, same node IDs (`doc:`, `section:`, `chunk:`, `entity:`), same edges. No other changes.
+
+Key properties:
+- **Idempotent** — re-ingesting the same file is a no-op (Document node already exists)
+- **Shared entity nodes** — "Acme Corp" is one node connected to every chunk and document that mentions it; updating the entity's properties propagates everywhere
+- **Delete cascade** — `DOCUMENT.DELETE` removes the Document, its Section nodes, and its Chunk nodes; Entity nodes are retained because they may be referenced by other documents
+- **Zero overhead when unused** — `graph_source=None` (the default) adds no overhead to any pipeline operation

@@ -22,6 +22,8 @@ DocumentPipeline(
     classifier: DocumentClassifier | None = None,
     field_extractor: FieldExtractor | None = None,
     record_store: RecordStore | None = None,
+    graph_source: GraphSource | None = None,
+    graph_database: str = "documents",
 )
 ```
 
@@ -31,6 +33,8 @@ DocumentPipeline(
 - `classifier` — when set, classifies the document type once per ingest (before the chunk loop) and propagates `document_type` to every `ChunkRecord`; defaults to `None` (no classification)
 - `field_extractor` — when set alongside `classifier`, extracts typed fields from the document text via a single call per ingest; result stored in `record_store`; defaults to `None`
 - `record_store` — backend for schema records; defaults to `MemoryRecordStore()` (in-process); pass `FileRecordStore(path)` for persistence across restarts
+- `graph_source` — any blue-data `GraphSource` (`MemoryGraphSource`, `NEO4JSource`, etc.); when set, `GraphIndexer` writes Document/Section/Chunk/Entity nodes and edges during every ingest; `None` (the default) disables the graph layer with zero overhead
+- `graph_database` — graph database name used by `GraphIndexer`; defaults to `"documents"`
 
 ### Methods
 
@@ -45,6 +49,8 @@ DocumentPipeline(
 | `get_record(document_id)` | `dict \| None` | Return the schema record stored during ingest; `None` if no `classifier` was set or the document is unknown |
 | `find_records(filter=None)` | `list[dict]` | Return all schema records matching the filter dict; see `RecordStore.find()` for filter syntax; returns `[]` when no classifier is set |
 | `search_rich(query, k=5, collection=None, filters=None, context_chunks=1)` | `dict` | Enriched search response: ranked results with citation, neighbor context, and `by_document` grouping |
+| `graph_neighbors(entity_name, entity_type=None, k=10)` | `list[dict]` | O(1) entity lookup via graph — no embeddings; requires `graph_source` |
+| `graph_query(node_id, edge_type=None, direction="both", k=None)` | `list[dict]` | General graph traversal from any node ID; requires `graph_source` |
 
 ### Document identity and deduplication
 
@@ -73,6 +79,8 @@ DocumentDataSource(
     classifier: DocumentClassifier | None = None,
     field_extractor: FieldExtractor | None = None,
     record_store: RecordStore | None = None,
+    graph_source: GraphSource | None = None,
+    graph_database: str = "documents",
 )
 ```
 
@@ -88,6 +96,8 @@ DocumentDataSource(
 | `DOCUMENT.FIND` | — | `filter` (dict) | `list[dict]` — schema records matching filter; see `RecordStore.find()` for filter syntax |
 | `DOCUMENT.FIND_THEN_SEARCH` | `query` | `find_filter` (dict), `k` (default 5), `collection`, `mode` (`"vector"` \| `"bm25"` \| `"hybrid"` \| `"rerank"`) | `list[dict]` — merged ranked chunks from all documents matching `find_filter`; returns `[]` when filter matches nothing |
 | `DOCUMENT.SEARCH_RICH` | `query` | `collection`, `k` (default 5), `filter` (dict), `context_chunks` (int, default 1) | `dict` — enriched results with citation, neighbor context, and `by_document` grouping |
+| `DOCUMENT.GRAPH_NEIGHBORS` | `entity` | `entity_type`, `k` (default 10) | `list[dict]` — chunks mentioning the named entity; requires `graph_source` |
+| `DOCUMENT.GRAPH_QUERY` | `node_id` | `edge_type`, `direction` (default `"both"`), `k` | `list[dict]` — neighbouring nodes with `node_id`, `label`, `properties`, `edge_type`, `direction`; requires `graph_source` |
 
 ### Methods
 

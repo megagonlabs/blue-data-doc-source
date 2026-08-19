@@ -12,7 +12,7 @@ Parser              extract raw text or page-by-page text
 DocumentClassifier  classify document type — contract, invoice, policy, … (optional)
   │
   ▼
-FieldExtractor     extract typed fields — parties, total_due, governing_law, … (optional)
+FieldExtractor      extract typed fields — parties, total_due, governing_law, … (optional)
   │
   ▼
 RecordStore         persist schema record — MemoryRecordStore or FileRecordStore (optional)
@@ -29,8 +29,10 @@ EmbeddingModel      embed each chunk text (optional)
   ▼
 ChunkRecord         canonical schema — document_id, chunk_id, provenance fields
   │
-  ▼
-VectorSource        upsert to Redis or any blue-data VectorSource (optional)
+  ├─▶ VectorSource   upsert to Redis or any blue-data VectorSource (optional)
+  │
+  └─▶ GraphIndexer   write Document/Section/Chunk/Entity nodes + edges (optional)
+           └─ GraphSource  any blue-data GraphSource (Memory, File, NEO4J)
 ```
 
 Each layer is independently pluggable. You can replace any stage without touching the others.
@@ -45,9 +47,24 @@ Each layer is independently pluggable. You can replace any stage without touchin
 
 Responsibilities:
 - Accepts `execute_query({"op": "...", ...})` calls
-- Dispatches on the `"op"` field to `DOCUMENT.INGEST`, `DOCUMENT.SEARCH`, `DOCUMENT.ENSURE_INDEX`, `DOCUMENT.DELETE`
+- Dispatches on the `"op"` field to all supported ops (see table below)
 - Owns a single `DocumentPipeline` instance reused across all calls
 - Exposes `execute_query_nl(text)` for natural language dispatch via `NLQueryParser`
+
+Supported ops:
+
+| Op | Description |
+|---|---|
+| `DOCUMENT.INGEST` | Parse, chunk, enrich, embed, and upsert a file |
+| `DOCUMENT.SEARCH` | KNN search with optional pre-filter |
+| `DOCUMENT.SEARCH_RICH` | KNN search with provenance, neighbor context, and by_document grouping |
+| `DOCUMENT.ENSURE_INDEX` | Create or verify the vector index |
+| `DOCUMENT.DELETE` | Remove all chunks for a document |
+| `DOCUMENT.GET_RECORD` | Retrieve the DocumentRecord written at ingest |
+| `DOCUMENT.FIND` | Filter DocumentRecords by extracted field values (no embedding) |
+| `DOCUMENT.FIND_THEN_SEARCH` | Filter documents by fields, then search text within matched docs |
+| `DOCUMENT.GRAPH_NEIGHBORS` | Find chunks that mention a named entity via graph traversal |
+| `DOCUMENT.GRAPH_QUERY` | General graph traversal from any node ID |
 
 `DocumentDataSource` adds no logic of its own beyond dispatch. All ingestion, search, and deletion logic lives in `DocumentPipeline`.
 
@@ -74,6 +91,8 @@ Key methods:
 | `search(query, k, collection)` | Embed query → KNN via VectorSource |
 | `ensure_index(collection)` | Create vector index (idempotent) |
 | `delete(path=...)` | Remove all chunks from the vector store |
+| `graph_neighbors(entity_name, entity_type, k)` | O(1) entity lookup via graph — no embeddings |
+| `graph_query(node_id, edge_type, direction, k)` | General graph traversal from any node |
 
 ### Parser
 
@@ -222,6 +241,7 @@ The registry is in-process only. Cross-process stale-chunk cleanup requires an e
 | Enrichment logic | `DocumentPipeline(enricher=MyEnricher())` |
 | Embedding model | `DocumentPipeline(embedding_model=MyModel())` |
 | Vector store backend | `DocumentPipeline(vector_source=MyVectorSource())` |
+| Graph store backend | `DocumentPipeline(graph_source=NEO4JSource(...))` |
 | Schema storage backend | `DocumentPipeline(record_store=FileRecordStore("schemas.json"))` |
 | NL query parsing | `DocumentDataSource(nl_parser=NLQueryParser(parse_fn=...))` |
 
