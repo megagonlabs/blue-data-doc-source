@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import json
-import os
 import re
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+from blue_data.source.json.file_json_source import FileJSONSource
+from blue_data.source.json.memory_json_source import MemoryJSONSource
 
 if TYPE_CHECKING:
     from blue_data.source.json.json_source import JSONSource
@@ -48,69 +49,6 @@ class RecordStore(ABC):
     @abstractmethod
     def delete(self, document_id: str) -> None:
         raise NotImplementedError
-
-
-class MemoryRecordStore(RecordStore):
-    """In-process schema store — default, zero dependencies."""
-
-    def __init__(self) -> None:
-        self._store: Dict[str, Dict[str, Any]] = {}
-
-    def upsert(self, record: Dict[str, Any]) -> None:
-        self._store[record["document_id"]] = record
-
-    def get(self, document_id: str) -> Optional[Dict[str, Any]]:
-        return self._store.get(document_id)
-
-    def find(self, filter: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        return [r for r in self._store.values() if _matches(r, filter)]
-
-    def delete(self, document_id: str) -> None:
-        self._store.pop(document_id, None)
-
-
-class FileRecordStore(RecordStore):
-    """JSON-file-backed schema store — survives process restarts.
-
-    Writes atomically (write to ``<path>.tmp`` then ``os.replace``) so a
-    crash mid-write never corrupts the file.
-
-    Args:
-        path: Path to the JSON file. Created on first write if absent.
-    """
-
-    def __init__(self, path: str) -> None:
-        self._path = path
-        self._store: Dict[str, Dict[str, Any]] = {}
-        self._load()
-
-    def _load(self) -> None:
-        if os.path.exists(self._path):
-            with open(self._path, "r", encoding="utf-8") as fh:
-                content = fh.read().strip()
-            if content:
-                self._store = json.loads(content)
-
-    def _save(self) -> None:
-        tmp = self._path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(self._store, fh, indent=2, ensure_ascii=False)
-        os.replace(tmp, self._path)
-
-    def upsert(self, record: Dict[str, Any]) -> None:
-        self._store[record["document_id"]] = record
-        self._save()
-
-    def get(self, document_id: str) -> Optional[Dict[str, Any]]:
-        return self._store.get(document_id)
-
-    def find(self, filter: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        return [r for r in self._store.values() if _matches(r, filter)]
-
-    def delete(self, document_id: str) -> None:
-        if document_id in self._store:
-            del self._store[document_id]
-            self._save()
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +115,7 @@ def _check(record: Dict[str, Any], key: str, condition: Any) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# JSONSource-backed adapter
+# Core implementation — backed by any blue-data JSONSource
 # ---------------------------------------------------------------------------
 
 class JsonSourceRecordStore(RecordStore):
@@ -217,3 +155,33 @@ class JsonSourceRecordStore(RecordStore):
 
     def delete(self, document_id: str) -> None:
         self._source.delete(document_id)
+
+
+# ---------------------------------------------------------------------------
+# Convenience subclasses — backward-compatible names, no duplicated logic
+# ---------------------------------------------------------------------------
+
+class MemoryRecordStore(JsonSourceRecordStore):
+    """In-process schema store. Default when no record_store is passed."""
+
+    def __init__(self) -> None:
+        super().__init__(MemoryJSONSource())
+
+
+class FileRecordStore(JsonSourceRecordStore):
+    """File-backed schema store — survives process restarts.
+
+    Writes atomically (delegated to FileJSONSource: write to ``<path>.tmp``
+    then ``os.replace``) so a crash mid-write never corrupts the file.
+
+    Args:
+        path: Path to the JSON file. Created on first write if absent.
+    """
+
+    def __init__(self, path: str) -> None:
+        super().__init__(
+            FileJSONSource(
+                name="file_record_store",
+                properties={"connection": {"path": path}},
+            )
+        )
