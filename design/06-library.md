@@ -86,6 +86,7 @@ DocumentDataSource(
 | `DOCUMENT.DELETE` | `path` OR (`document_id` + `chunk_count`) | `collection` | `int` — deleted chunk count |
 | `DOCUMENT.GET_RECORD` | `document_id` | — | `dict` — schema record; raises if unknown |
 | `DOCUMENT.FIND` | — | `filter` (dict) | `list[dict]` — schema records matching filter; see `RecordStore.find()` for filter syntax |
+| `DOCUMENT.FIND_THEN_SEARCH` | `query` | `find_filter` (dict), `k` (default 5), `collection`, `mode` (`"vector"` \| `"bm25"` \| `"hybrid"` \| `"rerank"`) | `list[dict]` — merged ranked chunks from all documents matching `find_filter`; returns `[]` when filter matches nothing |
 | `DOCUMENT.SEARCH_RICH` | `query` | `collection`, `k` (default 5), `filter` (dict), `context_chunks` (int, default 1) | `dict` — enriched results with citation, neighbor context, and `by_document` grouping |
 
 ### Methods
@@ -246,7 +247,7 @@ Canonical chunk schema. Constructed by `DocumentPipeline._make_record` and seria
 | `page_start` | int \| omitted | 1-based page number (PDF only) |
 | `page_end` | int \| omitted | Same as `page_start` in V1 |
 | `section_title` | str \| omitted | Section heading from `SectionChunker`; omitted when no structure detected |
-| `document_type` | str \| omitted | Classified type (`contract`, `invoice`, `policy`, `research_paper`, `financial_report`, `unknown`); present when `classifier` is set |
+| `document_type` | str \| omitted | Classified type; built-in values are `contract`, `invoice`, `policy`, `research_paper`, `financial_report`, `unknown`; user-defined types (via `KeywordClassifier(extra_types=...)`) are also valid; present when `classifier` is set |
 | `content_type` | str \| omitted | Content block type: `"text"` or `"table"`; present when using `PlumberPDFParser` or any block-aware parser |
 | `table` | dict \| omitted | `{"headers": list[str], "rows": list[list[str]]}`; present only when `content_type == "table"` |
 | `entities` | list | `[{"text": str, "type": str}, ...]` from enricher; empty list when no enricher |
@@ -308,10 +309,22 @@ Scores the first `sample_words` words (default 500) of the document against sign
 KeywordClassifier(
     min_confidence: float = 0.15,
     sample_words: int = 500,
+    extra_types: dict[str, list[str]] | None = None,
 )
 ```
 
-Supported document types and representative signals:
+- `extra_types` — maps a custom type name to a list of signal phrases. Merged with the built-in type signals at init time; user-defined entries take precedence on name collision. No subclassing required.
+
+```python
+# Example: add "lease" as a recognised type
+KeywordClassifier(
+    extra_types={
+        "lease": ["lease agreement", "landlord", "tenant", "monthly rent", "security deposit"],
+    }
+)
+```
+
+Supported built-in document types and representative signals:
 
 | Type | Signal phrases (sample) |
 |------|------------------------|
@@ -342,6 +355,21 @@ class FieldExtractor(ABC):
 LLMFieldExtractor(
     model: str = "gpt-4o-mini",
     sample_chars: int = 4000,   # truncates input sent to the LLM
+    extra_types: dict[str, str] | None = None,
+)
+```
+
+- `extra_types` — maps a custom type name to a field-spec string describing what to extract. Merged with the built-in field specs at init time; user-defined entries take precedence on name collision. When the document type is unknown and no spec exists, the extractor falls back to a generic "extract key facts" prompt.
+
+```python
+# Example: add extraction spec for a "lease" type
+LLMFieldExtractor(
+    extra_types={
+        "lease": (
+            "Extract: monthly_rent (number), lease_term_months (int), "
+            "landlord (string), tenant (string), security_deposit (number)"
+        ),
+    }
 )
 ```
 

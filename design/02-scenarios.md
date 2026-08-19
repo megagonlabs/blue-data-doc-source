@@ -176,6 +176,8 @@ records = pipeline.ingest_pages(
 
 A developer wants to let end users interact with the document store using plain English, without exposing the op interface. They wire up `NLQueryParser` backed by GPT-4o-mini to translate instructions into `DOCUMENT.*` ops automatically.
 
+`NLQueryParser` maps intent to six op types: `DOCUMENT.SEARCH` (content retrieval), `DOCUMENT.FIND` (list/filter documents), `DOCUMENT.FIND_THEN_SEARCH` (two-part queries that identify a document subset and retrieve text from it), `DOCUMENT.INGEST`, `DOCUMENT.DELETE`, and `DOCUMENT.ENSURE_INDEX`.
+
 **Example:**
 
 ```python
@@ -183,19 +185,29 @@ from blue_data_doc_source import DocumentDataSource, OpenAIEmbeddingModel, NLQue
 from blue_data.source.vector.memory_vector_source import MemoryVectorSource
 
 source = DocumentDataSource(
-    name="contracts",
+    name="legal_corpus",
     embedding_model=OpenAIEmbeddingModel(),
     vector_source=MemoryVectorSource(),
     nl_parser=NLQueryParser(),
-    default_collection="contracts",
+    classifier=KeywordClassifier(),
+    field_extractor=LLMFieldExtractor(),
+    default_collection="legal_corpus",
 )
 
-# NL instructions — the LLM decides the op and parameters
+# DOCUMENT.SEARCH — content retrieval, no document filter
 results = source.execute_query_nl("find clauses about termination notice periods")
-records = source.execute_query_nl("ingest /docs/new_contract.pdf into the contracts collection")
+
+# DOCUMENT.FIND — list documents, no content retrieval
+records = source.execute_query_nl("list all contracts governed by California law")
+
+# DOCUMENT.FIND_THEN_SEARCH — two-part: identify document subset, then retrieve text
+chunks  = source.execute_query_nl("find the indemnification clause in Acme Corp contracts")
+
+# DOCUMENT.INGEST
+source.execute_query_nl("ingest /docs/new_contract.pdf into the legal_corpus collection")
 ```
 
-The `NLQueryParser` accepts a custom `parse_fn` to swap in any LLM backend — Anthropic, a local model, or a test stub.
+The `NLQueryParser` accepts a custom `parse_fn` to swap in any LLM backend — Anthropic, a local model, or a test stub. The decision rules between FIND, FIND_THEN_SEARCH, and SEARCH are encoded in the system prompt — no application-level routing logic needed.
 
 ---
 
@@ -230,11 +242,11 @@ All pipeline logic — chunking, embedding, deduplication — runs server-side. 
 
 ---
 
-## Scenario 9: Structured Corpus Query (DOCUMENT.FIND + Two-Step Pattern)
+## Scenario 9: Structured Corpus Query (DOCUMENT.FIND + DOCUMENT.FIND_THEN_SEARCH)
 
 A legal team has ingested 200 contracts, invoices, and policies into one corpus. They need to find all contracts governed by California law and retrieve their indemnification clauses — without the noise of semantic search returning irrelevant document types.
 
-**Example:**
+**Two-step pattern (explicit):**
 
 ```python
 from blue_data_doc_source import (
@@ -277,7 +289,25 @@ for doc in contracts:
         print(f"  § {c.get('section_title')}  {c['text'][:100]}")
 ```
 
-Without `DOCUMENT.FIND`, a search for "indemnification California" returns chunks from all document types, ranked by semantic similarity, with no reliable way to know which contract they belong to.
+**Same result in one call using `DOCUMENT.FIND_THEN_SEARCH`:**
+
+```python
+clauses = source.execute_query({
+    "op": "DOCUMENT.FIND_THEN_SEARCH",
+    "find_filter": {
+        "document_type": "contract",
+        "fields.governing_law": {"contains": "California"},
+    },
+    "query": "indemnification obligations",
+    "k": 6,
+})
+# Returns merged, ranked chunks from all matched California contracts.
+# Deduplication, merge, and sort are handled internally.
+```
+
+`DOCUMENT.FIND_THEN_SEARCH` accepts the same `find_filter` dict as `DOCUMENT.FIND`, the same `query` and `k` as `DOCUMENT.SEARCH`, and an optional `mode` (`"vector"`, `"bm25"`, `"hybrid"`, `"rerank"`). When `find_filter` matches no documents it returns `[]` immediately.
+
+Without `DOCUMENT.FIND` / `DOCUMENT.FIND_THEN_SEARCH`, a search for "indemnification California" returns chunks from all document types, ranked by semantic similarity, with no reliable way to know which contract they belong to.
 
 ---
 
@@ -317,3 +347,135 @@ print(f"{len(docs)} contracts effective in 2026")
 ```
 
 `FileRecordStore` writes atomically (write-to-tmp, then `os.replace`) — a crash mid-write never corrupts the file. The store reloads cleanly from disk on every new process.
+
+---
+
+## Scenario 11: Compound Filter-then-Retrieve (DOCUMENT.FIND_THEN_SEARCH)
+
+A developer is building a contract intelligence tool. Users want to ask things like "what does the Acme Corp agreement say about liability caps?" — which requires first identifying the right document, then retrieving the relevant passage. They want a single call rather than writing a find-then-loop pattern themselves.
+
+**Example:**
+
+```python
+from blue_data_doc_source import (
+    DocumentDataSource, OpenAIEmbeddingModel, KeywordClassifier,
+    LLMFieldExtractor, FileRecordStore,
+)
+from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
+
+source = DocumentDataSource(
+    name="contracts",
+    embedding_model=OpenAIEmbeddingModel(),
+    vector_source=RedisVectorSource(host="localhost", port=6379),
+    classifier=KeywordClassifier(),
+    field_extractor=LLMFieldExtractor(),
+    record_store=FileRecordStore("schemas.json"),
+    default_collection="contracts",
+)
+
+# Single call: find contracts mentioning Acme Corp, retrieve liability clauses from them
+results = source.execute_query({
+    "op": "DOCUMENT.FIND_THEN_SEARCH",
+    "find_filter": {
+        "document_type": "contract",
+        "fields.parties": {"contains": "Acme Corp"},
+    },
+    "query": "liability cap limitation of liability",
+    "k": 5,
+    "mode": "hybrid",     # optional: "vector" | "bm25" | "hybrid" | "rerank"
+})
+
+for r in results:
+    print(r["file_name"], r.get("section_title"), r["score"])
+    print(r["text"][:150])
+    print()
+```
+
+The op returns the same chunk dict format as `DOCUMENT.SEARCH`. When `find_filter` matches no documents, it returns `[]` immediately without touching the vector store. The merge step deduplicates and sorts by score across all matched documents.
+
+For natural language dispatch, `NLQueryParser` emits `DOCUMENT.FIND_THEN_SEARCH` when the intent is both document-selection and content-retrieval in the same phrase:
+
+```python
+results = source.execute_query_nl(
+    "find the liability cap clauses in Acme Corp contracts"
+)
+```
+
+---
+
+## Scenario 12: User-Defined Document Types via `extra_types`
+
+A developer is building a tool for a property management company. Their corpus mixes standard contracts with lease agreements and employment contracts — document types the built-in `KeywordClassifier` does not recognise. They want to classify and filter these types the same way built-in types work, without forking the library.
+
+**Example:**
+
+```python
+from blue_data_doc_source import (
+    DocumentDataSource, KeywordClassifier, LLMFieldExtractor, FileRecordStore,
+    DummyEmbeddingModel,
+)
+from blue_data.source.vector.memory_vector_source import MemoryVectorSource
+
+# Register custom types alongside built-ins — no subclassing required
+classifier = KeywordClassifier(
+    extra_types={
+        "lease": [
+            "lease agreement", "landlord", "tenant", "monthly rent",
+            "security deposit", "premises", "lease term", "lessor", "lessee",
+        ],
+        "employment_contract": [
+            "employer", "employee", "salary", "start date", "job title",
+            "at-will employment", "non-compete", "severance",
+        ],
+    }
+)
+
+# Custom field specs for LLMFieldExtractor
+extractor = LLMFieldExtractor(
+    extra_types={
+        "lease": (
+            "Extract: monthly_rent (number), lease_term_months (int), "
+            "landlord (string), tenant (string), property_address (string), "
+            "security_deposit (number)"
+        ),
+        "employment_contract": (
+            "Extract: employer (string), employee (string), job_title (string), "
+            "salary (number), start_date (string), non_compete (bool)"
+        ),
+    }
+)
+
+source = DocumentDataSource(
+    name="property_corpus",
+    embedding_model=DummyEmbeddingModel(dim=8),
+    vector_source=MemoryVectorSource(),
+    classifier=classifier,
+    field_extractor=extractor,
+    record_store=FileRecordStore("schemas.json"),
+    default_collection="property_corpus",
+)
+
+source.execute_query({"op": "DOCUMENT.ENSURE_INDEX"})
+source.execute_query({"op": "DOCUMENT.INGEST", "path": "lease_apartment_4b.pdf"})
+source.execute_query({"op": "DOCUMENT.INGEST", "path": "employment_alice.pdf"})
+
+# Filter by custom type — identical API to built-in types
+leases = source.execute_query({
+    "op": "DOCUMENT.FIND",
+    "filter": {
+        "document_type": "lease",
+        "fields.monthly_rent": {"gt": 2000},
+    },
+})
+print(f"Leases > $2000/month: {len(leases)}")
+
+# FIND_THEN_SEARCH works with custom types too
+clauses = source.execute_query({
+    "op": "DOCUMENT.FIND_THEN_SEARCH",
+    "find_filter": {"document_type": "lease"},
+    "query": "early termination penalty",
+    "k": 4,
+})
+```
+
+`extra_types` entries are merged at init time — built-in types (`contract`, `invoice`, `policy`, `research_paper`, `financial_report`) coexist with user-defined types. If a user-defined name collides with a built-in, the user-defined entry takes precedence. No restart or subclassing required.
