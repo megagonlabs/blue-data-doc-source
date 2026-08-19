@@ -43,12 +43,11 @@ DocumentPipeline(
 | `ingest(path, collection=None)` | `list[dict]` | Parse, chunk, enrich, and embed a `.txt`, `.pdf`, or `.docx` file; upsert when `embedding_model` and `vector_source` are set |
 | `ingest_text(text, file_name, mime_type, collection=None)` | `list[dict]` | Bypass file parsing — chunk, enrich, and embed pre-extracted text |
 | `ingest_pages(pages, file_name, mime_type, collection=None)` | `list[dict]` | Bypass file parsing — chunk, enrich, and embed pre-extracted page dicts (`{"page_num": int, "text": str}`) |
-| `search(query, k=5, collection=None, filters=None)` | `list[dict]` | Embed query and run KNN; raises if `embedding_model` or `vector_source` is not set |
+| `search(query, k=5, collection=None, filters=None, mode="vector", rich=False, context_chunks=1)` | `list[dict]` or `dict` | Embed query and run KNN; `rich=False` (default) returns flat list; `rich=True` returns structured dict with provenance, neighbor context, and `by_document` grouping |
 | `ensure_index(collection=None)` | `None` | Create vector index for the collection; idempotent — safe to call multiple times |
 | `delete(path=None, document_id=None, chunk_count=None, collection=None)` | `int` | Delete all chunks for a document; returns count of successful delete calls |
 | `get_record(document_id)` | `dict \| None` | Return the schema record stored during ingest; `None` if no `classifier` was set or the document is unknown |
 | `find_records(filter=None)` | `list[dict]` | Return all schema records matching the filter dict; see `RecordStore.find()` for filter syntax; returns `[]` when no classifier is set |
-| `search_rich(query, k=5, collection=None, filters=None, context_chunks=1)` | `dict` | Enriched search response: ranked results with citation, neighbor context, and `by_document` grouping |
 | `graph_neighbors(entity_name, entity_type=None, k=10)` | `list[dict]` | O(1) entity lookup via graph — no embeddings; requires `graph_source` |
 | `graph_query(node_id, edge_type=None, direction="both", k=None)` | `list[dict]` | General graph traversal from any node ID; requires `graph_source` |
 
@@ -89,13 +88,12 @@ DocumentDataSource(
 | Op | Required fields | Optional fields | Returns |
 |----|-----------------|-----------------|---------|
 | `DOCUMENT.INGEST` | `path` | `collection` | `list[dict]` — one dict per chunk |
-| `DOCUMENT.SEARCH` | `query` | `collection`, `k` (default 5), `filter` (dict) | `list[dict]` — ranked chunks |
+| `DOCUMENT.SEARCH` | `query` | `collection`, `k` (default 5), `filter` (dict), `mode`, `rich` (bool, default false), `context_chunks` (int, default 1) | `list[dict]` — ranked chunks; or `dict` with `results`, `by_document`, provenance, and neighbor context when `rich=true` |
 | `DOCUMENT.ENSURE_INDEX` | — | `collection` | `None` |
 | `DOCUMENT.DELETE` | `path` OR (`document_id` + `chunk_count`) | `collection` | `int` — deleted chunk count |
 | `DOCUMENT.GET_RECORD` | `document_id` | — | `dict` — schema record; raises if unknown |
 | `DOCUMENT.FIND` | — | `filter` (dict) | `list[dict]` — schema records matching filter; see `RecordStore.find()` for filter syntax |
 | `DOCUMENT.FIND_THEN_SEARCH` | `query` | `find_filter` (dict), `k` (default 5), `collection`, `mode` (`"vector"` \| `"bm25"` \| `"hybrid"` \| `"rerank"`) | `list[dict]` — merged ranked chunks from all documents matching `find_filter`; returns `[]` when filter matches nothing |
-| `DOCUMENT.SEARCH_RICH` | `query` | `collection`, `k` (default 5), `filter` (dict), `context_chunks` (int, default 1) | `dict` — enriched results with citation, neighbor context, and `by_document` grouping |
 | `DOCUMENT.GRAPH_NEIGHBORS` | `entity` | `entity_type`, `k` (default 10) | `list[dict]` — chunks mentioning the named entity; requires `graph_source` |
 | `DOCUMENT.GRAPH_QUERY` | `node_id` | `edge_type`, `direction` (default `"both"`), `k` | `list[dict]` — neighbouring nodes with `node_id`, `label`, `properties`, `edge_type`, `direction`; requires `graph_source` |
 

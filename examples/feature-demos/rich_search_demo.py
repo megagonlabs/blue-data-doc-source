@@ -1,9 +1,9 @@
 """Rich Search Demo
 ==================
-Shows DOCUMENT.SEARCH_RICH versus plain DOCUMENT.SEARCH.
+Shows DOCUMENT.SEARCH with and without rich=True.
 
-Plain search returns a flat list of raw chunk dicts — text, score, metadata.
-Rich search wraps the same KNN query and adds three layers on top:
+Plain search (default) returns a flat list of raw chunk dicts — text, score, metadata.
+Rich search (rich=True) wraps the same KNN query and adds three layers on top:
 
   1. Provenance block — document_id, file_name, chunk_id, page (PDF), section
   2. Neighbor context — text of adjacent chunks (before / after each result)
@@ -91,7 +91,7 @@ def _wrap(text: str, width: int = 66, indent: str = "    ") -> str:
 
 
 def run() -> None:
-    _banner("Rich Search Demo — DOCUMENT.SEARCH_RICH vs DOCUMENT.SEARCH")
+    _banner("Rich Search Demo — pipeline.search(rich=False vs rich=True)")
 
     # ── Step 1: ingest two documents ─────────────────────────────────────
     _step(1, "Ingest two documents")
@@ -127,8 +127,8 @@ def run() -> None:
     total = len(policy_chunks) + len(contract_chunks)
     print(f"  Total chunks in store: {total}")
 
-    # ── Step 2: plain DOCUMENT.SEARCH ────────────────────────────────────
-    _step(2, "Plain DOCUMENT.SEARCH — flat list of raw chunk dicts")
+    # ── Step 2: plain search (default) ───────────────────────────────────
+    _step(2, "Plain search — pipeline.search(...) — flat list of chunk dicts")
 
     plain = pipeline.search("coverage and payment terms", k=4, collection=COLL)
 
@@ -147,18 +147,19 @@ def run() -> None:
     print("  Keys on each dict:", sorted(k for k in plain[0].keys()
                                          if k not in ("embedding",)))
 
-    # ── Step 3: DOCUMENT.SEARCH_RICH full output ─────────────────────────
-    _step(3, "DOCUMENT.SEARCH_RICH — full structured response")
+    # ── Step 3: rich search ───────────────────────────────────────────────
+    _step(3, "Rich search — pipeline.search(..., rich=True) — structured response")
 
-    rich = pipeline.search_rich(
+    rich = pipeline.search(
         "coverage and payment terms",
         k=4,
         collection=COLL,
         context_chunks=1,
+        rich=True,
     )
 
     print()
-    print("  pipeline.search_rich('coverage and payment terms', k=4, context_chunks=1)")
+    print("  pipeline.search('coverage and payment terms', k=4, rich=True, context_chunks=1)")
     print()
     print("  Top-level keys:")
     for key, val in rich.items():
@@ -216,18 +217,10 @@ def run() -> None:
     print("  immediately before and after each result in the document.")
     print()
 
-    with_ctx = pipeline.search_rich(
-        "termination clause",
-        k=3,
-        collection=COLL,
-        context_chunks=1,
-    )
-    without_ctx = pipeline.search_rich(
-        "termination clause",
-        k=3,
-        collection=COLL,
-        context_chunks=0,
-    )
+    with_ctx    = pipeline.search("termination clause", k=3, collection=COLL,
+                                  context_chunks=1, rich=True)
+    without_ctx = pipeline.search("termination clause", k=3, collection=COLL,
+                                  context_chunks=0, rich=True)
 
     has_before  = sum(1 for r in with_ctx["results"] if "before" in r.get("context", {}))
     has_after   = sum(1 for r in with_ctx["results"] if "after"  in r.get("context", {}))
@@ -257,11 +250,12 @@ def run() -> None:
     # ── Step 6: by_document grouping ─────────────────────────────────────
     _step(6, "by_document grouping — results organised per source file")
 
-    rich6 = pipeline.search_rich(
+    rich6 = pipeline.search(
         "payment terms coverage agreement",
         k=6,
         collection=COLL,
         context_chunks=0,
+        rich=True,
     )
 
     print()
@@ -286,10 +280,26 @@ def run() -> None:
                   f"§={sec!r}  text: {snippet!r}…")
         print()
 
-    # ── Summary ───────────────────────────────────────────────────────────
-    _banner("Summary — DOCUMENT.SEARCH vs DOCUMENT.SEARCH_RICH")
+    # ── Step 7: via DocumentDataSource op ────────────────────────────────
+    _step(7, "Via DOCUMENT.SEARCH op with rich=True")
+
     print()
-    print("  Feature              DOCUMENT.SEARCH        DOCUMENT.SEARCH_RICH")
+    print("  The same flag works through DocumentDataSource.execute_query:")
+    print()
+    print('  source.execute_query({')
+    print('      "op": "DOCUMENT.SEARCH",')
+    print('      "query": "termination",')
+    print('      "k": 3,')
+    print('      "rich": True,          # ← opt in to rich format')
+    print('      "context_chunks": 1,   # ← optional, default 1')
+    print('  })')
+    print()
+    print("  Omit 'rich' or set it to False for the default flat list.")
+
+    # ── Summary ───────────────────────────────────────────────────────────
+    _banner("Summary — plain search vs rich=True")
+    print()
+    print("  Feature              search()               search(rich=True)")
     print("  " + "-" * 68)
     print("  Return type          list[dict]             dict")
     print("  Ranked chunks        ✓ raw chunk fields     ✓ same KNN query")
@@ -298,14 +308,14 @@ def run() -> None:
     print("  Grouped by document  ✗ flat list only       ✓ by_document + top_sections")
     print("  Result count / doc   ✗ must count manually  ✓ match_count per document")
     print()
-    print("  When to use rich search:")
-    print("    - Feeding results to an LLM for answer generation (RAG)")
+    print("  When to use rich=True:")
     print("    - Building provenance-aware UI (show 'page 3, §Coverage' links)")
+    print("    - Agent responses that cite sources explicitly")
     print("    - Multi-document corpuses where grouping by source matters")
     print()
     print("  When plain search is enough:")
-    print("    - Simple ranked snippet retrieval")
-    print("    - When you process results yourself downstream")
+    print("    - Feeding chunk text directly to an LLM (rich overhead is wasted)")
+    print("    - Programmatic pipelines that process results further")
     print("    - Testing / debugging — fewer nested fields to inspect")
     print()
 

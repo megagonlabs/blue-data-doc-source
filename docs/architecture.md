@@ -56,8 +56,7 @@ Supported ops:
 | Op | Description |
 |---|---|
 | `DOCUMENT.INGEST` | Parse, chunk, enrich, embed, and upsert a file |
-| `DOCUMENT.SEARCH` | KNN search with optional pre-filter |
-| `DOCUMENT.SEARCH_RICH` | KNN search with provenance, neighbor context, and by_document grouping |
+| `DOCUMENT.SEARCH` | KNN search with optional pre-filter; add `"rich": true` for provenance, neighbor context, and by_document grouping |
 | `DOCUMENT.ENSURE_INDEX` | Create or verify the vector index |
 | `DOCUMENT.DELETE` | Remove all chunks for a document |
 | `DOCUMENT.GET_RECORD` | Retrieve the DocumentRecord written at ingest |

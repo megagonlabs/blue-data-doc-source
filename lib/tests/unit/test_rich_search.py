@@ -1,4 +1,4 @@
-"""Tests for search_rich — provenance, grouping, neighbor context, and DOCUMENT.SEARCH_RICH op."""
+"""Tests for search(rich=True) — provenance, grouping, neighbor context, and DOCUMENT.SEARCH with rich=True."""
 from __future__ import annotations
 
 import pytest
@@ -125,36 +125,35 @@ def source_with_data():
 class TestRichSearchStructure:
     def test_returns_dict_with_required_keys(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("termination obligations", k=3)
+        result = pipeline.search("termination obligations", k=3, rich=True)
         assert isinstance(result, dict)
         for key in ("query", "result_count", "document_count", "results", "by_document"):
             assert key in result
 
     def test_query_echoed_in_response(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("termination clause", k=3)
+        result = pipeline.search("termination clause", k=3, rich=True)
         assert result["query"] == "termination clause"
 
     def test_result_count_matches_results_length(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("eligibility coverage", k=4)
+        result = pipeline.search("eligibility coverage", k=4, rich=True)
         assert result["result_count"] == len(result["results"])
 
     def test_document_count_matches_by_document_length(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("termination", k=5)
+        result = pipeline.search("termination", k=5, rich=True)
         assert result["document_count"] == len(result["by_document"])
 
     def test_result_count_respects_k(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("the", k=2)
+        result = pipeline.search("the", k=2, rich=True)
         assert result["result_count"] <= 2
 
     def test_empty_results_when_filter_matches_nothing(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich(
-            "termination", k=5, filters={"document_id": "doc_nonexistent"}
-        )
+        result = pipeline.search(
+            "termination", k=5, filters={"document_id": "doc_nonexistent"}, rich=True)
         assert result["result_count"] == 0
         assert result["document_count"] == 0
         assert result["results"] == []
@@ -168,26 +167,26 @@ class TestRichSearchStructure:
 class TestRichSearchResultItems:
     def test_each_result_has_required_keys(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("obligations", k=3)
+        result = pipeline.search("obligations", k=3, rich=True)
         for r in result["results"]:
             for key in ("rank", "score", "chunk_id", "text", "provenance"):
                 assert key in r, f"Missing key {key!r} in result"
 
     def test_rank_is_sequential_from_1(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("termination", k=4)
+        result = pipeline.search("termination", k=4, rich=True)
         ranks = [r["rank"] for r in result["results"]]
         assert ranks == list(range(1, len(ranks) + 1))
 
     def test_score_is_numeric(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("eligibility", k=3)
+        result = pipeline.search("eligibility", k=3, rich=True)
         for r in result["results"]:
             assert isinstance(r["score"], (int, float))
 
     def test_text_is_non_empty_string(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("coverage", k=3)
+        result = pipeline.search("coverage", k=3, rich=True)
         for r in result["results"]:
             assert isinstance(r["text"], str)
             assert len(r["text"]) > 0
@@ -195,9 +194,8 @@ class TestRichSearchResultItems:
     def test_document_type_present_when_classifier_set(self, pipeline_with_data):
         pipeline, contract_records, _ = pipeline_with_data
         doc_id = contract_records[0]["document_id"]
-        result = pipeline.search_rich(
-            "obligations", k=3, filters={"document_id": doc_id}
-        )
+        result = pipeline.search(
+            "obligations", k=3, filters={"document_id": doc_id}, rich=True)
         for r in result["results"]:
             assert "document_type" in r
             assert r["document_type"] == "contract"
@@ -212,7 +210,7 @@ class TestRichSearchResultItems:
         )
         pipeline.ensure_index("docs")
         pipeline.ingest_text(CONTRACT_TEXT, file_name="contract.txt")
-        result = pipeline.search_rich("obligations", k=2)
+        result = pipeline.search("obligations", k=2, rich=True)
         for r in result["results"]:
             assert "document_type" not in r
 
@@ -224,7 +222,7 @@ class TestRichSearchResultItems:
 class TestRichSearchProvenance:
     def test_provenance_has_required_keys(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("termination", k=3)
+        result = pipeline.search("termination", k=3, rich=True)
         for r in result["results"]:
             prov = r["provenance"]
             for key in ("document_id", "file_name", "chunk_id", "chunk_index"):
@@ -233,30 +231,28 @@ class TestRichSearchProvenance:
     def test_provenance_file_name_matches_chunk(self, pipeline_with_data):
         pipeline, contract_records, _ = pipeline_with_data
         doc_id = contract_records[0]["document_id"]
-        result = pipeline.search_rich(
-            "obligations", k=2, filters={"document_id": doc_id}
-        )
+        result = pipeline.search(
+            "obligations", k=2, filters={"document_id": doc_id}, rich=True)
         for r in result["results"]:
             assert r["provenance"]["file_name"] == "contract.txt"
 
     def test_provenance_document_id_matches_chunk(self, pipeline_with_data):
         pipeline, contract_records, _ = pipeline_with_data
         expected_doc_id = contract_records[0]["document_id"]
-        result = pipeline.search_rich(
-            "agreement", k=2, filters={"document_id": expected_doc_id}
-        )
+        result = pipeline.search(
+            "agreement", k=2, filters={"document_id": expected_doc_id}, rich=True)
         for r in result["results"]:
             assert r["provenance"]["document_id"] == expected_doc_id
 
     def test_provenance_chunk_id_matches_result(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("termination", k=3)
+        result = pipeline.search("termination", k=3, rich=True)
         for r in result["results"]:
             assert r["provenance"]["chunk_id"] == r["chunk_id"]
 
     def test_provenance_chunk_index_is_int(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("termination", k=3)
+        result = pipeline.search("termination", k=3, rich=True)
         for r in result["results"]:
             assert isinstance(r["provenance"]["chunk_index"], int)
 
@@ -272,7 +268,7 @@ class TestRichSearchProvenance:
         pipeline.ensure_index("docs")
         structured = "# Introduction\nThis is the intro text.\n\n# Methods\nThese are the methods."
         pipeline.ingest_text(structured, file_name="structured.txt")
-        result = pipeline.search_rich("introduction", k=2)
+        result = pipeline.search("introduction", k=2, rich=True)
         sections = [r["provenance"].get("section") for r in result["results"]]
         assert any(s is not None for s in sections)
 
@@ -285,9 +281,8 @@ class TestRichSearchContext:
     def test_context_key_present_when_context_chunks_gt_0(self, pipeline_with_data):
         pipeline, contract_records, _ = pipeline_with_data
         doc_id = contract_records[0]["document_id"]
-        result = pipeline.search_rich(
-            "obligations", k=1, filters={"document_id": doc_id}, context_chunks=1
-        )
+        result = pipeline.search(
+            "obligations", k=1, filters={"document_id": doc_id}, context_chunks=1, rich=True)
         r = result["results"][0]
         # Context key is present only when there is at least one neighbor
         # (first chunk may have no "before"; last may have no "after")
@@ -299,7 +294,7 @@ class TestRichSearchContext:
 
     def test_context_absent_when_context_chunks_0(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("termination", k=3, context_chunks=0)
+        result = pipeline.search("termination", k=3, context_chunks=0, rich=True)
         for r in result["results"]:
             assert "context" not in r
 
@@ -307,9 +302,8 @@ class TestRichSearchContext:
         pipeline, records = multi_chunk_pipeline
         middle_id = records[1]["chunk_id"]
         doc_id = records[0]["document_id"]
-        result = pipeline.search_rich(
-            "chunk", k=len(records), filters={"document_id": doc_id}, context_chunks=1
-        )
+        result = pipeline.search(
+            "chunk", k=len(records), filters={"document_id": doc_id}, context_chunks=1, rich=True)
         for r in result["results"]:
             if r["chunk_id"] == middle_id:
                 assert "context" in r
@@ -322,9 +316,8 @@ class TestRichSearchContext:
         pipeline, contract_records, _ = pipeline_with_data
         first_id = contract_records[0]["chunk_id"]
         doc_id = contract_records[0]["document_id"]
-        result = pipeline.search_rich(
-            "agreement", k=10, filters={"document_id": doc_id}, context_chunks=1
-        )
+        result = pipeline.search(
+            "agreement", k=10, filters={"document_id": doc_id}, context_chunks=1, rich=True)
         for r in result["results"]:
             if r["chunk_id"] == first_id:
                 assert "before" not in r.get("context", {})
@@ -335,9 +328,8 @@ class TestRichSearchContext:
         second_chunk_id = records[1]["chunk_id"]
         first_chunk_text = records[0]["text"]
         doc_id = records[0]["document_id"]
-        result = pipeline.search_rich(
-            "chunk", k=len(records), filters={"document_id": doc_id}, context_chunks=1
-        )
+        result = pipeline.search(
+            "chunk", k=len(records), filters={"document_id": doc_id}, context_chunks=1, rich=True)
         for r in result["results"]:
             if r["chunk_id"] == second_chunk_id:
                 assert "context" in r
@@ -350,9 +342,8 @@ class TestRichSearchContext:
         # records[2] has two chunks before it (indices 0 and 1)
         third_id = records[2]["chunk_id"]
         doc_id = records[0]["document_id"]
-        result = pipeline.search_rich(
-            "chunk", k=len(records), filters={"document_id": doc_id}, context_chunks=2
-        )
+        result = pipeline.search(
+            "chunk", k=len(records), filters={"document_id": doc_id}, context_chunks=2, rich=True)
         for r in result["results"]:
             if r["chunk_id"] == third_id:
                 assert "context" in r
@@ -371,32 +362,32 @@ class TestRichSearchContext:
 class TestRichSearchGrouping:
     def test_by_document_keys_are_document_ids(self, pipeline_with_data):
         pipeline, contract_records, policy_records = pipeline_with_data
-        result = pipeline.search_rich("termination coverage", k=6)
+        result = pipeline.search("termination coverage", k=6, rich=True)
         for doc_id in result["by_document"]:
             assert doc_id.startswith("doc_")
 
     def test_by_document_match_count_sums_to_result_count(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("the", k=6)
+        result = pipeline.search("the", k=6, rich=True)
         total = sum(g["match_count"] for g in result["by_document"].values())
         assert total == result["result_count"]
 
     def test_by_document_matches_list_length_equals_match_count(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("policy termination", k=6)
+        result = pipeline.search("policy termination", k=6, rich=True)
         for entry in result["by_document"].values():
             assert len(entry["matches"]) == entry["match_count"]
 
     def test_by_document_has_file_name(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("termination", k=4)
+        result = pipeline.search("termination", k=4, rich=True)
         for entry in result["by_document"].values():
             assert "file_name" in entry
             assert entry["file_name"] in ("contract.txt", "policy.txt")
 
     def test_by_document_has_document_type_when_classifier_set(self, pipeline_with_data):
         pipeline, _, _ = pipeline_with_data
-        result = pipeline.search_rich("termination coverage", k=6)
+        result = pipeline.search("termination coverage", k=6, rich=True)
         for entry in result["by_document"].values():
             assert "document_type" in entry
 
@@ -415,14 +406,14 @@ class TestRichSearchGrouping:
             "# Termination\nAdditional termination clause."
         )
         pipeline.ingest_text(structured, file_name="doc.txt")
-        result = pipeline.search_rich("termination liability", k=6)
+        result = pipeline.search("termination liability", k=6, rich=True)
         for entry in result["by_document"].values():
             if "top_sections" in entry:
                 assert len(entry["top_sections"]) == len(set(entry["top_sections"]))
 
     def test_multiple_documents_appear_as_separate_groups(self, pipeline_with_data):
         pipeline, contract_records, policy_records = pipeline_with_data
-        result = pipeline.search_rich("termination coverage", k=8)
+        result = pipeline.search("termination coverage", k=8, rich=True)
         doc_ids = set(result["by_document"].keys())
         contract_id = contract_records[0]["document_id"]
         policy_id = policy_records[0]["document_id"]
@@ -431,9 +422,8 @@ class TestRichSearchGrouping:
     def test_single_document_one_group_in_by_document(self, pipeline_with_data):
         pipeline, contract_records, _ = pipeline_with_data
         doc_id = contract_records[0]["document_id"]
-        result = pipeline.search_rich(
-            "termination", k=5, filters={"document_id": doc_id}
-        )
+        result = pipeline.search(
+            "termination", k=5, filters={"document_id": doc_id}, rich=True)
         assert result["document_count"] == 1
         assert list(result["by_document"].keys()) == [doc_id]
 
@@ -488,17 +478,18 @@ class TestChunkIndexLifecycle:
 
 
 # ---------------------------------------------------------------------------
-# DOCUMENT.SEARCH_RICH op
+# DOCUMENT.SEARCH op with rich=True
 # ---------------------------------------------------------------------------
 
 class TestSearchRichOp:
     def test_op_returns_dict_with_required_keys(self, source_with_data):
         source, _, _ = source_with_data
         result = source.execute_query({
-            "op": "DOCUMENT.SEARCH_RICH",
+            "op": "DOCUMENT.SEARCH",
             "query": "termination obligations",
             "collection": "docs",
             "k": 3,
+            "rich": True,
         })
         for key in ("query", "result_count", "document_count", "results", "by_document"):
             assert key in result
@@ -506,25 +497,27 @@ class TestSearchRichOp:
     def test_op_raises_without_query(self, source_with_data):
         source, _, _ = source_with_data
         with pytest.raises(ValueError, match="query"):
-            source.execute_query({"op": "DOCUMENT.SEARCH_RICH", "collection": "docs"})
+            source.execute_query({"op": "DOCUMENT.SEARCH", "collection": "docs"})
 
     def test_op_respects_k(self, source_with_data):
         source, _, _ = source_with_data
         result = source.execute_query({
-            "op": "DOCUMENT.SEARCH_RICH",
+            "op": "DOCUMENT.SEARCH",
             "query": "the",
             "collection": "docs",
             "k": 2,
+            "rich": True,
         })
         assert result["result_count"] <= 2
 
     def test_op_passes_context_chunks(self, source_with_data):
         source, _, _ = source_with_data
         result = source.execute_query({
-            "op": "DOCUMENT.SEARCH_RICH",
+            "op": "DOCUMENT.SEARCH",
             "query": "termination",
             "collection": "docs",
             "k": 3,
+            "rich": True,
             "context_chunks": 0,
         })
         for r in result["results"]:
@@ -534,9 +527,10 @@ class TestSearchRichOp:
         source, contract_records, _ = source_with_data
         doc_id = contract_records[0]["document_id"]
         result = source.execute_query({
-            "op": "DOCUMENT.SEARCH_RICH",
+            "op": "DOCUMENT.SEARCH",
             "query": "obligations",
             "collection": "docs",
+            "rich": True,
             "filter": {"document_id": doc_id},
         })
         for r in result["results"]:

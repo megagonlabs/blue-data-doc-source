@@ -874,7 +874,9 @@ class DocumentPipeline:
         collection: Optional[str] = None,
         filters: Optional[Dict[str, Any]] = None,
         mode: str = "vector",
-    ) -> List[Dict[str, Any]]:
+        rich: bool = False,
+        context_chunks: int = 1,
+    ) -> Any:
         """Search for chunks matching a query.
 
         Args:
@@ -884,23 +886,26 @@ class DocumentPipeline:
             filters: Optional pre-filter. Supported keys: ``document_id``,
                 ``file_name``, ``section_title``, ``mime_type``, ``content_type``
                 (exact match) and ``page_start`` (int or ``{"gte": N, "lte": M}``).
-            mode: Search strategy — one of:
-
-                - ``"vector"`` (default) — pure KNN via the vector store.
-                - ``"hybrid"`` — Reciprocal Rank Fusion of BM25 and vector KNN.
-                  Use when the corpus contains exact identifiers (codes, SKUs,
-                  version numbers) where keyword matching outperforms embeddings.
-                  Falls back to ``"vector"`` when no chunks are in the in-process
-                  index.
-                - ``"bm25"`` — keyword-only search over the in-process chunk
-                  index. Does not require an embedding model or vector store.
-                - ``"rerank"`` — two-stage: BM25 shortlists candidates cheaply,
-                  then one query embedding re-ranks them by cosine similarity.
-                  Requires ``embedding_model`` but not ``vector_source``. Falls
-                  back to BM25 ranking when no stored embeddings are available.
+            mode: Search strategy — ``"vector"`` (default), ``"hybrid"`` (RRF
+                fusion of BM25 + KNN), ``"bm25"`` (keyword-only, no vector store
+                required), or ``"rerank"`` (BM25 shortlist re-ranked by cosine).
+            rich: When ``False`` (default) returns a flat ``list[dict]`` of
+                scored chunk dicts. When ``True`` returns a structured ``dict``
+                with ``results``, ``by_document`` grouping, per-chunk provenance
+                blocks, and optional neighbor ``context``. Use ``rich=True`` when
+                you need citations, source grouping, or explainability.
+            context_chunks: Only used when ``rich=True``. Number of adjacent
+                chunks to include in ``context.before`` / ``context.after`` for
+                each result. Set to ``0`` to omit context entirely.
 
         Returns:
-            List of matching chunk dicts, each with a ``score`` field.
+            ``list[dict]`` when ``rich=False`` — each dict has ``score`` plus
+            all ChunkRecord fields. ``dict`` when ``rich=True`` — keys:
+            ``query``, ``result_count``, ``document_count``, ``results``
+            (ranked list with ``rank``, ``score``, ``chunk_id``, ``text``,
+            ``provenance``, optional ``context`` and ``document_type``), and
+            ``by_document`` (results grouped by document with ``match_count``
+            and optional ``top_sections``).
 
         Raises:
             ValueError: If ``embedding_model`` or ``vector_source`` is not set
@@ -908,191 +913,124 @@ class DocumentPipeline:
         """
         target = collection or self.collection
 
+        # ------------------------------------------------------------------
+        # Raw retrieval — collect flat list of scored chunk dicts
+        # ------------------------------------------------------------------
+
         if mode == "bm25":
             bm25_scores = self._bm25_candidates(query, target, filters)
             if not bm25_scores:
-                return []
-            ranked = sorted(bm25_scores.items(), key=lambda x: x[1], reverse=True)
-            results = []
-            for chunk_id, score in ranked[:k]:
-                chunk = dict(self._chunk_index[chunk_id])
-                chunk["score"] = score
-                results.append(chunk)
-            return results
+                raw: List[Dict[str, Any]] = []
+            else:
+                ranked = sorted(bm25_scores.items(), key=lambda x: x[1], reverse=True)
+                raw = []
+                for chunk_id, score in ranked[:k]:
+                    chunk = dict(self._chunk_index[chunk_id])
+                    chunk["score"] = score
+                    raw.append(chunk)
 
-        if mode == "rerank":
-            # Stage 1: BM25 shortlist — cheap, no embedding needed.
+        elif mode == "rerank":
             bm25_scores = self._bm25_candidates(query, target, filters)
             if not bm25_scores:
-                return []
-            # Fetch a wider candidate set than k so re-ranking has room to work.
-            bm25_k = max(k * 4, 20)
-            shortlist = sorted(bm25_scores.items(), key=lambda x: x[1], reverse=True)[:bm25_k]
-            # Stage 2: embed query once and re-rank shortlist by cosine similarity.
-            if self.embedding_model is None or not any(
-                cid in self._chunk_embeddings for cid, _ in shortlist
-            ):
-                # No stored embeddings — fall back to BM25 ranking.
-                return [
-                    {**dict(self._chunk_index[cid]), "score": score}
-                    for cid, score in shortlist[:k]
-                ]
-            query_vector = self.embedding_model.embed_text(query)
-            reranked: List[Tuple[float, str]] = []
-            for chunk_id, _ in shortlist:
-                emb = self._chunk_embeddings.get(chunk_id)
-                if emb is None:
-                    continue
-                reranked.append((compute_vector_score(query_vector, emb), chunk_id))
-            reranked.sort(key=lambda x: x[0], reverse=True)
-            return [
-                {**dict(self._chunk_index[cid]), "score": score}
-                for score, cid in reranked[:k]
-            ]
-
-        # vector or hybrid — both require embedding_model and vector_source
-        if self.embedding_model is None:
-            raise ValueError("An embedding_model is required for search")
-        if self.vector_source is None:
-            raise ValueError("A vector_source is required for search")
-
-        query_vector = self.embedding_model.embed_text(query)
-
-        if mode == "vector":
-            return self.vector_source.knn(
-                index_name=target,
-                query_vector=query_vector,
-                k=k,
-                filter_expr=_build_filter_expr(filters),
-            )
-
-        # hybrid: RRF fusion of vector KNN + BM25
-        bm25_scores = self._bm25_candidates(query, target, filters)
-        if not bm25_scores:
-            # no in-process BM25 corpus — degrade to pure vector
-            return self.vector_source.knn(
-                index_name=target,
-                query_vector=query_vector,
-                k=k,
-                filter_expr=_build_filter_expr(filters),
-            )
-
-        k_vec = max(k * 3, 20)
-        vec_results = self.vector_source.knn(
-            index_name=target,
-            query_vector=query_vector,
-            k=k_vec,
-            filter_expr=_build_filter_expr(filters),
-        )
-
-        # build rank maps (1-based)
-        vec_rank: Dict[str, int] = {
-            r.get("chunk_id", ""): i + 1
-            for i, r in enumerate(vec_results)
-            if r.get("chunk_id")
-        }
-        bm25_ranked = sorted(bm25_scores.items(), key=lambda x: x[1], reverse=True)
-        bm25_rank: Dict[str, int] = {cid: i + 1 for i, (cid, _) in enumerate(bm25_ranked)}
-
-        # RRF: score every chunk that appears in either ranking
-        rrf_k = 60
-        n_vec_fallback = len(vec_results) + 1
-        n_bm25_fallback = len(bm25_ranked) + 1
-        all_ids = set(vec_rank) | set(bm25_rank)
-
-        scored: List[Tuple[float, str]] = [
-            (
-                1.0 / (rrf_k + vec_rank.get(cid, n_vec_fallback))
-                + 1.0 / (rrf_k + bm25_rank.get(cid, n_bm25_fallback)),
-                cid,
-            )
-            for cid in all_ids
-        ]
-        scored.sort(key=lambda x: x[0], reverse=True)
-
-        vec_by_id = {r.get("chunk_id", ""): r for r in vec_results}
-        results: List[Dict[str, Any]] = []
-        for rrf_score, chunk_id in scored[:k]:
-            if chunk_id in vec_by_id:
-                chunk = dict(vec_by_id[chunk_id])
-            elif chunk_id in self._chunk_index:
-                chunk = dict(self._chunk_index[chunk_id])
+                raw = []
             else:
-                continue
-            chunk["score"] = rrf_score
-            results.append(chunk)
+                bm25_k = max(k * 4, 20)
+                shortlist = sorted(bm25_scores.items(), key=lambda x: x[1], reverse=True)[:bm25_k]
+                if self.embedding_model is None or not any(
+                    cid in self._chunk_embeddings for cid, _ in shortlist
+                ):
+                    raw = [
+                        {**dict(self._chunk_index[cid]), "score": score}
+                        for cid, score in shortlist[:k]
+                    ]
+                else:
+                    query_vector = self.embedding_model.embed_text(query)
+                    reranked: List[Tuple[float, str]] = []
+                    for chunk_id, _ in shortlist:
+                        emb = self._chunk_embeddings.get(chunk_id)
+                        if emb is None:
+                            continue
+                        reranked.append((compute_vector_score(query_vector, emb), chunk_id))
+                    reranked.sort(key=lambda x: x[0], reverse=True)
+                    raw = [
+                        {**dict(self._chunk_index[cid]), "score": score}
+                        for score, cid in reranked[:k]
+                    ]
 
-        return results
+        else:
+            # vector or hybrid — both require embedding_model and vector_source
+            if self.embedding_model is None:
+                raise ValueError("An embedding_model is required for search")
+            if self.vector_source is None:
+                raise ValueError("A vector_source is required for search")
 
-    # ------------------------------------------------------------------
-    # Rich search
-    # ------------------------------------------------------------------
+            query_vector = self.embedding_model.embed_text(query)
 
-    @staticmethod
-    def _chunk_idx_from_id(chunk_id: str) -> Optional[int]:
-        """Parse the numeric index from a chunk_id like ``doc_abc_chunk_000003``."""
-        parts = chunk_id.rsplit("_chunk_", 1)
-        if len(parts) == 2:
-            try:
-                return int(parts[1])
-            except ValueError:
-                pass
-        return None
+            if mode == "vector":
+                raw = self.vector_source.knn(
+                    index_name=target,
+                    query_vector=query_vector,
+                    k=k,
+                    filter_expr=_build_filter_expr(filters),
+                )
+            else:
+                # hybrid: RRF fusion of vector KNN + BM25
+                bm25_scores = self._bm25_candidates(query, target, filters)
+                if not bm25_scores:
+                    raw = self.vector_source.knn(
+                        index_name=target,
+                        query_vector=query_vector,
+                        k=k,
+                        filter_expr=_build_filter_expr(filters),
+                    )
+                else:
+                    k_vec = max(k * 3, 20)
+                    vec_results = self.vector_source.knn(
+                        index_name=target,
+                        query_vector=query_vector,
+                        k=k_vec,
+                        filter_expr=_build_filter_expr(filters),
+                    )
+                    vec_rank: Dict[str, int] = {
+                        r.get("chunk_id", ""): i + 1
+                        for i, r in enumerate(vec_results)
+                        if r.get("chunk_id")
+                    }
+                    bm25_ranked = sorted(bm25_scores.items(), key=lambda x: x[1], reverse=True)
+                    bm25_rank: Dict[str, int] = {cid: i + 1 for i, (cid, _) in enumerate(bm25_ranked)}
+                    rrf_k = 60
+                    n_vec_fallback = len(vec_results) + 1
+                    n_bm25_fallback = len(bm25_ranked) + 1
+                    all_ids = set(vec_rank) | set(bm25_rank)
+                    scored: List[Tuple[float, str]] = [
+                        (
+                            1.0 / (rrf_k + vec_rank.get(cid, n_vec_fallback))
+                            + 1.0 / (rrf_k + bm25_rank.get(cid, n_bm25_fallback)),
+                            cid,
+                        )
+                        for cid in all_ids
+                    ]
+                    scored.sort(key=lambda x: x[0], reverse=True)
+                    vec_by_id = {r.get("chunk_id", ""): r for r in vec_results}
+                    raw = []
+                    for rrf_score, chunk_id in scored[:k]:
+                        if chunk_id in vec_by_id:
+                            chunk = dict(vec_by_id[chunk_id])
+                        elif chunk_id in self._chunk_index:
+                            chunk = dict(self._chunk_index[chunk_id])
+                        else:
+                            continue
+                        chunk["score"] = rrf_score
+                        raw.append(chunk)
 
-    def _neighbor_text(self, chunk_id: str, offset: int) -> Optional[str]:
-        """Return the text of the chunk ``offset`` positions from ``chunk_id``."""
-        idx = self._chunk_idx_from_id(chunk_id)
-        if idx is None:
-            return None
-        doc_prefix = chunk_id.rsplit("_chunk_", 1)[0]
-        neighbor_id = f"{doc_prefix}_chunk_{(idx + offset):06d}"
-        neighbor = self._chunk_index.get(neighbor_id)
-        return neighbor.get("text") if neighbor else None
+        if not rich:
+            return raw
 
-    def search_rich(
-        self,
-        query: str,
-        k: int = 5,
-        collection: Optional[str] = None,
-        filters: Optional[Dict[str, Any]] = None,
-        context_chunks: int = 1,
-        mode: str = "vector",
-    ) -> Dict[str, Any]:
-        """Embed a query and return an enriched response with provenance, grouping,
-        and neighbor context.
+        # ------------------------------------------------------------------
+        # Rich wrapping — provenance, neighbor context, by_document grouping
+        # ------------------------------------------------------------------
 
-        Args:
-            query: Natural language query string.
-            k: Number of results to return.
-            collection: Override the instance-level collection for this call only.
-            filters: Same pre-filter dict accepted by ``search()``.
-            context_chunks: Number of adjacent chunks to include in
-                ``context.before`` / ``context.after`` for each result. Set to
-                ``0`` to omit context entirely. Neighbor chunks are looked up
-                from the in-process ``_chunk_index`` — only chunks ingested in
-                the current process are available.
-
-        Returns:
-            Dict with keys:
-
-            - ``query`` — the original query string
-            - ``result_count`` — number of matched chunks
-            - ``document_count`` — number of distinct documents in the results
-            - ``results`` — list of enriched result dicts (see below)
-            - ``by_document`` — results grouped by ``document_id``
-
-            Each result dict contains:
-
-            - ``rank``, ``score``, ``chunk_id``, ``text``
-            - ``provenance`` — ``{document_id, file_name, chunk_index}`` plus
-              ``page`` (PDF only) and ``section`` (when detected)
-            - ``document_type`` — present when a classifier was set at ingest
-            - ``context`` — ``{before, after}`` with neighboring chunk text;
-              keys are omitted when no neighbor is available
-        """
-        raw = self.search(query, k=k, collection=collection, filters=filters, mode=mode)
-
-        results: List[Dict[str, Any]] = []
+        rich_results: List[Dict[str, Any]] = []
         for rank, chunk in enumerate(raw, 1):
             chunk_id = chunk.get("chunk_id") or chunk.get("id", "")
             document_id = chunk.get("document_id", "")
@@ -1139,10 +1077,10 @@ class DocumentPipeline:
                 if context:
                     result["context"] = context
 
-            results.append(result)
+            rich_results.append(result)
 
         by_document: Dict[str, Dict[str, Any]] = {}
-        for r in results:
+        for r in rich_results:
             doc_id = r["provenance"]["document_id"]
             if doc_id not in by_document:
                 entry: Dict[str, Any] = {
@@ -1170,8 +1108,29 @@ class DocumentPipeline:
 
         return {
             "query": query,
-            "result_count": len(results),
+            "result_count": len(rich_results),
             "document_count": len(by_document),
-            "results": results,
+            "results": rich_results,
             "by_document": by_document,
         }
+
+    @staticmethod
+    def _chunk_idx_from_id(chunk_id: str) -> Optional[int]:
+        """Parse the numeric index from a chunk_id like ``doc_abc_chunk_000003``."""
+        parts = chunk_id.rsplit("_chunk_", 1)
+        if len(parts) == 2:
+            try:
+                return int(parts[1])
+            except ValueError:
+                pass
+        return None
+
+    def _neighbor_text(self, chunk_id: str, offset: int) -> Optional[str]:
+        """Return the text of the chunk ``offset`` positions from ``chunk_id``."""
+        idx = self._chunk_idx_from_id(chunk_id)
+        if idx is None:
+            return None
+        doc_prefix = chunk_id.rsplit("_chunk_", 1)[0]
+        neighbor_id = f"{doc_prefix}_chunk_{(idx + offset):06d}"
+        neighbor = self._chunk_index.get(neighbor_id)
+        return neighbor.get("text") if neighbor else None

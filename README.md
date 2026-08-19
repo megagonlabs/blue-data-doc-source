@@ -211,7 +211,7 @@ docs = source.execute_query({
 - **Multi-format parsing** — PDF (text layer + optional Tesseract OCR), plain text, and DOCX through a single interface; `PlumberPDFParser` adds structure-aware table extraction
 - **Section-aware chunking** — detects markdown, numbered, ALL-CAPS, and underlined headers; keeps chunks within section boundaries; preserves section heading on every chunk
 - **Full provenance** — every chunk carries `file_name`, `page_start`, `page_end`, `section_title`, and `content_type`; results are always citable
-- **Rich search** — `search_rich()` / `DOCUMENT.SEARCH_RICH` returns ranked results with per-chunk citation, neighbor context, and `by_document` grouping in a single call
+- **Rich search** — `search(rich=True)` / `DOCUMENT.SEARCH` with `"rich": true` returns ranked results with per-chunk citation, neighbor context, and `by_document` grouping; plain `search()` returns a flat list for programmatic use
 - **Regex enrichment** — `BasicEnricher` extracts named entities (DATE, EMAIL, PERCENT, MONEY, PROPER_NOUN) and semantic hints with no ML dependency
 - **LLM enrichment** — `LLMEnricher` extracts keyphrases, subject-predicate-object relationships, semantic flags (`is_legal`, `is_financial`, …), and language via a single LLM call per chunk; any provider via `llm_fn` injection
 - **Pluggable embeddings** — `OpenAIEmbeddingModel`, `DummyEmbeddingModel`, or any custom `EmbeddingModel` subclass

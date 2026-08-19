@@ -27,8 +27,7 @@ class DocumentDataSource(DataSource):
     Supported ops:
 
     - ``DOCUMENT.INGEST`` — parse, chunk, enrich, embed, and upsert a document
-    - ``DOCUMENT.SEARCH`` — embed a query and return matching chunks via KNN
-    - ``DOCUMENT.SEARCH_RICH`` — KNN search with per-chunk provenance, neighbor context, and ``by_document`` grouping
+    - ``DOCUMENT.SEARCH`` — embed a query and return matching chunks; set ``"rich": true`` for provenance, neighbor context, and ``by_document`` grouping
     - ``DOCUMENT.ENSURE_INDEX`` — create the vector index (idempotent)
     - ``DOCUMENT.DELETE`` — remove all chunks for a document from the vector store
     - ``DOCUMENT.GET_RECORD`` — retrieve the DocumentRecord extracted at ingest time
@@ -130,8 +129,8 @@ class DocumentDataSource(DataSource):
 
         Returns:
             Op-specific result: ``list[dict]`` for INGEST/SEARCH/FIND,
-            ``dict`` for SEARCH_RICH/GET_RECORD, ``None`` for ENSURE_INDEX,
-            ``int`` (deleted count) for DELETE.
+            ``dict`` for SEARCH (when ``rich=true``)/GET_RECORD, ``None`` for
+            ENSURE_INDEX, ``int`` (deleted count) for DELETE.
 
         Raises:
             ValueError: For unsupported ops or missing required fields.
@@ -150,8 +149,6 @@ class DocumentDataSource(DataSource):
             return self._get_record(query)
         elif op == "DOCUMENT.FIND":
             return self._find(query)
-        elif op == "DOCUMENT.SEARCH_RICH":
-            return self._search_rich(query, collection)
         elif op == "DOCUMENT.FIND_THEN_SEARCH":
             return self._find_then_search(query, collection)
         elif op == "DOCUMENT.GRAPH_NEIGHBORS":
@@ -163,8 +160,7 @@ class DocumentDataSource(DataSource):
                 f"Unsupported op: {op!r}. "
                 "Expected DOCUMENT.INGEST, DOCUMENT.SEARCH, DOCUMENT.ENSURE_INDEX, "
                 "DOCUMENT.DELETE, DOCUMENT.GET_RECORD, DOCUMENT.FIND, "
-                "DOCUMENT.SEARCH_RICH, DOCUMENT.FIND_THEN_SEARCH, "
-                "DOCUMENT.GRAPH_NEIGHBORS, or DOCUMENT.GRAPH_QUERY"
+                "DOCUMENT.FIND_THEN_SEARCH, DOCUMENT.GRAPH_NEIGHBORS, or DOCUMENT.GRAPH_QUERY"
             )
 
     _PROTOCOL_BY_SUFFIX = {
@@ -184,15 +180,16 @@ class DocumentDataSource(DataSource):
         collection = collection_override or request.get("collection")
         return self._pipeline.ingest(path, collection=collection)
 
-    def _search(self, request: Dict[str, Any], collection_override=None) -> List[Dict[str, Any]]:
+    def _search(self, request: Dict[str, Any], collection_override=None):
         """Implement DOCUMENT.SEARCH.
 
         Optional request fields:
             ``k`` — number of results (default 5)
             ``filter`` — pre-filter dict applied before KNN scoring
-            ``mode`` — ``"vector"`` (default, KNN) or ``"bm25"`` (keyword);
-                ``"bm25"`` uses the in-process chunk index and respects filters
-                reliably regardless of embedding quality
+            ``mode`` — ``"vector"`` (default), ``"hybrid"``, ``"bm25"``, or ``"rerank"``
+            ``rich`` — when ``true``, returns a structured dict with provenance,
+                neighbor context, and ``by_document`` grouping instead of a flat list
+            ``context_chunks`` — neighbor chunks per result when ``rich=true`` (default 1)
         """
         query_text = request.get("query")
         if not query_text:
@@ -202,7 +199,12 @@ class DocumentDataSource(DataSource):
         k = request.get("k", 5)
         filters = request.get("filter")
         mode = request.get("mode", "vector")
-        return self._pipeline.search(query_text, k=k, collection=collection, filters=filters, mode=mode)
+        rich = request.get("rich", False)
+        context_chunks = request.get("context_chunks", 1)
+        return self._pipeline.search(
+            query_text, k=k, collection=collection, filters=filters,
+            mode=mode, rich=rich, context_chunks=context_chunks,
+        )
 
     def _ensure_index(self, request: Dict[str, Any], collection_override=None) -> None:
         collection = collection_override or request.get("collection")
@@ -279,32 +281,6 @@ class DocumentDataSource(DataSource):
         for name, typ, desc in attrs:
             schema.add_entity_attribute("ChunkRecord", name, typ, desc)
         return schema.get_entities()
-
-    def _search_rich(self, request: Dict[str, Any], collection_override=None) -> Dict[str, Any]:
-        """Implement DOCUMENT.SEARCH_RICH.
-
-        Optional request fields:
-            ``k`` — number of results (default 5)
-            ``filter`` — pre-filter dict applied before KNN scoring
-            ``context_chunks`` — neighbor chunks to include before/after each result (default 1)
-            ``mode`` — ``"vector"`` (default) or ``"bm25"``; see ``_search`` for details
-        """
-        query_text = request.get("query")
-        if not query_text:
-            raise ValueError("DOCUMENT.SEARCH_RICH requires a 'query' field")
-        collection = collection_override or request.get("collection")
-        k = request.get("k", 5)
-        filters = request.get("filter")
-        context_chunks = request.get("context_chunks", 1)
-        mode = request.get("mode", "vector")
-        return self._pipeline.search_rich(
-            query_text,
-            k=k,
-            collection=collection,
-            filters=filters,
-            context_chunks=context_chunks,
-            mode=mode,
-        )
 
     def _find(self, request: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Implement DOCUMENT.FIND — filter schema records by extracted field values.

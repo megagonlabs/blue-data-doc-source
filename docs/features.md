@@ -479,7 +479,7 @@ pipeline = DocumentPipeline(
 
 ## Rich search
 
-`DOCUMENT.SEARCH_RICH` runs the same KNN query as `DOCUMENT.SEARCH` and wraps the results with three extra layers in a single call.
+`DOCUMENT.SEARCH` returns a flat `list[dict]` by default. Pass `"rich": True` (op dict) or `rich=True` (pipeline method) to get a structured response with provenance, neighbor context, and `by_document` grouping — the same KNN query with three extra layers on top.
 
 **1. Provenance block** — provenance fields are packaged per result instead of scattered across the raw chunk dict:
 
@@ -529,8 +529,8 @@ pipeline = DocumentPipeline(embedding_model=..., vector_source=...)
 pipeline.ingest("policy.pdf")
 pipeline.ingest("agreement.pdf")
 
-# Pipeline call
-rich = pipeline.search_rich("termination clause", k=5, context_chunks=1)
+# Pipeline call — opt in with rich=True
+rich = pipeline.search("termination clause", k=5, context_chunks=1, rich=True)
 
 print(rich["query"])           # original query string
 print(rich["result_count"])    # number of matched chunks
@@ -555,20 +555,21 @@ Via `DocumentDataSource`:
 
 ```python
 rich = source.execute_query({
-    "op":            "DOCUMENT.SEARCH_RICH",
+    "op":            "DOCUMENT.SEARCH",
     "query":         "termination clause",
     "collection":    "contracts",
     "k":             5,
+    "rich":          True,
     "context_chunks": 1,
 })
 ```
 
-| When to use | Reason |
+| When to use `rich=True` | Reason |
 |---|---|
-| LLM answer generation (RAG) | Provenance block is ready to embed in the prompt |
-| Provenance-aware UI | `page`, `section` are pre-extracted per result |
+| Building a provenance-aware UI | `page`, `section` are pre-extracted per result |
+| Agent responses that cite sources | Provenance block is ready to embed in the prompt |
 | Multi-document corpus | `by_document` shows which files matched and how many times |
-| Plain retrieval, debugging | Use `DOCUMENT.SEARCH` — fewer nested fields |
+| Feeding text to an LLM | Use plain search — rich overhead is wasted |
 
 See `examples/feature-demos/rich_search_demo.py` for a runnable side-by-side comparison with captured output.
 
