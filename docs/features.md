@@ -161,7 +161,7 @@ Fields added to `semantic_hints`: `keyphrases`, `relationships` (subject/predica
 
 ## Structured corpus query (DOCUMENT.FIND)
 
-`DOCUMENT.FIND` filters across all ingested DocumentRecords by extracted field values — no embedding, no LLM, deterministic. Requires a `classifier` to be set so that records exist.
+`DOCUMENT.FIND` filters across all ingested DocumentRecords by extracted field values — no embedding, no LLM, deterministic. Records exist when either a `classifier` or a `field_extractor` (or both) is set at ingest time.
 
 ```python
 # Filter by document type
@@ -215,7 +215,7 @@ docs = source.execute_query({
 })
 ```
 
-DocumentRecords persist across restarts when `FileRecordStore` is used — ingest once, query forever.
+DocumentRecords persist across restarts when `FileRecordStore` is used — ingest once, query forever. For multi-process deployments use `JsonSourceRecordStore(RedisJSONSource(...))` — concurrent ingest workers can write safely without a last-writer-wins race.
 
 **Two-step agent pattern** — `DOCUMENT.FIND` narrows the corpus to the right documents, then `DOCUMENT.SEARCH` retrieves text only within those documents:
 

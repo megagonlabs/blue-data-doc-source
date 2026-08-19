@@ -542,6 +542,63 @@ pipeline.find_records({"document_type": "lease", "fields.lessor": {"contains": "
 
 For document types with no matching spec (including `"unknown"`), `LLMFieldExtractor` falls back to a generic prompt: `"Extract any structured metadata you can find."`.
 
+### Generic extraction without a classifier
+
+Pass only `field_extractor` — no `classifier` needed. The pipeline calls `extract()` with `document_type="unknown"`, which triggers the generic fallback prompt. Useful for unknown corpora where document types are not defined in advance.
+
+```python
+pipeline = DocumentPipeline(
+    field_extractor=LLMFieldExtractor(),   # no classifier
+)
+records = pipeline.ingest("mystery_doc.pdf")
+schema = pipeline.find_records()
+# → [{"document_type": "unknown", "confidence": 0.0, "fields": {...}}]
+```
+
+`find_records()` works exactly as when a classifier is set — `document_type` is `"unknown"` and field names are whatever the LLM extracted.
+
+### StructuredFieldExtractor — schema-driven extraction
+
+Instead of a plain-English field spec string, supply a Pydantic model, TypedDict, or JSON Schema dict. The prompt is generated automatically from the schema definition. For Pydantic models the LLM output is validated and coerced before storage.
+
+```python
+from pydantic import BaseModel
+from blue_data_doc_source import StructuredFieldExtractor
+
+class EmploymentContract(BaseModel):
+    employee_name: str
+    start_date: str
+    base_salary: str
+    notice_period: str
+    non_compete: bool
+
+pipeline = DocumentPipeline(
+    field_extractor=StructuredFieldExtractor(schema=EmploymentContract),
+)
+pipeline.ingest("offer_letter.pdf")
+schema = pipeline.find_records()[0]
+# → {"document_type": "unknown", "fields": {"employee_name": "Alice", "non_compete": False, ...}}
+```
+
+Works with any of the three schema formats:
+
+| Input | Prompt generated from | Output validation |
+|---|---|---|
+| Pydantic model class | `model_json_schema()` | `model_validate()` — type coercion; falls back to raw dict on error |
+| TypedDict class | `__annotations__` | None — returns parsed dict as-is |
+| JSON Schema dict | `properties` | None — returns parsed dict as-is |
+
+Pair with a classifier to use structured extraction for known types:
+
+```python
+pipeline = DocumentPipeline(
+    classifier=KeywordClassifier(),
+    field_extractor=StructuredFieldExtractor(schema=EmploymentContract),
+)
+```
+
+`document_type` is set by the classifier; `StructuredFieldExtractor` ignores it and always extracts against the supplied schema.
+
 ### Schema retrieval
 
 The schema is stored in-process at ingest time. Retrieve it without re-reading the document:
@@ -577,9 +634,11 @@ schema = source.execute_query({
 })
 ```
 
-### Record persistence (FileRecordStore)
+### Record persistence
 
-By default DocumentRecords are stored in `MemoryRecordStore` — in-process only. Pass `FileRecordStore` to persist across restarts:
+By default DocumentRecords are stored in `MemoryRecordStore` — in-process only. Two durable options:
+
+**`FileRecordStore`** — JSON file, single process. Written atomically on every ingest (`write-to-tmp` then `os.replace`) — crash-safe.
 
 ```python
 from blue_data_doc_source import DocumentPipeline, FileRecordStore, KeywordClassifier, LLMFieldExtractor
@@ -587,14 +646,31 @@ from blue_data_doc_source import DocumentPipeline, FileRecordStore, KeywordClass
 pipeline = DocumentPipeline(
     classifier=KeywordClassifier(),
     field_extractor=LLMFieldExtractor(),
-    record_store=FileRecordStore("schemas.json"),  # written atomically on every ingest
+    record_store=FileRecordStore("schemas.json"),
 )
 # After restart, schemas.json is reloaded — DOCUMENT.FIND works immediately
 ```
 
+**`JsonSourceRecordStore`** — wraps any blue-data `JSONSource` backend. Use `RedisJSONSource` for multi-process-safe durable storage — two ingest workers can write concurrently without a last-writer-wins race.
+
+```python
+from blue_data.source.json.redis.redis_json_source import RedisJSONSource
+from blue_data_doc_source import DocumentPipeline, JsonSourceRecordStore, KeywordClassifier, LLMFieldExtractor
+
+pipeline = DocumentPipeline(
+    classifier=KeywordClassifier(),
+    field_extractor=LLMFieldExtractor(),
+    record_store=JsonSourceRecordStore(
+        RedisJSONSource(name="doc_schemas", properties={"namespace": "doc_schemas"})
+    ),
+)
+```
+
+`MemoryRecordStore` and `FileRecordStore` are thin convenience wrappers over `JsonSourceRecordStore` — they use `MemoryJSONSource` and `FileJSONSource` respectively. Any blue-data `JSONSource` (including `MongoDBSource`) works as a drop-in backend.
+
 ### Structured corpus query (DOCUMENT.FIND)
 
-`find_records()` filters across all ingested DocumentRecords — no embedding, no LLM call at query time. Requires a `classifier` to be set at ingest time so that records exist.
+`find_records()` filters across all ingested DocumentRecords — no embedding, no LLM call at query time. Records exist when either a `classifier` or a `field_extractor` (or both) is set at ingest time.
 
 ```python
 # All contracts governed by California

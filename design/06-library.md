@@ -338,7 +338,7 @@ Supported built-in document types and representative signals:
 
 ## FieldExtractor (ABC)
 
-Extracts typed fields from a document given its classified type. Called once per document during ingest when both `classifier` and `field_extractor` are set.
+Extracts typed fields from a document given its classified type. Called once per document during ingest when a `field_extractor` is set. A `classifier` is not required — when no classifier is present the pipeline passes `document_type="unknown"` to `extract()`.
 
 ```python
 class FieldExtractor(ABC):
@@ -374,6 +374,33 @@ LLMFieldExtractor(
 ```
 
 Builds a type-specific prompt from the document text and returns a JSON dict of extracted fields. Falls back to `{"raw_response": "..."}` if the LLM returns malformed JSON.
+
+**`StructuredFieldExtractor`** — extraction driven by a caller-supplied schema. No predefined field list required. Requires `openai>=1.0` and `OPENAI_API_KEY`.
+
+```python
+StructuredFieldExtractor(
+    schema: type | dict,         # Pydantic model class, TypedDict, or JSON Schema dict
+    model: str = "gpt-4o-mini",
+    sample_chars: int = 4000,
+)
+```
+
+The extraction prompt is generated automatically from the schema definition. For Pydantic models the LLM output is validated via `model_validate()` and type-coerced before storage; falls back to the raw parsed dict on validation error. TypedDict and JSON Schema dict inputs return the parsed dict as-is.
+
+`document_type` is ignored — `StructuredFieldExtractor` always extracts against the supplied schema regardless of how the document was classified.
+
+```python
+from pydantic import BaseModel
+
+class LeaseAgreement(BaseModel):
+    tenant: str
+    monthly_rent: float
+    lease_term_months: int
+
+pipeline = DocumentPipeline(
+    field_extractor=StructuredFieldExtractor(schema=LeaseAgreement),
+)
+```
 
 ### Schema record format
 
