@@ -409,9 +409,12 @@ class DocumentPipeline:
 
         # Run document classification / schema extraction once per document.
         document_type: Optional[str] = None
-        if self.classifier is not None:
+        if self.classifier is not None or self.field_extractor is not None:
             full_text = " ".join(p.get("text", "") for p in pages)
-            document_type, confidence = self.classifier.classify(full_text)
+            if self.classifier is not None:
+                document_type, confidence = self.classifier.classify(full_text)
+            else:
+                document_type, confidence = "unknown", 0.0
             extracted_fields: Dict[str, Any] = {}
             if self.field_extractor is not None:
                 extracted_fields = self.field_extractor.extract(full_text, document_type)
@@ -484,9 +487,12 @@ class DocumentPipeline:
         chunk_index = 0
 
         document_type: Optional[str] = None
-        if self.classifier is not None:
+        if self.classifier is not None or self.field_extractor is not None:
             full_text = " ".join(b.get("text", "") for b in blocks)
-            document_type, confidence = self.classifier.classify(full_text)
+            if self.classifier is not None:
+                document_type, confidence = self.classifier.classify(full_text)
+            else:
+                document_type, confidence = "unknown", 0.0
             extracted_fields: Dict[str, Any] = {}
             if self.field_extractor is not None:
                 extracted_fields = self.field_extractor.extract(full_text, document_type)

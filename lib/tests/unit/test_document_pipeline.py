@@ -760,3 +760,82 @@ def test_ingest_text_with_embedding():
     assert "embedding" in records[0]
     assert len(records[0]["embedding"]) == 8
     assert vector_source.upsert.call_count == len(records)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: field_extractor runs without classifier (generic extraction)
+# ---------------------------------------------------------------------------
+
+class _StubExtractor:
+    """Stub FieldExtractor that records the document_type it was called with."""
+    def __init__(self):
+        self.calls = []
+
+    def extract(self, text: str, document_type: str) -> dict:
+        self.calls.append(document_type)
+        return {"stub_field": "stub_value", "doc_type_seen": document_type}
+
+
+class TestExtractorWithoutClassifier:
+    def _pipeline(self, extractor):
+        return DocumentPipeline(
+            chunk_size=100, overlap=10,
+            field_extractor=extractor,
+        )
+
+    def test_extractor_called_without_classifier(self):
+        extractor = _StubExtractor()
+        pipeline = self._pipeline(extractor)
+        pipeline.ingest_text("Some document text here.", file_name="doc.txt")
+        assert len(extractor.calls) == 1
+
+    def test_extractor_receives_unknown_type(self):
+        extractor = _StubExtractor()
+        pipeline = self._pipeline(extractor)
+        pipeline.ingest_text("Some document text here.", file_name="doc.txt")
+        assert extractor.calls[0] == "unknown"
+
+    def test_record_stored_with_unknown_type(self):
+        extractor = _StubExtractor()
+        pipeline = self._pipeline(extractor)
+        pipeline.ingest_text("Some document text here.", file_name="doc.txt")
+        records = pipeline.find_records()
+        assert len(records) == 1
+        assert records[0]["document_type"] == "unknown"
+        assert records[0]["fields"]["stub_field"] == "stub_value"
+
+    def test_chunks_carry_unknown_document_type(self):
+        extractor = _StubExtractor()
+        pipeline = self._pipeline(extractor)
+        chunks = pipeline.ingest_text("Some document text here.", file_name="doc.txt")
+        assert all(c.get("document_type") == "unknown" for c in chunks)
+
+    def test_confidence_is_zero_without_classifier(self):
+        extractor = _StubExtractor()
+        pipeline = self._pipeline(extractor)
+        pipeline.ingest_text("Some document text here.", file_name="doc.txt")
+        record = pipeline.find_records()[0]
+        assert record["confidence"] == 0.0
+
+    def test_classifier_name_is_llm_when_extractor_only(self):
+        extractor = _StubExtractor()
+        pipeline = self._pipeline(extractor)
+        pipeline.ingest_text("Some document text here.", file_name="doc.txt")
+        record = pipeline.find_records()[0]
+        assert record["classifier"] == "llm"
+
+    def test_no_extractor_no_classifier_produces_no_record(self):
+        pipeline = DocumentPipeline(chunk_size=100, overlap=10)
+        pipeline.ingest_text("Some document text here.", file_name="doc.txt")
+        assert pipeline.find_records() == []
+
+    def test_extractor_called_via_ingest_pages(self):
+        extractor = _StubExtractor()
+        pipeline = self._pipeline(extractor)
+        pipeline.ingest_pages(
+            [{"page_num": 1, "text": "Page one content."},
+             {"page_num": 2, "text": "Page two content."}],
+            file_name="doc.pdf",
+        )
+        assert len(extractor.calls) == 1
+        assert extractor.calls[0] == "unknown"
