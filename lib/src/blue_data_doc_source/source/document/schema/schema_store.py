@@ -4,7 +4,10 @@ import json
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from blue_data.source.json.json_source import JSONSource
 
 
 class RecordStore(ABC):
@@ -171,3 +174,46 @@ def _check(record: Dict[str, Any], key: str, condition: Any) -> bool:
                 if op == "lte" and not sv <= so: return False
                 if op == "gte" and not sv >= so: return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# JSONSource-backed adapter
+# ---------------------------------------------------------------------------
+
+class JsonSourceRecordStore(RecordStore):
+    """RecordStore backed by any blue-data JSONSource.
+
+    Accepts ``MemoryJSONSource``, ``FileJSONSource``, ``RedisJSONSource``, or
+    any other ``JSONSource`` implementation. Each schema record is stored at its
+    ``document_id`` as the key. The ``find()`` filter logic runs in Python after
+    fetching all records from the source.
+
+    Example (Redis-backed, multi-process-safe)::
+
+        from blue_data.source.json.redis.redis_json_source import RedisJSONSource
+        from blue_data_doc_source import JsonSourceRecordStore
+
+        store = JsonSourceRecordStore(
+            RedisJSONSource(
+                name="doc_schemas",
+                properties={"namespace": "doc_schemas"},
+            )
+        )
+    """
+
+    def __init__(self, json_source: "JSONSource") -> None:
+        self._source = json_source
+
+    def upsert(self, record: Dict[str, Any]) -> None:
+        self._source.set(record["document_id"], record)
+
+    def get(self, document_id: str) -> Optional[Dict[str, Any]]:
+        return self._source.get(document_id)
+
+    def find(self, filter: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        all_data = self._source.get(None) or {}
+        records = all_data.values() if isinstance(all_data, dict) else []
+        return [r for r in records if isinstance(r, dict) and _matches(r, filter)]
+
+    def delete(self, document_id: str) -> None:
+        self._source.delete(document_id)

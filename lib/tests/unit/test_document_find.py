@@ -6,12 +6,15 @@ import os
 import tempfile
 
 import pytest
+from blue_data.source.json.file_json_source import FileJSONSource
+from blue_data.source.json.memory_json_source import MemoryJSONSource
 
 from blue_data_doc_source import (
     DocumentDataSource,
     DocumentPipeline,
     DummyEmbeddingModel,
     FileRecordStore,
+    JsonSourceRecordStore,
     KeywordClassifier,
     MemoryRecordStore,
     RecordStore,
@@ -398,6 +401,147 @@ class TestDocumentFindOp:
     def test_record_store_injected_into_source(self):
         store = MemoryRecordStore()
         store.upsert(CONTRACT_A)
+        source = DocumentDataSource(
+            name="test",
+            chunk_size=100,
+            overlap=10,
+            record_store=store,
+        )
+        results = source.execute_query({
+            "op": "DOCUMENT.FIND",
+            "filter": {"document_type": "contract"},
+        })
+        assert len(results) == 1
+        assert results[0]["document_id"] == "doc_contract_a"
+
+
+# ---------------------------------------------------------------------------
+# JsonSourceRecordStore — MemoryJSONSource backend
+# ---------------------------------------------------------------------------
+
+class TestJsonSourceRecordStoreMemory:
+    def _store(self):
+        return JsonSourceRecordStore(MemoryJSONSource())
+
+    def test_upsert_and_get(self):
+        store = self._store()
+        store.upsert(CONTRACT_A)
+        result = store.get("doc_contract_a")
+        assert result is not None
+        assert result["document_type"] == "contract"
+
+    def test_get_missing_returns_none(self):
+        store = self._store()
+        assert store.get("does_not_exist") is None
+
+    def test_upsert_overwrites(self):
+        store = self._store()
+        store.upsert(CONTRACT_A)
+        updated = {**CONTRACT_A, "confidence": 0.99}
+        store.upsert(updated)
+        assert store.get("doc_contract_a")["confidence"] == 0.99
+
+    def test_delete_removes_record(self):
+        store = self._store()
+        store.upsert(CONTRACT_A)
+        store.delete("doc_contract_a")
+        assert store.get("doc_contract_a") is None
+
+    def test_delete_missing_is_safe(self):
+        store = self._store()
+        store.delete("does_not_exist")  # must not raise
+
+    def test_find_no_filter_returns_all(self):
+        store = self._store()
+        for rec in [CONTRACT_A, CONTRACT_B, INVOICE, POLICY]:
+            store.upsert(rec)
+        assert len(store.find()) == 4
+
+    def test_find_by_document_type(self):
+        store = self._store()
+        for rec in [CONTRACT_A, CONTRACT_B, INVOICE]:
+            store.upsert(rec)
+        results = store.find({"document_type": "contract"})
+        assert len(results) == 2
+        assert all(r["document_type"] == "contract" for r in results)
+
+    def test_find_with_nested_field_filter(self):
+        store = self._store()
+        for rec in [CONTRACT_A, CONTRACT_B]:
+            store.upsert(rec)
+        results = store.find({"fields.governing_law": {"contains": "California"}})
+        assert len(results) == 1
+        assert results[0]["document_id"] == "doc_contract_b"
+
+    def test_find_with_numeric_operator(self):
+        store = self._store()
+        for rec in [CONTRACT_A, CONTRACT_B, INVOICE]:
+            store.upsert(rec)
+        results = store.find({"fields.contract_value": {"gt": 100000}})
+        assert len(results) == 1
+        assert results[0]["document_id"] == "doc_contract_a"
+
+    def test_find_empty_store_returns_empty(self):
+        store = self._store()
+        assert store.find({"document_type": "contract"}) == []
+
+
+# ---------------------------------------------------------------------------
+# JsonSourceRecordStore — FileJSONSource backend
+# ---------------------------------------------------------------------------
+
+class TestJsonSourceRecordStoreFile:
+    def _store(self, path):
+        return JsonSourceRecordStore(
+            FileJSONSource(
+                name="test_file_json",
+                properties={"connection": {"path": path}},
+            )
+        )
+
+    def test_persists_across_instances(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "schemas.json")
+            store1 = self._store(path)
+            store1.upsert(CONTRACT_A)
+
+            store2 = self._store(path)
+            result = store2.get("doc_contract_a")
+            assert result is not None
+            assert result["document_type"] == "contract"
+
+    def test_find_after_reload(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "schemas.json")
+            store1 = self._store(path)
+            for rec in [CONTRACT_A, CONTRACT_B, INVOICE]:
+                store1.upsert(rec)
+
+            store2 = self._store(path)
+            results = store2.find({"document_type": "contract"})
+            assert len(results) == 2
+
+    def test_delete_persists_across_instances(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "schemas.json")
+            store1 = self._store(path)
+            store1.upsert(CONTRACT_A)
+            store1.delete("doc_contract_a")
+
+            store2 = self._store(path)
+            assert store2.get("doc_contract_a") is None
+
+
+# ---------------------------------------------------------------------------
+# JsonSourceRecordStore — plugged into DocumentDataSource
+# ---------------------------------------------------------------------------
+
+class TestJsonSourceRecordStoreIntegration:
+    def test_used_as_record_store_in_document_source(self):
+        store = JsonSourceRecordStore(MemoryJSONSource())
+        store.upsert(CONTRACT_A)
+        store.upsert(INVOICE)
+
         source = DocumentDataSource(
             name="test",
             chunk_size=100,

@@ -14,6 +14,7 @@ from .source.document.schema import (
     RecordStore,
     MemoryRecordStore,
     FileRecordStore,
+    JsonSourceRecordStore,
 )
 
 __all__ = [
@@ -43,4 +44,5 @@ __all__ = [
     "RecordStore",
     "MemoryRecordStore",
     "FileRecordStore",
+    "JsonSourceRecordStore",
 ]
