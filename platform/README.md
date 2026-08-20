@@ -4,6 +4,7 @@ The `platform/` directory contains deployable components built on top of `lib/`.
 
 | Component | Description |
 |---|---|
+| `api` | REST API (FastAPI) — HTTP interface with interactive docs at `/docs` |
 | `cli` | Command-line interface — ingest, search, and delete documents from a terminal |
 | `document-mcp` | MCP server — exposes document operations as AI-callable tools for Claude and other MCP clients |
 
@@ -13,11 +14,93 @@ The `platform/` directory contains deployable components built on top of `lib/`.
 # Install the library first
 pip install -e lib/
 
+# REST API
+pip install -e platform/api/
+
 # CLI
 pip install -e platform/cli/
 
 # MCP server
 pip install -e platform/document-mcp/
+```
+
+---
+
+## REST API (`platform/api`)
+
+FastAPI-based HTTP server. Interactive docs available at `http://localhost:8001/docs` when running.
+
+### Configuration
+
+Same environment variables as the CLI (see table in CLI section below).
+
+### Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/documents/health` | Health check |
+| `POST` | `/documents/ensure-index` | Create vector index — call once before first ingest |
+| `POST` | `/documents/ingest` | Parse, chunk, embed, and upsert a document |
+| `POST` | `/documents/search` | Semantic search; add `"rich": true` for provenance + grouping |
+| `POST` | `/documents/find` | Filter DocumentRecords by extracted fields (no embedding) |
+| `POST` | `/documents/find-then-search` | Filter by fields, then search within matched documents |
+| `GET` | `/documents/record/{document_id}` | Retrieve the schema record written at ingest |
+| `DELETE` | `/documents/document` | Delete all chunks for a document |
+
+### Running
+
+```bash
+# Dev server (auto-reload)
+uvicorn doc_api.main:app --reload --port 8001
+
+# Or via the installed script
+blue-data-doc-api
+```
+
+### Quick start (OpenAI + Redis)
+
+```bash
+docker run -p 6379:6379 redis/redis-stack-server:latest
+
+export BLUE_DOC_EMBEDDING=openai
+export OPENAI_API_KEY=sk-...
+export BLUE_DOC_REDIS_HOST=localhost
+
+blue-data-doc-api
+# → http://localhost:8001/docs
+```
+
+### Example requests
+
+```bash
+# Ensure index
+curl -X POST http://localhost:8001/documents/ensure-index \
+     -H "Content-Type: application/json" -d '{}'
+
+# Ingest
+curl -X POST http://localhost:8001/documents/ingest \
+     -H "Content-Type: application/json" \
+     -d '{"path": "/data/contract.pdf"}'
+
+# Search
+curl -X POST http://localhost:8001/documents/search \
+     -H "Content-Type: application/json" \
+     -d '{"query": "governing law", "k": 5}'
+
+# Rich search with provenance
+curl -X POST http://localhost:8001/documents/search \
+     -H "Content-Type: application/json" \
+     -d '{"query": "termination clause", "rich": true}'
+
+# Find by extracted field
+curl -X POST http://localhost:8001/documents/find \
+     -H "Content-Type: application/json" \
+     -d '{"filter": {"document_type": "contract", "fields.total_due": {"gt": 30000}}}'
+
+# Delete by document_id
+curl -X DELETE http://localhost:8001/documents/document \
+     -H "Content-Type: application/json" \
+     -d '{"document_id": "doc_3a7f1c2e", "chunk_count": 12}'
 ```
 
 ---
