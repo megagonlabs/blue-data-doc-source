@@ -600,6 +600,18 @@ Additional edges:
 
 Node IDs are deterministic: `doc:{document_id}`, `section:{document_id}:{title.lower()}`, `chunk:{chunk_id}`, `entity:{entity_type}:{name.lower()}`. Re-ingesting the same file is a no-op for the graph (Document node exists → skip).
 
+### Design notes
+
+**`Document -[:HAS_CHUNK]->` exists alongside `Section -[:HAS_CHUNK]->`** so you can retrieve all chunks for a document in one hop without knowing whether sections exist. The section path is for structure-aware traversal; the direct path is for bulk access.
+
+**`CO_OCCURS_WITH` edges** connect every pair of entities that appear in the same chunk. This lets you ask "what other entities tend to appear alongside Acme Corp?" as a graph query rather than a full-corpus text scan.
+
+**`APPEARS_IN` edges** go directly from Entity to Document (not via Chunk). This means "which documents mention Acme Corp?" is a single hop, regardless of how many chunks in the document mention it. The edge is written once per document per entity, not once per chunk.
+
+**`graph_neighbors()` is O(1)** because entity node IDs are deterministic — the lookup constructs `entity:{entity_type}:{name.lower()}` directly and calls `get_node()` rather than scanning the graph for a match. No embeddings, no index, no full scan.
+
+**Entity nodes survive `delete_document()`** because they are shared across documents. Deleting one document must not break entity lookups that other documents depend on. Only Document, Section, and Chunk nodes are removed on delete.
+
 ### Setup
 
 ```python
