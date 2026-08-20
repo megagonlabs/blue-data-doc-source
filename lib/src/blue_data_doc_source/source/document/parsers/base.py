@@ -53,7 +53,11 @@ class Parser(ABC):
         ``"page_num"`` (int, 1-based) is included when available.
 
         The default implementation wraps ``parse()`` and marks every block
-        as ``type="text"``. Override this in parsers that can distinguish
-        tables from prose (e.g. ``PlumberPDFParser``).
+        as ``type="text"``, so implementing only ``parse()`` is sufficient
+        for parsers that return flat text (e.g. a vision model that extracts
+        plain text, or a LlamaIndex wrapper). Override ``parse_blocks()``
+        when the parser can distinguish content types — e.g. PlumberPDFParser
+        for tables, Docling for rich layouts, or a vision model prompted to
+        return structured JSON with table and prose blocks separated.
         """
         return [{"type": "text", **page} for page in self.parse(path)]

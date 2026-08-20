@@ -186,6 +186,8 @@ class DocumentPipeline:
         suffix = file_path.suffix.lower()
         effective_collection = collection or self.collection
 
+        # Custom parser path — e.g. PlumberPDFParser for table extraction,
+        # a vision model parser for scanned images, or Docling for rich layouts.
         if self.parser is not None:
             blocks = self.parser.parse_blocks(path)
             mime_type = "application/pdf" if suffix == ".pdf" else "text/plain"
@@ -425,6 +427,20 @@ class DocumentPipeline:
         document_id: str,
         collection: str,
     ) -> List[Dict[str, Any]]:
+        """Classify, chunk, enrich, embed, and upsert a list of page dicts.
+
+        Runs classification and field extraction once across the full document
+        text before chunking — so document_type propagates to every chunk
+        without repeated LLM calls. Each page is then chunked independently;
+        the chunk_index counter is global across all pages so chunk IDs are
+        continuous (not restarting per page). OCR metadata (``ocr``,
+        ``ocr_confidence``) from the parser is forwarded to each chunk's
+        metadata. Graph indexing runs once after all chunks are produced.
+
+        Used by the built-in parsers (TextParser, PDFParser, DocxParser) and
+        by ingest_text() / ingest_pages(). For block-aware parsers that return
+        typed content (e.g. PlumberPDFParser), use _ingest_from_blocks instead.
+        """
         ingested_at = datetime.now(timezone.utc).isoformat()
         records = []
         chunk_index = 0
