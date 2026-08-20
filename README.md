@@ -330,18 +330,18 @@ Upsert only fires when both `embedding_model` and `vector_source` are provided a
 
 ```bash
 # Ingest the sample policy — no embeddings, just inspect chunks
-python examples/ingest_txt.py
+python examples/backends/ingest_txt.py
 
 # Ingest with dummy embeddings
-python examples/ingest_txt.py --embedding dummy
+python examples/backends/ingest_txt.py --embedding dummy
 
 # Ingest your own file
-python examples/ingest_txt.py path/to/doc.txt --embedding dummy --query "eligibility requirements"
+python examples/backends/ingest_txt.py path/to/doc.txt --embedding dummy --query "eligibility requirements"
 ```
 
 ## Local end-to-end demo (PDF → Redis → search)
 
-`examples/demo_pdf.py` runs the full pipeline against a local Redis Stack instance.
+`examples/integration-demos/pdf_redis_demo.py` runs the full pipeline against a local Redis Stack instance.
 Sample data is included in `data/` — no file needed to get started.
 
 ### Prerequisites
@@ -364,15 +364,15 @@ pip install -e .
 
 ```bash
 # Zero-config — uses data/sample_policy.pdf and a built-in query
-python examples/demo_pdf.py
+python examples/integration-demos/pdf_redis_demo.py
 
 # With OpenAI embeddings for real semantic search
-OPENAI_API_KEY=sk-... python examples/demo_pdf.py \
+OPENAI_API_KEY=sk-... python examples/integration-demos/pdf_redis_demo.py \
     --embedding openai \
     --query "what is the deductible"
 
 # Your own PDF
-OPENAI_API_KEY=sk-... python examples/demo_pdf.py path/to/doc.pdf \
+OPENAI_API_KEY=sk-... python examples/integration-demos/pdf_redis_demo.py path/to/doc.pdf \
     --embedding openai \
     --query "termination clause"
 ```

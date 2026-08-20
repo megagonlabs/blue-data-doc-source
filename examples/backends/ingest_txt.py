@@ -1,16 +1,16 @@
 """Quick ingestion demo for .txt files — no vector store required.
 
 Usage:
-    python examples/ingest_txt.py                          # uses sample policy
-    python examples/ingest_txt.py path/to/doc.txt
-    python examples/ingest_txt.py data/sample_policy.txt --embedding dummy --query "deductible"
+    python examples/backends/ingest_txt.py                          # uses sample policy
+    python examples/backends/ingest_txt.py path/to/doc.txt
+    python examples/backends/ingest_txt.py data/sample_policy.txt --embedding dummy --query "deductible"
 """
 import argparse
 from pathlib import Path
 
 from blue_data_doc_source import DocumentPipeline, DummyEmbeddingModel, OpenAIEmbeddingModel
 
-DEFAULT_PATH = Path(__file__).parent.parent / "data" / "sample_policy.txt"
+DEFAULT_PATH = Path(__file__).parent.parent.parent / "data" / "sample_policy.txt"
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

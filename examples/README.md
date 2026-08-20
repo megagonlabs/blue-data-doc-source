@@ -121,6 +121,7 @@ python3 examples/feature-demos/rich_search_demo.py
 | `integration-demos/multi_format_demo.py` | TXT + PDF + DOCX through one pipeline; ingest_text() and ingest_pages() bypass methods | none |
 | `integration-demos/corpus_update_demo.py` | Add / replace / remove documents; DOCUMENT.DELETE; stale-chunk management | none |
 | `integration-demos/custom_parser_demo.py` | Parser ABC extension (LlamaIndex wrapper) and ingest_pages() bypass for external extractors | none (LlamaIndex optional) |
+| `integration-demos/pdf_redis_demo.py` | Full end-to-end: PDF → parse → chunk → embed → Redis → search; NLQueryParser dispatch | Redis Stack (OpenAI optional) |
 
 ```bash
 python3 examples/integration-demos/pdf_pipeline_demo.py
@@ -128,6 +129,11 @@ python3 examples/integration-demos/multi_format_demo.py
 python3 examples/integration-demos/corpus_update_demo.py
 python3 examples/integration-demos/custom_parser_demo.py                   # bypass mode, no deps
 python3 examples/integration-demos/custom_parser_demo.py --mode llamaindex  # requires llama-index
+
+# PDF + Redis + NLQueryParser:
+docker run -p 6379:6379 redis/redis-stack-server:latest
+python3 examples/integration-demos/pdf_redis_demo.py
+OPENAI_API_KEY=sk-... python3 examples/integration-demos/pdf_redis_demo.py --embedding openai --query "deductible"
 ```
 
 ---
@@ -157,12 +163,17 @@ OPENAI_API_KEY=sk-... python3 examples/framework-demos/mcp_demo.py
 | Demo | What it shows | Deps |
 |---|---|---|
 | `backends/memory_quickstart.py` | Minimal quickstart: LocalMemoryVectorStore + DummyEmbeddingModel | none |
+| `backends/ingest_txt.py` | Raw pipeline without a vector store — shows chunking output for a .txt file; optional dummy/OpenAI embeddings | none |
 | `backends/redis_backend_demo.py` | RedisVectorSource as persistent backend; DOCUMENT.* op interface | Redis Stack |
 | `backends/openai_embeddings_demo.py` | Semantic quality comparison: OpenAIEmbeddingModel vs DummyEmbeddingModel | OpenAI |
 
 ```bash
 # In-memory (no deps):
 python3 examples/backends/memory_quickstart.py
+
+# Raw pipeline, no vector store:
+python3 examples/backends/ingest_txt.py
+python3 examples/backends/ingest_txt.py --embedding dummy
 
 # Redis (requires Redis Stack):
 docker run -p 6379:6379 redis/redis-stack-server:latest

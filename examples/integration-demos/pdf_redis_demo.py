@@ -4,10 +4,10 @@ Usage:
     # Start Redis Stack first:
     #   docker run -p 6379:6379 redis/redis-stack-server:latest
 
-    python examples/demo_pdf.py                                         # dummy embeddings, built-in query
-    python examples/demo_pdf.py --embedding openai --query "what is the deductible"
-    python examples/demo_pdf.py --embedding openai --nl-query "find the termination clause"
-    python examples/demo_pdf.py mydoc.pdf --embedding openai --query "eligibility requirements"
+    python examples/integration-demos/pdf_redis_demo.py                                         # dummy embeddings, built-in query
+    python examples/integration-demos/pdf_redis_demo.py --embedding openai --query "what is the deductible"
+    python examples/integration-demos/pdf_redis_demo.py --embedding openai --nl-query "find the termination clause"
+    python examples/integration-demos/pdf_redis_demo.py mydoc.pdf --embedding openai --query "eligibility requirements"
 """
 import argparse
 import sys
@@ -20,10 +20,10 @@ from blue_data_doc_source import (
     OpenAIEmbeddingModel,
 )
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from local_redis_store import LocalRedisVectorStore
 
-DEFAULT_PATH = Path(__file__).parent.parent / "data" / "sample_policy.pdf"
+DEFAULT_PATH = Path(__file__).parent.parent.parent / "data" / "sample_policy.pdf"
 DEFAULT_QUERY = "what is the deductible and out-of-pocket maximum"
 
 EMBEDDING_DIMS = {
