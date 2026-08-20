@@ -24,14 +24,12 @@ import sys
 from pathlib import Path
 
 try:
-    from blue_data.source.vector.redis_vector_source import RedisVectorSource  # type: ignore
+    from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource  # type: ignore
     import redis as _redis
 except ImportError:
     print("ERROR: RedisVectorSource or redis-py is not installed.")
     print("  pip install blue-data redis")
     sys.exit(1)
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from blue_data_doc_source import DocumentPipeline, DocumentDataSource, DummyEmbeddingModel, NLQueryParser
 
@@ -72,7 +70,10 @@ def run(doc_path: str, host: str, port: int) -> None:
     print(f"  Doc    : {doc_path}")
     print()
 
-    vector_source = RedisVectorSource(host=host, port=port)
+    vector_source = RedisVectorSource(
+        name="redis_vec",
+        properties={"connection": {"host": host, "port": port, "scan_prefix": "doc:"}},
+    )
 
     pipeline = DocumentPipeline(
         embedding_model=DummyEmbeddingModel(dim=8),
@@ -133,7 +134,10 @@ def run(doc_path: str, host: str, port: int) -> None:
 
     pipeline2 = DocumentPipeline(
         embedding_model=DummyEmbeddingModel(dim=8),
-        vector_source=RedisVectorSource(host=host, port=port),
+        vector_source=RedisVectorSource(
+            name="redis_vec2",
+            properties={"connection": {"host": host, "port": port, "scan_prefix": "doc:"}},
+        ),
         chunk_size=200,
         overlap=30,
         collection=COLLECTION,
@@ -150,14 +154,20 @@ def run(doc_path: str, host: str, port: int) -> None:
     print(DIV2)
     print()
 
+    import os
+    nl_parser = NLQueryParser() if os.getenv("OPENAI_API_KEY") else None
+
     source = DocumentDataSource(
         name="redis_demo",
         embedding_model=DummyEmbeddingModel(dim=8),
-        vector_source=RedisVectorSource(host=host, port=port),
+        vector_source=RedisVectorSource(
+            name="redis_vec3",
+            properties={"connection": {"host": host, "port": port, "scan_prefix": "doc:"}},
+        ),
         chunk_size=200,
         overlap=30,
         default_collection=COLLECTION,
-        nl_parser=NLQueryParser(),
+        nl_parser=nl_parser,
     )
     source.execute_query({"op": "DOCUMENT.ENSURE_INDEX", "collection": COLLECTION})
 
@@ -169,8 +179,11 @@ def run(doc_path: str, host: str, port: int) -> None:
     })
     print(f"  DOCUMENT.SEARCH 'enrollment period' → {len(results3)} result(s)")
 
-    nl_results = source.execute_query_nl("who is eligible", collection=COLLECTION)
-    print(f"  execute_query_nl 'who is eligible' → {len(nl_results)} result(s)")
+    if nl_parser is not None:
+        nl_results = source.execute_query_nl("who is eligible", collection=COLLECTION)
+        print(f"  execute_query_nl 'who is eligible' → {len(nl_results)} result(s)")
+    else:
+        print("  execute_query_nl skipped — set OPENAI_API_KEY to enable NL dispatch")
 
     # ── Cleanup ────────────────────────────────────────────────────────────
     print()

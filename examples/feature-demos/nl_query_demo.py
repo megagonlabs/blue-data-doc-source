@@ -32,9 +32,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from local_memory_store import LocalMemoryVectorStore
-
-from blue_data_doc_source import DocumentDataSource, DummyEmbeddingModel, NLQueryParser
+from blue_data_doc_source import DocumentDataSource, NLQueryParser
 
 DATA_DIR    = Path(__file__).parent.parent.parent / "data"
 DEFAULT_DOC = DATA_DIR / "sample_policy.txt"
@@ -149,7 +147,7 @@ def _regex_parse(text: str) -> dict:
         raw_type = m.group(1).lower()
         doc_type = _TYPE_MAP.get(raw_type, raw_type.rstrip("s"))
         return {"op": "DOCUMENT.FIND", "filter": {"document_type": doc_type}}
-    return {"op": "DOCUMENT.SEARCH", "query": text, "k": 5}
+    return {"op": "DOCUMENT.SEARCH", "query": text, "k": 5, "mode": "bm25"}
 
 
 def fmt_op(op: dict) -> str:
@@ -250,16 +248,14 @@ def run(use_openai: bool) -> None:
     print(DIV2)
     print()
 
+    # Use BM25 mode so results are keyword-relevant without needing real embeddings.
     source = DocumentDataSource(
         name="nl_demo",
-        embedding_model=DummyEmbeddingModel(dim=8),
-        vector_source=LocalMemoryVectorStore(),
         chunk_size=200,
         overlap=30,
         default_collection=COLLECTION,
         nl_parser=parser,
     )
-    source.execute_query({"op": "DOCUMENT.ENSURE_INDEX", "collection": COLLECTION})
     source.execute_query({
         "op": "DOCUMENT.INGEST",
         "path": str(DEFAULT_DOC),

@@ -54,7 +54,7 @@ QUERY_PAIRS = [
 def build_pipeline(model: str, dim: int) -> tuple[DocumentPipeline, LocalMemoryVectorStore]:
     store    = LocalMemoryVectorStore()
     pipeline = DocumentPipeline(
-        embedding_model=OpenAIEmbeddingModel(api_key=API_KEY, model=model, dim=dim),
+        embedding_model=OpenAIEmbeddingModel(api_key=API_KEY, model=model),
         vector_source=store,
         chunk_size=200,
         overlap=30,
@@ -161,7 +161,7 @@ def run(doc_path: str, model: str) -> None:
     print()
     print("  # Production:")
     print("  pipeline = DocumentPipeline(")
-    print(f"      embedding_model=OpenAIEmbeddingModel(api_key=OPENAI_KEY, model={model!r}, dim={dim}),")
+    print(f"      embedding_model=OpenAIEmbeddingModel(api_key=OPENAI_KEY, model={model!r}),")
     print("      vector_source=RedisVectorSource(…),")
     print("  )")
     print()

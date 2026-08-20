@@ -8,8 +8,9 @@ import struct
 from typing import Any, Dict, List, Optional
 
 import redis
-from redis.commands.search.field import NumericField, TextField, VectorField
-from redis.commands.search.index_definition import IndexDefinition, IndexType
+from redis.commands.search.field import NumericField, TagField, TextField, VectorField
+from redis.commands.search.indexDefinition import IndexDefinition, IndexType
+from redis.commands.search.query import Query
 
 
 class LocalRedisVectorStore:
@@ -29,27 +30,34 @@ class LocalRedisVectorStore:
         collection: str,
         dim: int = 1536,
         distance_metric: str = "COSINE",
+        extra_fields: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
     ) -> Any:
+        _field_type_map = {"TAG": TagField, "NUMERIC": NumericField, "TEXT": TextField}
+        extra_schema = []
+        for f in (extra_fields or []):
+            cls = _field_type_map.get(f.get("field_type", "TEXT"), TextField)
+            extra_schema.append(cls(f["path"], as_name=f["name"]))
+
         schema = (
             TextField("$.text", as_name="text"),
-            TextField("$.document_id", as_name="document_id"),
             TextField("$.chunk_id", as_name="chunk_id"),
-            TextField("$.file_name", as_name="file_name"),
-            NumericField("$.page_start", as_name="page_start"),
-            NumericField("$.page_end", as_name="page_end"),
             VectorField(
                 "$.embedding",
                 "FLAT",
                 {"TYPE": "FLOAT32", "DIM": dim, "DISTANCE_METRIC": distance_metric},
                 as_name="embedding",
             ),
+            *extra_schema,
         )
         definition = IndexDefinition(prefix=[f"{collection}:"], index_type=IndexType.JSON)
+
+        # Drop the existing index so a dim change always takes effect.
         try:
-            self.client.ft(index_name).create_index(schema, definition=definition)
-        except Exception as e:
-            if "Index already exists" not in str(e):
-                raise
+            self.client.ft(index_name).dropindex()
+        except Exception:
+            pass
+        self.client.ft(index_name).create_index(schema, definition=definition)
 
     def upsert(
         self,
@@ -71,21 +79,24 @@ class LocalRedisVectorStore:
         filter_expr: str = "*",
     ) -> List[Dict[str, Any]]:
         vec_bytes = struct.pack(f"{len(query_vector)}f", *query_vector)
-        raw = self.client.execute_command(
-            "FT.SEARCH", index_name,
-            f"*=>[KNN {k} @{embedding_field} $vec AS {score_alias}]",
-            "PARAMS", "2", "vec", vec_bytes,
-            "SORTBY", score_alias,
-            "DIALECT", "2",
+        q = (
+            Query(f"{filter_expr}=>[KNN {k} @{embedding_field} $vec AS {score_alias}]")
+            .sort_by(score_alias)
+            .paging(0, k)
+            .return_fields("$", score_alias)
+            .dialect(2)
         )
-        results = raw.get(b"results", [])
+        results = self.client.ft(index_name).search(q, query_params={"vec": vec_bytes})
         out = []
-        for item in results:
-            extra = item.get(b"extra_attributes", {})
-            score = extra.get(b"score", b"0")
-            raw_doc = extra.get(b"$", b"{}")
-            doc = json.loads(raw_doc)
-            doc[score_alias] = float(score)
-            doc.pop("embedding", None)
-            out.append(doc)
+        for doc in results.docs:
+            raw_json = getattr(doc, "$", None) or getattr(doc, "json", None)
+            if raw_json is None:
+                continue
+            chunk = json.loads(raw_json) if isinstance(raw_json, (str, bytes)) else raw_json
+            chunk[score_alias] = float(getattr(doc, score_alias, 0))
+            chunk.pop("embedding", None)
+            out.append(chunk)
         return out
+
+    def delete(self, collection: str, doc_id: str) -> None:
+        self.client.delete(f"{collection}:{doc_id}")

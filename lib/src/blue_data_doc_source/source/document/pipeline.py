@@ -315,6 +315,17 @@ class DocumentPipeline:
                 dim=self.embedding_model.dim,
                 extra_fields=_INDEX_EXTRA_FIELDS,
             )
+        except TypeError:
+            # Vector source doesn't accept extra_fields (e.g. MemoryVectorSource).
+            try:
+                self.vector_source.create_index(
+                    index_name=target,
+                    collection=target,
+                    dim=self.embedding_model.dim,
+                )
+            except Exception as exc2:
+                if "already exists" not in str(exc2).lower():
+                    raise
         except Exception as exc:
             if "already exists" not in str(exc).lower():
                 raise

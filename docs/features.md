@@ -475,6 +475,54 @@ pipeline = DocumentPipeline(
 )
 ```
 
+### Generic extraction — `field_extractor` without a classifier
+
+`LLMFieldExtractor` can be used **without** a `KeywordClassifier`. When no classifier is set, the pipeline assigns `document_type = "unknown"` and `confidence = 0.0`, then runs the field extractor on the raw document text with no type hint. The LLM discovers and names fields freely based on whatever it finds in the document.
+
+This is useful when you are ingesting a heterogeneous or unfamiliar corpus and want structured fields immediately, without having to define document types or signal phrases upfront:
+
+```python
+from blue_data_doc_source import DocumentPipeline, LLMFieldExtractor
+
+pipeline = DocumentPipeline(
+    field_extractor=LLMFieldExtractor(),   # no classifier=
+)
+
+pipeline.ingest_text(lab_notebook_text, file_name="lab_notebook.txt")
+pipeline.ingest_text(incident_report_text, file_name="incident.txt")
+
+records = pipeline.find_records()
+# document_type = 'unknown', confidence = 0.0
+# fields = whatever the LLM found: researcher, protocol, sample_id, ...
+```
+
+Extracted fields are fully queryable via `DOCUMENT.FIND` — the only difference from typed extraction is that field names are LLM-chosen, so you should inspect the records once to learn what names were used before writing filters:
+
+```python
+# Discover what the LLM extracted
+for rec in pipeline.find_records():
+    print(rec["document_id"], list(rec.get("fields", {}).keys()))
+# doc_abc123: ['report_id', 'severity', 'root_cause', 'status', ...]
+
+# Then filter normally
+pipeline.find_records({"fields.severity": {"contains": "High"}})
+```
+
+Once you have seen the fields the LLM produces, you can stabilise them with a `StructuredFieldExtractor` or a typed `LLMFieldExtractor` prompt — but no code change is needed until then.
+
+---
+
+### Choosing your extraction setup
+
+| Scenario | Setup | `document_type` | Field names |
+|---|---|---|---|
+| Unfamiliar corpus, get started fast | `field_extractor=LLMFieldExtractor()` only | `"unknown"` | LLM-chosen — inspect first |
+| Known document types, typed fields | `classifier=KeywordClassifier()` + `field_extractor=LLMFieldExtractor()` | detected type | type-specific prompt |
+| Known schema, validated output | `field_extractor=StructuredFieldExtractor(schema)` | `"unknown"` | schema-defined, Pydantic-validated |
+| Typed + schema-validated | `classifier=KeywordClassifier()` + `field_extractor=StructuredFieldExtractor(schema)` | detected type | schema-defined, Pydantic-validated |
+
+All four paths write to the same `DocumentRecord`, use the same `DOCUMENT.FIND` filter syntax, and store fields under the same `fields.*` dot-notation. The setup decision only affects type detection accuracy and how predictable field names are.
+
 ---
 
 ## Rich search
