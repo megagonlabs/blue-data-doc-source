@@ -74,7 +74,6 @@ def run(doc_path: str, k: int) -> None:
         embedding_model=OpenAIEmbeddingModel(
             api_key=API_KEY,
             model="text-embedding-3-small",
-            dim=EMBEDDING_DIM,
         ),
         vector_source=store,
         chunk_size=200,

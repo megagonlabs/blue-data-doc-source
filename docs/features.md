@@ -193,19 +193,6 @@ Dot notation accesses nested fields: `"fields.governing_law"`, `"fields.total_du
 
 Numeric coercion handles `"$35,154"` → `35154.0`. Formats that can't be parsed (percentages, parenthesized negatives, locale separators) fall back to string comparison without erroring.
 
-**`DOCUMENT.FIND_THEN_SEARCH`** — combines a document filter with text retrieval in one call. Runs FIND internally, searches within each matched document, returns ranked chunks:
-
-```python
-chunks = source.execute_query({
-    "op": "DOCUMENT.FIND_THEN_SEARCH",
-    "find_filter": {"document_type": "contract", "fields.parties": {"contains": "Acme Corp"}},
-    "query": "termination clause",
-    "k": 5,
-})
-```
-
-Both ops are reachable via `execute_query_nl` — the `NLQueryParser` detects whether the query is purely structural (`DOCUMENT.FIND`) or combines a document filter with content retrieval (`DOCUMENT.FIND_THEN_SEARCH`).
-
 Via `DocumentDataSource`:
 
 ```python
@@ -226,6 +213,55 @@ docs = pipeline.find_records({"fields.parties": {"contains": "Acme Corp"}})
 # Step 2: retrieve text scoped to matched document only
 chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["document_id"]})
 ```
+
+---
+
+## Two-stage find-then-retrieve (DOCUMENT.FIND_THEN_SEARCH)
+
+`DOCUMENT.FIND_THEN_SEARCH` combines a document-level filter with text retrieval in a single call. It runs `DOCUMENT.FIND` internally, searches within each matched document, then returns a merged ranked list — eliminating application-level filter-then-loop logic.
+
+```python
+chunks = source.execute_query({
+    "op":         "DOCUMENT.FIND_THEN_SEARCH",
+    "find_filter": {"document_type": "contract", "fields.parties": {"contains": "Acme Corp"}},
+    "query":      "termination clause",
+    "k":          5,
+})
+```
+
+The `find_filter` accepts the same syntax as `DOCUMENT.FIND`. The `query` is searched only within documents that pass the filter — not the full corpus. Results are ranked chunks, each carrying full provenance.
+
+`NLQueryParser` detects two-part questions automatically and emits `DOCUMENT.FIND_THEN_SEARCH` when it identifies both a document type intent and a content retrieval intent in the same natural-language query.
+
+---
+
+## Record retrieval (DOCUMENT.GET_RECORD)
+
+`DOCUMENT.GET_RECORD` retrieves the full `DocumentRecord` for any ingested document by `document_id`. Returns the document type, confidence score, classifier name, and all extracted fields — without touching the vector store.
+
+```python
+# Via pipeline
+record = pipeline.get_record(document_id)
+# {
+#   "document_id": "doc_abc123",
+#   "document_type": "invoice",
+#   "confidence": 0.80,
+#   "classifier": "llm",
+#   "fields": {
+#     "invoice_number": "INV-2026-004",
+#     "vendor": "Acme Corp",
+#     "total_due": "$1,250.00",
+#   }
+# }
+
+# Via DocumentDataSource
+record = source.execute_query({
+    "op":         "DOCUMENT.GET_RECORD",
+    "document_id": document_id,
+})
+```
+
+Useful for inspecting what was extracted at ingest time, building document-level summaries, or feeding structured metadata to an agent without re-running search.
 
 ---
 
@@ -293,6 +329,58 @@ source.execute_query({"op": "DOCUMENT.ENSURE_INDEX", "collection": "reports"})
 ```
 
 `DOCUMENT.ENSURE_INDEX` is safe to call multiple times — skip creation if the index already exists.
+
+---
+
+## Multi-document collections
+
+A collection holds any number of ingested documents. `DOCUMENT.SEARCH` spans all of them in a single query. Each document is independently deletable by its `document_id` — deleting one document leaves all others in the collection untouched. Re-ingesting an updated file replaces only that document's chunks via content-hash deduplication.
+
+```python
+# Ingest multiple documents into one collection
+pipeline.ingest("contracts/acme.pdf",   collection="contracts")
+pipeline.ingest("contracts/beta.pdf",   collection="contracts")
+pipeline.ingest("contracts/gamma.pdf",  collection="contracts")
+
+# Search spans all three documents in one query
+results = pipeline.search("termination clause", collection="contracts", k=5)
+
+# Delete one document — others are untouched
+pipeline.delete(path="contracts/beta.pdf", collection="contracts")
+```
+
+Collections are named strings — any value works. Use separate collections to partition by tenant, document category, or access scope. A pipeline instance can ingest into and search across multiple collections.
+
+---
+
+## Search modes
+
+`DOCUMENT.SEARCH` supports four retrieval strategies via the `"mode"` field:
+
+| Mode | Description | Requires embeddings |
+|---|---|---|
+| `"vector"` | Default KNN — cosine similarity over chunk embeddings | Yes |
+| `"bm25"` | Keyword-only BM25 scoring — no embedding model needed | No |
+| `"hybrid"` | Reciprocal Rank Fusion (RRF) of KNN + BM25 | Yes |
+| `"rerank"` | BM25 shortlist followed by cosine re-rank | Yes |
+
+```python
+# BM25 — keyword relevance, no embedding cost
+results = pipeline.search("deductible", mode="bm25", k=5)
+
+# Hybrid — fuses semantic and keyword signals
+results = pipeline.search("deductible", mode="hybrid", k=5)
+
+# Via op dict
+results = source.execute_query({
+    "op":    "DOCUMENT.SEARCH",
+    "query": "deductible",
+    "mode":  "bm25",
+    "k":     5,
+})
+```
+
+`"bm25"` is useful for testing without an embedding model, for keyword-heavy corpora where semantic similarity adds noise, and for the `NLQueryParser` demo path where dummy embeddings would produce meaningless scores.
 
 ---
 
@@ -766,12 +854,22 @@ See `examples/feature-demos/graph_backend_demo.py` for a full runnable demo.
 
 ---
 
-## MCP server
+## Agent-friendly platform interfaces
+
+The pipeline is accessible through four interfaces. All share the same environment variables and underlying `DocumentDataSource` — switching between them requires no code changes to the pipeline itself.
+
+| Interface | Use case |
+|---|---|
+| Python library | Direct integration in any Python application or agent |
+| MCP server | AI agents via Model Context Protocol (Claude Desktop, Claude Code, custom agents) |
+| REST API | Non-Python services, microservice architectures, HTTP-based tool use |
+| CLI | Interactive development, scripting, CI pipelines |
+
+### MCP server
 
 `platform/document-mcp` exposes `DocumentDataSource` as tools for Claude and other MCP clients. Each tool maps to a `DOCUMENT.*` op and returns structured JSON.
 
 ```bash
-# Start with dummy embeddings (no OpenAI required)
 cd platform/document-mcp
 BLUE_DOC_EMBEDDING=dummy python src/server.py
 
@@ -803,3 +901,45 @@ python src/server.py
 Tools exposed: `ensure_index`, `ingest_document`, `ingest_documents`, `search`, `delete_document`.
 
 See [`docs/mcp.md`](mcp.md) for the full tool reference and environment variable documentation.
+
+### REST API
+
+`platform/api` is a FastAPI service that exposes every `DOCUMENT.*` op as an HTTP endpoint. Useful for non-Python services, microservice architectures, or anywhere HTTP-based tool use is preferred.
+
+```bash
+cd platform/api
+BLUE_DOC_EMBEDDING=openai OPENAI_API_KEY=sk-... uvicorn doc_api.main:app --port 8001
+```
+
+| Endpoint | Method | Op equivalent |
+|---|---|---|
+| `/health` | GET | — |
+| `/ensure-index` | POST | `DOCUMENT.ENSURE_INDEX` |
+| `/ingest` | POST | `DOCUMENT.INGEST` |
+| `/search` | POST | `DOCUMENT.SEARCH` |
+| `/find` | POST | `DOCUMENT.FIND` |
+| `/find-then-search` | POST | `DOCUMENT.FIND_THEN_SEARCH` |
+| `/record/{document_id}` | GET | `DOCUMENT.GET_RECORD` |
+| `/document` | DELETE | `DOCUMENT.DELETE` |
+
+### CLI
+
+`platform/cli` provides a command-line interface for ingestion, search, and document management — useful for interactive development, shell scripts, and CI pipelines.
+
+```bash
+pip install -e platform/cli
+
+# Ingest a document
+blue-data-doc ingest path/to/policy.pdf --collection contracts
+
+# Search
+blue-data-doc search "termination clause" --collection contracts -k 5
+
+# Delete
+blue-data-doc delete --path path/to/policy.pdf --collection contracts
+
+# Output raw JSON for scripting
+blue-data-doc search "deductible" --json
+```
+
+Configure via the same environment variables used by the MCP server and REST API (`BLUE_DOC_EMBEDDING`, `BLUE_DOC_REDIS_HOST`, `BLUE_DOC_COLLECTION`, etc.).
