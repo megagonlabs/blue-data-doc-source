@@ -147,9 +147,9 @@ doc_source = DocumentDataSource(
 
 # All sources share one registry — same registration model, source-specific query ops
 registry = DataRegistry()
-registry.register(sql_source)    # CRM: customers, vendors
-registry.register(graph_source)  # entity relationships
-registry.register(doc_source)    # contracts, invoices, policies
+registry.register_source(sql_source)    # CRM: customers, vendors
+registry.register_source(graph_source)  # entity relationships
+registry.register_source(doc_source)    # contracts, invoices, policies
 
 # Filter documents by extracted fields
 contracts = doc_source.execute_query({

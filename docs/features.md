@@ -52,6 +52,24 @@ window_chunker = WindowChunker(chunk_size=500, overlap=50)
 chunks = window_chunker.chunk_with_titles(text)
 ```
 
+`SentenceChunker` aligns chunks to sentence boundaries — no sentence is ever split across chunk boundaries. Uses `nltk.sent_tokenize` when available; falls back to punctuation regex without NLTK.
+
+```python
+from blue_data_doc_source.source.document.chunkers import SentenceChunker
+
+chunker = SentenceChunker(chunk_size=200, overlap=40)
+pipeline = DocumentPipeline(chunker=chunker, embedding_model=..., vector_source=...)
+```
+
+Install NLTK for higher-quality sentence detection:
+
+```bash
+pip install blue-data-doc-source[nlp]
+python -c "import nltk; nltk.download('punkt_tab')"
+```
+
+`SentenceChunker` produces no `section_title` — use `SectionChunker` when heading preservation matters.
+
 Both chunkers operate on **word count**, not character count. PDF chunks never span page boundaries.
 
 ---
@@ -610,6 +628,59 @@ Once you have seen the fields the LLM produces, you can stabilise them with a `S
 | Typed + schema-validated | `classifier=KeywordClassifier()` + `field_extractor=StructuredFieldExtractor(schema)` | detected type | schema-defined, Pydantic-validated |
 
 All four paths write to the same `DocumentRecord`, use the same `DOCUMENT.FIND` filter syntax, and store fields under the same `fields.*` dot-notation. The setup decision only affects type detection accuracy and how predictable field names are.
+
+---
+
+## Schema-validated extraction (StructuredFieldExtractor)
+
+`StructuredFieldExtractor` accepts a Pydantic model class, TypedDict, or JSON Schema dict and auto-generates the extraction prompt from the schema — no manual field spec string needed. For Pydantic models the output is validated and coerced via `model_validate` before storage; invalid LLM output falls back to the raw parsed dict.
+
+```python
+from pydantic import BaseModel
+from blue_data_doc_source import DocumentPipeline, StructuredFieldExtractor
+
+class EmploymentContract(BaseModel):
+    employee_name: str
+    start_date: str
+    base_salary: str
+    notice_period: str
+    non_compete: bool
+
+pipeline = DocumentPipeline(
+    field_extractor=StructuredFieldExtractor(schema=EmploymentContract),
+    embedding_model=...,
+    vector_source=...,
+)
+pipeline.ingest("employment_contract.pdf")
+
+rec = pipeline.get_record(records[0]["document_id"])
+# rec["fields"] == {
+#   "employee_name": "Jane Smith",
+#   "start_date": "2026-01-15",
+#   "base_salary": "$120,000",
+#   "notice_period": "30 days",
+#   "non_compete": True,
+# }
+```
+
+TypedDict and JSON Schema dict also work:
+
+```python
+from typing import TypedDict
+
+class InvoiceFields(TypedDict):
+    vendor: str
+    total_due: str
+    due_date: str
+
+pipeline = DocumentPipeline(
+    field_extractor=StructuredFieldExtractor(schema=InvoiceFields),
+)
+```
+
+`document_type` is set to `"unknown"` unless a `KeywordClassifier` is also provided — but the extraction prompt is derived entirely from the schema, so no classifier is required to get typed, predictable field names.
+
+See `examples/feature-demos/structured_extractor_demo.py` for a runnable demo.
 
 ---
 
