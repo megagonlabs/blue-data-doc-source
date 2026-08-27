@@ -25,7 +25,7 @@ chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["
 # → ['2. TERMINATION — Either party may terminate this agreement with sixty days...']
 ```
 
-**Structured questions can't be answered by embedding distance**
+**Failure 2 — Structured questions can't be answered by embedding distance**
 
 *"Find all invoices from Blue Solutions where the total exceeds $30,000."* A vector search returns chunks that *mention* Blue Solutions and amounts. It cannot evaluate `total_due > 30000` — that requires parsing `"$35,154"` as a number, which embedding distance cannot do. The answer is either wrong or requires the LLM to read every invoice chunk and compare manually.
 
@@ -40,7 +40,7 @@ pipeline.find_records({
 # → [{document_type: "invoice", fields: {total_due: "$35,154", vendor: "Blue Solutions Inc.", ...}}]
 ```
 
-**A mixed corpus makes every search ambiguous**
+**Failure 3 — A mixed corpus makes every search ambiguous**
 
 A legal team ingests contracts, invoices, and policies into one index. A search for *"termination obligations liability"* returns policy exclusion clauses and invoice payment terms alongside contract termination clauses — equally ranked, because semantic similarity doesn't understand document categories. The agent has no reliable signal about which results to trust.
 

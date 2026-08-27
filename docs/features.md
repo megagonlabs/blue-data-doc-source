@@ -969,7 +969,7 @@ python src/server.py
 }
 ```
 
-Tools exposed: `ensure_index`, `ingest_document`, `ingest_documents`, `search`, `delete_document`.
+Tools exposed: `ensure_index`, `ingest_document`, `search_documents`, `delete_document`.
 
 See [`docs/mcp.md`](mcp.md) for the full tool reference and environment variable documentation.
 
@@ -984,14 +984,14 @@ BLUE_DOC_EMBEDDING=openai OPENAI_API_KEY=sk-... uvicorn doc_api.main:app --port 
 
 | Endpoint | Method | Op equivalent |
 |---|---|---|
-| `/health` | GET | — |
-| `/ensure-index` | POST | `DOCUMENT.ENSURE_INDEX` |
-| `/ingest` | POST | `DOCUMENT.INGEST` |
-| `/search` | POST | `DOCUMENT.SEARCH` |
-| `/find` | POST | `DOCUMENT.FIND` |
-| `/find-then-search` | POST | `DOCUMENT.FIND_THEN_SEARCH` |
-| `/record/{document_id}` | GET | `DOCUMENT.GET_RECORD` |
-| `/document` | DELETE | `DOCUMENT.DELETE` |
+| `/documents/health` | GET | — |
+| `/documents/ensure-index` | POST | `DOCUMENT.ENSURE_INDEX` |
+| `/documents/ingest` | POST | `DOCUMENT.INGEST` |
+| `/documents/search` | POST | `DOCUMENT.SEARCH` |
+| `/documents/find` | POST | `DOCUMENT.FIND` |
+| `/documents/find-then-search` | POST | `DOCUMENT.FIND_THEN_SEARCH` |
+| `/documents/record/{document_id}` | GET | `DOCUMENT.GET_RECORD` |
+| `/documents/document` | DELETE | `DOCUMENT.DELETE` |
 
 ### CLI
 
