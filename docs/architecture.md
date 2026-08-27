@@ -90,7 +90,7 @@ Key methods:
 | `search(query, k, collection)` | Embed query → KNN via VectorSource |
 | `ensure_index(collection)` | Create vector index (idempotent) |
 | `delete(path=...)` | Remove all chunks from the vector store |
-| `graph_neighbors(entity_name, entity_type, k)` | O(1) entity lookup via graph — no embeddings |
+| `graph_neighbors(entity_name, entity_type, k)` | Exact entity lookup via graph (deterministic node ID, no corpus scan, no embeddings) |
 | `graph_query(node_id, edge_type, direction, k)` | General graph traversal from any node |
 
 ### Parser

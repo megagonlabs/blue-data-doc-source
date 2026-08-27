@@ -48,7 +48,7 @@ DocumentPipeline(
 | `delete(path=None, document_id=None, chunk_count=None, collection=None)` | `int` | Delete all chunks for a document; returns count of successful delete calls |
 | `get_record(document_id)` | `dict \| None` | Return the schema record stored during ingest; `None` if no `classifier` was set or the document is unknown |
 | `find_records(filter=None)` | `list[dict]` | Return all schema records matching the filter dict; see `RecordStore.find()` for filter syntax; returns `[]` when no classifier is set |
-| `graph_neighbors(entity_name, entity_type=None, k=10)` | `list[dict]` | O(1) entity lookup via graph — no embeddings; requires `graph_source` |
+| `graph_neighbors(entity_name, entity_type=None, k=10)` | `list[dict]` | Exact entity lookup via graph (deterministic node ID, no corpus scan, no embeddings); requires `graph_source` |
 | `graph_query(node_id, edge_type=None, direction="both", k=None)` | `list[dict]` | General graph traversal from any node ID; requires `graph_source` |
 
 ### Document identity and deduplication

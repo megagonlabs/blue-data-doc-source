@@ -815,7 +815,7 @@ Node IDs are deterministic: `doc:{document_id}`, `section:{document_id}:{title.l
 
 **`APPEARS_IN` edges** go directly from Entity to Document (not via Chunk). This means "which documents mention Acme Corp?" is a single hop, regardless of how many chunks in the document mention it. The edge is written once per document per entity, not once per chunk.
 
-**`graph_neighbors()` is O(1)** because entity node IDs are deterministic — the lookup constructs `entity:{entity_type}:{name.lower()}` directly and calls `get_node()` rather than scanning the graph for a match. No embeddings, no index, no full scan.
+**`graph_neighbors()` uses a deterministic entity node ID** — constructed as `entity:{entity_type}:{name.lower()}` — so finding the entity node is a single dict lookup rather than a node scan. The subsequent edge traversal to collect all MENTIONS edges is proportional to the number of entity mentions, not total corpus size. No embeddings, no scoring.
 
 **Entity nodes survive `delete_document()`** because they are shared across documents. Deleting one document must not break entity lookups that other documents depend on. Only Document, Section, and Chunk nodes are removed on delete.
 
@@ -839,7 +839,7 @@ pipeline.ingest_text(
 
 ### Entity-centric retrieval — `graph_neighbors()`
 
-O(1) exact lookup by entity name — no embeddings required. Uses deterministic node-ID lookup, not a full scan.
+Exact lookup by entity name — no embeddings, no scoring. Entity node ID is constructed deterministically, so the node is found in a single lookup. Results are proportional to the number of mentions, not total corpus size.
 
 ```python
 # Find all chunks that mention "Acme Corp" across the entire corpus

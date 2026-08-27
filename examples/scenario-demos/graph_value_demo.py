@@ -10,8 +10,8 @@ traversal (shows the solution).
 Question 1 — "Find everything connected to Acme Corp across all docs"
   Search: BM25 keyword scan with k=4 — caps the result set, missing
           documents where Acme Corp appears beyond the k limit.
-  Graph:  O(1) lookup via entity node → MENTIONS edges → every mention
-          across every document, no k limit, no false positives.
+  Graph:  deterministic node ID → one dict lookup → follow MENTIONS edges
+          → every mention across every document, no k cap, no scoring.
 
 Question 2 — "Which documents mention BOTH Sarah Chen AND Acme Corp?"
   Search: two separate BM25 queries + manual intersection — k-limited,
@@ -253,8 +253,10 @@ def q1_entity_lookup(pipeline: DocumentPipeline,
     _label("")
     _label("  pipeline.search('Acme Corp', mode='bm25', k=4)")
     _label("")
-    _label("  Problem: k=4 caps the result set. Acme Corp appears in 6 documents")
-    _label("  producing multiple chunks — BM25 will silently drop some.")
+    _label("  Problem: k caps the result set and you cannot know the right k in")
+    _label("  advance. In this 6-document corpus k=10 would retrieve everything.")
+    _label("  In a 50,000-document corpus an entity might appear in thousands of")
+    _label("  documents — any fixed k silently drops results beyond it.")
     _label("")
 
     bm25_hits = pipeline.search("Acme Corp", mode="bm25", k=4, collection=COLLECTION)
@@ -267,12 +269,13 @@ def q1_entity_lookup(pipeline: DocumentPipeline,
     print()
 
     _hr()
-    _label("Attempt B — graph traversal  (O(1), no k limit)")
+    _label("Attempt B — graph traversal  (no k cap)")
     _label("")
     _label("  pipeline.graph_neighbors('Acme Corp')")
     _label("")
-    _label("  Resolves entity:PROPER_NOUN:acme corp → MENTIONS edges → Chunks.")
-    _label("  Returns every chunk across every document. No scoring. No k cap.")
+    _label("  Constructs node ID 'entity:PROPER_NOUN:acme corp' deterministically")
+    _label("  (one dict lookup), then follows all inbound MENTIONS edges to chunk")
+    _label("  nodes. No scoring. No k cap. Returns every mention exactly.")
     _label("")
 
     graph_hits = pipeline.graph_neighbors("Acme Corp", k=999)
@@ -303,10 +306,10 @@ def q2_entity_intersection(pipeline: DocumentPipeline,
     _label("  hits_b = pipeline.search('Acme Corp',  mode='bm25', k=4)")
     _label("  shared = doc_ids_with_exact_match(hits_a) & doc_ids_with_exact_match(hits_b)")
     _label("")
-    _label("  Problem: k=4 caps each result set independently. A document where")
-    _label("  Sarah Chen appears only in chunk 5 (past the cap) is silently excluded.")
-    _label("  Correctness depends on choosing k large enough — you rarely know this")
-    _label("  in advance for a growing corpus.")
+    _label("  Problem: k caps each result set independently. A document where")
+    _label("  Sarah Chen appears only past position k is silently excluded.")
+    _label("  Correctness requires knowing k in advance — impossible for a growing")
+    _label("  corpus where entity frequency is unpredictable.")
     _label("")
 
     hits_a = pipeline.search("Sarah Chen", mode="bm25", k=4, collection=COLLECTION)
@@ -465,7 +468,7 @@ def summary() -> None:
     rows = [
         ("Exact entity lookup across corpus",
          "BM25/KNN — k-capped, may miss docs",
-         "O(1) via MENTIONS — exact, no cap"),
+         "Node lookup + MENTIONS hop — exact, no cap"),
         ("Docs mentioning entity A AND B",
          "Two queries + intersect (k-limited)",
          "Neighbour intersection — complete"),

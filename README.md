@@ -76,7 +76,7 @@ chunks = source.execute_query_nl("find the termination clause in Acme Corp contr
 
 An audit team needs every chunk that explicitly names "Acme Corp" — not the 5 most semantically similar chunks, but every occurrence, regardless of surrounding context. Vector search embeds "Acme Corp" and returns the k nearest chunks, missing exact mentions in short passages or tables where the entity name appears without rich surrounding prose to drive embedding quality.
 
-blue-data-doc-source adds optional graph indexing. Every entity extracted by `BasicEnricher` becomes a shared node; every chunk that mentions it gets a `MENTIONS` edge. "Acme Corp" is a graph node with O(1) lookup — returns all chunks across all documents in one hop, regardless of how many there are.
+blue-data-doc-source adds optional graph indexing. Every entity extracted by `BasicEnricher` becomes a shared node; every chunk that mentions it gets a `MENTIONS` edge. "Acme Corp" is a graph node with a deterministic ID — found in a single dict lookup, no corpus scan — and its MENTIONS edges lead directly to every chunk across every document.
 
 ```python
 from blue_data.source.graph.memory_graph_source import MemoryGraphSource
@@ -90,7 +90,7 @@ pipeline.ingest("contract_a.pdf")
 pipeline.ingest("vendor_b.pdf")
 pipeline.ingest("incident_c.txt")
 
-# O(1) entity lookup — returns every chunk that mentions "Acme Corp",
+# exact entity lookup — no corpus scan, no embeddings
 # across all three documents, with no embedding call
 results = pipeline.graph_neighbors("Acme Corp")
 # → [{"chunk_id": "...", "document_id": "...", "text_preview": "...", "entity_type": "PROPER_NOUN"}, ...]
@@ -202,7 +202,7 @@ docs = source.execute_query({
 - **blue-data DataRegistry integration** — `DocumentDataSource` extends blue-data's `DataSource` ABC; registers in the same `DataRegistry` as SQL, graph, and JSON sources using a shared registration and metadata model; each source type retains its own query vocabulary
 - **Document classification and field extraction** — `KeywordClassifier` assigns a document type at ingest using keyword rules (zero API cost); `LLMFieldExtractor` extracts typed fields via one LLM call per document; `StructuredFieldExtractor` extracts against a caller-supplied Pydantic model, TypedDict, or JSON Schema with automatic prompt generation and output validation; all three work without a pre-configured classifier — pass only a `field_extractor` for generic extraction from unknown corpora; `document_type` propagates to every chunk and is filterable in KNN search
 - **Structured corpus query (`DOCUMENT.FIND`)** — filter across all ingested documents by extracted field values (`{"fields.governing_law": {"contains": "California"}}`, `{"fields.total_due": {"gt": 30000}}`); currency symbols (`$€£¥`) and commas are stripped before numeric comparison; all conditions ANDed; deterministic — no embedding, no query-time LLM call
-- **Graph backend — entity-centric retrieval and structural navigation** — pass any blue-data `GraphSource` as `graph_source=` to populate a full knowledge graph during ingest; nodes: `Document` (with `mime_type`, `ingested_at`, `chunk_count`), `Section`, `Chunk`, `Entity`; edges: `HAS_SECTION`, `HAS_CHUNK`, `NEXT`, `PREV`, `MENTIONS`, `APPEARS_IN`, `CO_OCCURS_WITH`; query via `DOCUMENT.GRAPH_NEIGHBORS` (O(1) exact entity lookup, no embeddings) or `DOCUMENT.GRAPH_QUERY` (general traversal from any node); fully optional — `graph_source=None` (the default) disables with zero overhead; backends: `MemoryGraphSource` (dev), `NEO4JSource` (production)
+- **Graph backend — entity-centric retrieval and structural navigation** — pass any blue-data `GraphSource` as `graph_source=` to populate a full knowledge graph during ingest; nodes: `Document` (with `mime_type`, `ingested_at`, `chunk_count`), `Section`, `Chunk`, `Entity`; edges: `HAS_SECTION`, `HAS_CHUNK`, `NEXT`, `PREV`, `MENTIONS`, `APPEARS_IN`, `CO_OCCURS_WITH`; query via `DOCUMENT.GRAPH_NEIGHBORS` (exact entity lookup via deterministic node ID, no embeddings, no corpus scan) or `DOCUMENT.GRAPH_QUERY` (general traversal from any node); fully optional — `graph_source=None` (the default) disables with zero overhead; backends: `MemoryGraphSource` (dev), `NEO4JSource` (production)
 - **Persistent schema store** — `RecordStore` ABC backed by any blue-data `JSONSource`; `MemoryRecordStore` (default, in-process), `FileRecordStore` (atomic JSON write, survives restarts), `JsonSourceRecordStore(RedisJSONSource(...))` (multi-process-safe, no last-writer-wins race)
 - **Content-addressed ingestion** — SHA-256 hash of file bytes is the `document_id`; re-ingesting the same file is always a safe upsert; chunk IDs are stable provided the parser, chunker, and chunk size remain unchanged
 
