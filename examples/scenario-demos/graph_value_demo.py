@@ -214,6 +214,86 @@ def _chunk_hit(label: str, chunk: dict, fname_map: dict[str, str]) -> None:
     print(f"    {label}: {fname}  {section}{preview!r}…")
 
 
+def _render_entity_tree(entity_name: str, hits: list[dict],
+                        fname_map: dict[str, str]) -> None:
+    """ASCII tree: entity node → MENTIONS edges → chunk nodes."""
+    print(f"    entity:PROPER_NOUN:{entity_name.lower()}")
+    for i, chunk in enumerate(hits):
+        branch = "    └──MENTIONS──►" if i == len(hits) - 1 else "    ├──MENTIONS──►"
+        doc_id = chunk.get("document_id", "")
+        fname  = chunk.get("file_name") or fname_map.get(doc_id, "?")
+        section = f"  [{chunk['section_title']}]" if chunk.get("section_title") else ""
+        print(f"    {branch}  {fname}{section}")
+    print()
+
+
+def _render_membership(label_a: str, docs_a: set, label_b: str, docs_b: set,
+                        fname_map: dict[str, str]) -> None:
+    """Table showing per-document membership for two entities, intersection marked."""
+    both     = docs_a & docs_b
+    all_docs = sorted(docs_a | docs_b)
+    col_doc  = max((len(fname_map.get(d, d)) for d in all_docs), default=20) + 2
+    sep      = "─" * (col_doc + len(label_a) + len(label_b) + 10)
+    print(f"    {'Document':<{col_doc}}  {label_a:<{len(label_a)+2}}  {label_b}")
+    print(f"    {sep}")
+    for doc_id in all_docs:
+        name   = fname_map.get(doc_id, doc_id)
+        mark_a = "✓" if doc_id in docs_a else " "
+        mark_b = "✓" if doc_id in docs_b else " "
+        tag    = "   ◄ both" if doc_id in both else ""
+        print(f"    {name:<{col_doc}}  {mark_a:<{len(label_a)+2}}  {mark_b}{tag}")
+    print(f"    {sep}")
+    print(f"    Intersection: {len(both)} document(s)")
+    print()
+
+
+def _render_chain(prev_text: str, this_text: str, next_text: str) -> None:
+    """Three-box PREV → THIS → NEXT reading-order diagram."""
+    W = 18  # content width inside each box
+
+    def _wrap(text: str) -> list[str]:
+        text  = text.replace("\n", " ").strip()
+        lines: list[str] = []
+        while text and len(lines) < 2:
+            if len(text) <= W:
+                lines.append(text)
+                break
+            cut = text.rfind(" ", 0, W)
+            if cut <= 0:
+                cut = W
+            lines.append(text[:cut])
+            text = text[cut:].strip()
+        while len(lines) < 2:
+            lines.append("")
+        return lines
+
+    labels  = ["◄ PREV", "● THIS", "NEXT ►"]
+    wrapped = [_wrap(t) for t in [
+        prev_text or "(start of document)",
+        this_text,
+        next_text or "(end of document)",
+    ]]
+    top   = f"┌{'─'*(W+2)}┐"
+    mid   = f"├{'─'*(W+2)}┤"
+    bot   = f"└{'─'*(W+2)}┘"
+    gap   = "         "
+    arrow = " ──────► "
+
+    hdr = [f"│ {lbl.center(W)} │" for lbl in labels]
+    r0  = [f"│ {wrapped[i][0]:<{W}} │" for i in range(3)]
+    r1  = [f"│ {wrapped[i][1]:<{W}} │" for i in range(3)]
+
+    print(f"    reading order {'─'*47}►")
+    print()
+    print(f"    {top}{gap}{top}{gap}{top}")
+    print(f"    {hdr[0]}{gap}{hdr[1]}{gap}{hdr[2]}")
+    print(f"    {mid}{gap}{mid}{gap}{mid}")
+    print(f"    {r0[0]}{arrow}{r0[1]}{arrow}{r0[2]}")
+    print(f"    {r1[0]}{gap}{r1[1]}{gap}{r1[2]}")
+    print(f"    {bot}{gap}{bot}{gap}{bot}")
+    print()
+
+
 def build_pipeline() -> tuple[DocumentPipeline, MemoryGraphSource]:
     graph    = MemoryGraphSource("compliance")
     pipeline = DocumentPipeline(
@@ -285,6 +365,7 @@ def q1_entity_lookup(pipeline: DocumentPipeline,
     for r in graph_hits:
         _chunk_hit("hit", r, fname_map)
     print()
+    _render_entity_tree("Acme Corp", graph_hits, fname_map)
     missing = len(doc_ids) - len(docs_in_bm25)
     if missing > 0:
         print(f"    ↑ Graph found {missing} more document(s) than BM25 with k=4.")
@@ -341,13 +422,7 @@ def q2_entity_intersection(pipeline: DocumentPipeline,
     ac_docs   = {r["document_id"] for r in ac_hits}
     both_docs = sc_docs & ac_docs
 
-    print(f"    Sarah Chen appears in: {len(sc_docs)} document(s)")
-    print(f"    Acme Corp  appears in: {len(ac_docs)} document(s)")
-    print(f"    Both appear in       : {len(both_docs)} document(s) — complete")
-    print()
-    for doc_id in sorted(both_docs):
-        print(f"      ✓  {fname_map.get(doc_id, doc_id)}")
-    print()
+    _render_membership("Sarah Chen", sc_docs, "Acme Corp", ac_docs, fname_map)
     _label("  One intersection. No k risk. Scales to any corpus size.")
     print()
 
@@ -438,17 +513,11 @@ def q3_context_expansion(pipeline: DocumentPipeline,
         text   = props.get("text_preview", "").replace("\n", " ").strip()
         return text[:120] if text else fallback
 
-    prev_text = _node_text(prev_items, "(start of document)")
-    next_text = _node_text(next_items, "(end of document)")
+    prev_text = _node_text(prev_items, "")
+    next_text = _node_text(next_items, "")
 
-    print(f"    ← PREV  [{target_fname}]")
-    print(f"      {prev_text!r}…")
-    print()
-    print(f"    ● THIS  [{target_fname}]  ← Acme Corp mention found here")
-    print(f"      {target_prev!r}…")
-    print()
-    print(f"    → NEXT  [{target_fname}]")
-    print(f"      {next_text!r}…")
+    _render_chain(prev_text, target_prev, next_text)
+    print(f"    All three chunks from {target_fname} — same document, in reading order.")
     print()
     _label("  The analyst can now read the incident timeline in sequence:")
     _label("  what happened before the Acme Corp mention, and what follow-up")
