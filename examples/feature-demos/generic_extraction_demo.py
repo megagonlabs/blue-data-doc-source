@@ -342,6 +342,95 @@ def run() -> None:
     print("                          └─ Yes → KeywordClassifier() + StructuredFieldExtractor(schema)")
     print("                                    detected document_type + schema-validated fields")
 
+    # ── Step 6: hint_fields — partial name stabilisation ─────────────────
+    _step(6, "hint_fields — stabilise key names without a full schema")
+    print()
+    print("  Problem: field names vary across documents because the LLM chooses them freely.")
+    print("    lab_notebook   : 'Date', 'Researcher', 'Lab Location', 'Result'")
+    print("    equipment_log  : 'Service Date', 'Technician', 'Certification Status'")
+    print("    incident_report: 'Date of Incident', 'Reported By', 'Location', 'Status'")
+    print()
+    print("  DOCUMENT.FIND({'fields.date': {'exists': True}}) misses records where the LLM")
+    print("  chose 'Service Date' or 'Date of Incident' instead.")
+    print()
+    print("  hint_fields tells the LLM which exact names to prefer:")
+    print()
+    print("    LLMFieldExtractor(")
+    print("        hint_fields=['date', 'status', 'responsible_person', 'location'],")
+    print("    )")
+    print()
+    print("  The prompt becomes:")
+    print("    'Extract any structured metadata you can find. When you find values")
+    print("     that correspond to any of the following concepts, use exactly these")
+    print("     field names: date, status, responsible_person, location.")
+    print("     You may extract additional fields beyond this list.'")
+    print()
+
+    if has_openai:
+        pipeline_hinted = DocumentPipeline(
+            chunk_size=250, overlap=25,
+            field_extractor=LLMFieldExtractor(
+                hint_fields=["date", "status", "responsible_person", "location"],
+            ),
+        )
+        for fname, _label, text in docs:
+            pipeline_hinted.ingest_text(text, file_name=fname)
+
+        hinted_records = pipeline_hinted.find_records()
+        _HINT_NAMES = {"date", "status", "responsible_person", "location"}
+
+        print("  Extracted fields with hint_fields=['date', 'status', 'responsible_person', 'location']:")
+        print()
+        for r in hinted_records:
+            doc_name = r.get("source_name", r["document_id"][:24])
+            hinted = {k: v for k, v in r["fields"].items() if k in _HINT_NAMES}
+            others  = {k: v for k, v in r["fields"].items() if k not in _HINT_NAMES}
+            print(f"  ┌── {doc_name}")
+            for k, v in hinted.items():
+                v_str = str(v)[:50]
+                print(f"  │   {k:<24} {v_str!r}  ← hinted name")
+            for k, v in list(others.items())[:3]:
+                v_str = str(v)[:50]
+                print(f"  │   {k:<24} {v_str!r}")
+            if len(others) > 3:
+                print(f"  │   ... +{len(others) - 3} more")
+            print(f"  └──")
+            print()
+
+        print("  DOCUMENT.FIND on the hinted field name 'date':")
+        dated = pipeline_hinted.find_records({"fields.date": {"exists": True}})
+        print(f"    find_records({{'fields.date': {{'exists': True}}}})  ->  {len(dated)} record(s)")
+        for r in dated:
+            doc_name = r.get("source_name", r["document_id"][:24])
+            print(f"    {doc_name}: date={r['fields'].get('date')!r}")
+        print()
+        if len(dated) == len(docs):
+            print("  All 3 documents matched — consistent name, consistent filter.")
+        else:
+            print("  Note: LLM may still vary on some docs. hint_fields reduces variance,")
+            print("  not eliminates it. For guaranteed names, use StructuredFieldExtractor.")
+    else:
+        print("  Expected outcome (set OPENAI_API_KEY to see real results):")
+        print()
+        print("  ┌──────────────────────────┬──────────────────────────┬───────────────────────────┐")
+        print("  │ Document                 │ Without hint_fields      │ With hint_fields           │")
+        print("  ├──────────────────────────┼──────────────────────────┼───────────────────────────┤")
+        print("  │ lab_notebook_2026.txt    │ 'Date', 'Researcher',    │ 'date',                   │")
+        print("  │                          │ 'Lab Location', 'Result' │ 'responsible_person',     │")
+        print("  │                          │                          │ 'location', 'status'      │")
+        print("  ├──────────────────────────┼──────────────────────────┼───────────────────────────┤")
+        print("  │ equipment_log_cf800.txt  │ 'Service Date',          │ 'date',                   │")
+        print("  │                          │ 'Technician',            │ 'responsible_person',     │")
+        print("  │                          │ 'Certification Status'   │ 'status'                  │")
+        print("  ├──────────────────────────┼──────────────────────────┼───────────────────────────┤")
+        print("  │ incident_INC-2026-0088   │ 'Date of Incident',      │ 'date',                   │")
+        print("  │                          │ 'Reported By',           │ 'responsible_person',     │")
+        print("  │                          │ 'Location', 'Status'     │ 'location', 'status'      │")
+        print("  └──────────────────────────┴──────────────────────────┴───────────────────────────┘")
+        print()
+        print("  Without hints:  find_records({'fields.date': {'exists': True}})  ->  0 records")
+        print("  With hints:     find_records({'fields.date': {'exists': True}})  ->  3 records")
+
     # ── Summary ───────────────────────────────────────────────────────────
     _banner("Summary")
     print()
@@ -359,8 +448,10 @@ def run() -> None:
     print("  How to use it correctly:")
     print("    1. Ingest a representative sample of your corpus.")
     print("    2. Call find_records() and list all field names that appeared.")
-    print("    3. Define a StructuredFieldExtractor(schema) with those names.")
-    print("    4. Re-ingest (or use the schema from that point forward).")
+    print("    3. Add hint_fields=[...] to reduce naming variance for the names you care about.")
+    print("       Field names still vary for un-hinted fields; hints are best-effort, not guaranteed.")
+    print("    4. Once names are stable, define a StructuredFieldExtractor(schema).")
+    print("    5. Re-ingest (or use the schema from that point forward).")
     print()
     if not has_openai:
         print("  To see real extraction output:")
