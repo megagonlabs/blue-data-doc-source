@@ -620,14 +620,40 @@ Once you have seen the fields the LLM produces, you can stabilise them with a `S
 
 ### Choosing your extraction setup
 
+Start here — pick your path based on what you already know:
+
+```
+Do you need extracted fields?
+  │
+  ├─ No  → KeywordClassifier() alone
+  │         Assigns document_type to every chunk at zero API cost.
+  │         Use DOCUMENT.SEARCH with filters={"document_type": "contract"}.
+  │
+  └─ Yes → Do you already have a schema (Pydantic / TypedDict / JSON Schema)?
+             │
+             ├─ No  → LLMFieldExtractor() alone          ← start here for unfamiliar corpora
+             │         LLM names fields freely. Inspect the output once:
+             │           find_records() → see which field names were used → write filters
+             │         When field names are stable, move to StructuredFieldExtractor(schema).
+             │
+             └─ Yes → Do you also need document_type on each chunk?
+                        │
+                        ├─ No  → StructuredFieldExtractor(schema)
+                        │         Schema-defined names. Pydantic-validated output.
+                        │
+                        └─ Yes → KeywordClassifier() + StructuredFieldExtractor(schema)
+                                  Detected document_type + schema-defined, validated fields.
+```
+
 | Scenario | Setup | `document_type` | Field names |
 |---|---|---|---|
-| Unfamiliar corpus, get started fast | `field_extractor=LLMFieldExtractor()` only | `"unknown"` | LLM-chosen — inspect first |
-| Known document types, typed fields | `classifier=KeywordClassifier()` + `field_extractor=LLMFieldExtractor()` | detected type | type-specific prompt |
+| Type classification only | `classifier=KeywordClassifier()` | detected type | — |
+| Unfamiliar corpus — discover fields | `field_extractor=LLMFieldExtractor()` only | `"unknown"` | LLM-chosen — inspect first, then stabilise |
+| Known types, typed fields | `classifier=KeywordClassifier()` + `field_extractor=LLMFieldExtractor()` | detected type | type-specific prompt |
 | Known schema, validated output | `field_extractor=StructuredFieldExtractor(schema)` | `"unknown"` | schema-defined, Pydantic-validated |
 | Typed + schema-validated | `classifier=KeywordClassifier()` + `field_extractor=StructuredFieldExtractor(schema)` | detected type | schema-defined, Pydantic-validated |
 
-All four paths write to the same `DocumentRecord`, use the same `DOCUMENT.FIND` filter syntax, and store fields under the same `fields.*` dot-notation. The setup decision only affects type detection accuracy and how predictable field names are.
+All five paths write to the same `DocumentRecord`, use the same `DOCUMENT.FIND` filter syntax, and store fields under the same `fields.*` dot-notation. The setup decision only affects type detection accuracy and how predictable field names are.
 
 ---
 
