@@ -44,6 +44,8 @@ _DEFAULT_PROMPT = (
     "Document text:\n{text}"
 )
 
+_GENERIC_SPEC = "Extract any structured metadata you can find."
+
 
 class LLMFieldExtractor(FieldExtractor):
     """OpenAI-backed field extractor — optional dependency.
@@ -60,6 +62,14 @@ class LLMFieldExtractor(FieldExtractor):
             what to extract, in the same format as the built-in specs. Merged
             with the built-in types; user-supplied types take precedence on
             name collision.
+        hint_fields: Preferred field names to use when extracting from an
+            unrecognised document type (i.e. when no type-specific spec
+            matches). The LLM is instructed to use these exact names for any
+            data it finds that corresponds to them, reducing naming variance
+            across documents. Additional fields not in this list may still be
+            extracted. Has no effect when ``document_type`` matches a built-in
+            or ``extra_types`` spec, since those specs already define field
+            names precisely.
 
     Example::
 
@@ -77,6 +87,11 @@ class LLMFieldExtractor(FieldExtractor):
                 ),
             }
         )
+
+        # Stabilise field names during schema discovery (no known type yet):
+        extractor = LLMFieldExtractor(
+            hint_fields=["vendor", "total_due", "date", "status"],
+        )
     """
 
     def __init__(
@@ -84,10 +99,22 @@ class LLMFieldExtractor(FieldExtractor):
         model: str = "gpt-4o-mini",
         sample_chars: int = 4000,
         extra_types: dict[str, str] | None = None,
+        hint_fields: list[str] | None = None,
     ) -> None:
         self._model = model
         self._sample_chars = sample_chars
         self._field_specs = {**_FIELD_SPECS, **(extra_types or {})}
+        self._hint_fields = hint_fields
+        if hint_fields:
+            names = ", ".join(hint_fields)
+            self._generic_spec = (
+                f"{_GENERIC_SPEC} "
+                f"When you find values that correspond to any of the following concepts, "
+                f"use exactly these field names: {names}. "
+                f"You may extract additional fields beyond this list."
+            )
+        else:
+            self._generic_spec = _GENERIC_SPEC
         self._client: Any = None
 
     def _get_client(self) -> Any:
@@ -103,7 +130,7 @@ class LLMFieldExtractor(FieldExtractor):
         return self._client
 
     def extract(self, text: str, document_type: str) -> dict:
-        field_spec = self._field_specs.get(document_type, "Extract any structured metadata you can find.")
+        field_spec = self._field_specs.get(document_type, self._generic_spec)
         prompt = _DEFAULT_PROMPT.format(
             field_spec=field_spec,
             text=text[: self._sample_chars],

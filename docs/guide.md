@@ -610,18 +610,25 @@ For document types with no matching spec (including `"unknown"`), `LLMFieldExtra
 
 ### Generic extraction without a classifier
 
-Pass only `field_extractor` — no `classifier` needed. The pipeline calls `extract()` with `document_type="unknown"`, which triggers the generic fallback prompt. Useful for unknown corpora where document types are not defined in advance.
+Pass only `field_extractor` — no `classifier` needed. The pipeline calls `extract()` with `document_type="unknown"`, which triggers the generic fallback prompt. Use this when you are exploring an unfamiliar corpus and want to understand what structured fields it contains before committing to a schema.
+
+**This mode is for schema discovery, not reliable production filtering.** The LLM names fields freely — `"vendor"` in one document, `"supplier_name"` in another — and `DOCUMENT.FIND` matches on exact field names, so inconsistent names mean filters silently miss records. Inspect the output across multiple documents before relying on any filter.
 
 ```python
 pipeline = DocumentPipeline(
     field_extractor=LLMFieldExtractor(),   # no classifier
 )
-records = pipeline.ingest("mystery_doc.pdf")
-schema = pipeline.find_records()
-# → [{"document_type": "unknown", "confidence": 0.0, "fields": {...}}]
+pipeline.ingest("doc_a.pdf")
+pipeline.ingest("doc_b.pdf")
+
+# Inspect before filtering — names may differ across documents
+for rec in pipeline.find_records():
+    print(rec["document_id"], sorted(rec.get("fields", {}).keys()))
+# doc_abc: ['total_amount', 'vendor']
+# doc_def: ['amount_due', 'supplier_name']   ← same concept, different names
 ```
 
-`find_records()` works exactly as when a classifier is set — `document_type` is `"unknown"` and field names are whatever the LLM extracted.
+Once you know which field names the LLM consistently produces, define a `StructuredFieldExtractor` schema to enforce those names on all future ingests. See [features.md — Generic extraction](features.md#generic-extraction--field_extractor-without-a-classifier) for the full stabilization workflow.
 
 ### StructuredFieldExtractor — schema-driven extraction
 

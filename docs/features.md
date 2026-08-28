@@ -585,7 +585,7 @@ pipeline = DocumentPipeline(
 
 `LLMFieldExtractor` can be used **without** a `KeywordClassifier`. When no classifier is set, the pipeline assigns `document_type = "unknown"` and `confidence = 0.0`, then runs the field extractor on the raw document text with no type hint. The LLM discovers and names fields freely based on whatever it finds in the document.
 
-This is useful when you are ingesting a heterogeneous or unfamiliar corpus and want structured fields immediately, without having to define document types or signal phrases upfront:
+**This mode is for schema discovery, not production filtering.** The LLM chooses field names freely and inconsistently — one document might produce `{"vendor": "Acme"}` while another produces `{"supplier_name": "Acme Corp"}` for the same concept. `DOCUMENT.FIND` filters on exact field names, so those two records would not both match `{"fields.vendor": {"contains": "Acme"}}`. Use this mode to understand what fields your corpus contains, then define a `StructuredFieldExtractor` schema once field names are understood.
 
 ```python
 from blue_data_doc_source import DocumentPipeline, LLMFieldExtractor
@@ -599,22 +599,38 @@ pipeline.ingest_text(incident_report_text, file_name="incident.txt")
 
 records = pipeline.find_records()
 # document_type = 'unknown', confidence = 0.0
-# fields = whatever the LLM found: researcher, protocol, sample_id, ...
+# fields = whatever the LLM named: researcher, protocol, sample_id, ...
+# Warning: field names may differ across documents for the same concept
 ```
 
-Extracted fields are fully queryable via `DOCUMENT.FIND` — the only difference from typed extraction is that field names are LLM-chosen, so you should inspect the records once to learn what names were used before writing filters:
+Inspect what was extracted across all records before writing any filters:
 
 ```python
-# Discover what the LLM extracted
+# See all field names the LLM chose across the corpus
 for rec in pipeline.find_records():
-    print(rec["document_id"], list(rec.get("fields", {}).keys()))
-# doc_abc123: ['report_id', 'severity', 'root_cause', 'status', ...]
-
-# Then filter normally
-pipeline.find_records({"fields.severity": {"contains": "High"}})
+    print(rec["document_id"], sorted(rec.get("fields", {}).keys()))
+# doc_abc123: ['root_cause', 'severity', 'status']
+# doc_def456: ['incident_severity', 'root_cause_analysis', 'ticket_status']
+# ↑ same concepts, different names — filters on one will miss the other
 ```
 
-Once you have seen the fields the LLM produces, you can stabilise them with a `StructuredFieldExtractor` or a typed `LLMFieldExtractor` prompt — but no code change is needed until then.
+Once you have identified which field names the LLM consistently produces, define a `StructuredFieldExtractor` schema to enforce those names going forward:
+
+```python
+from pydantic import BaseModel
+from blue_data_doc_source import StructuredFieldExtractor
+
+class IncidentReport(BaseModel):
+    severity: str
+    root_cause: str
+    status: str
+
+pipeline = DocumentPipeline(
+    field_extractor=StructuredFieldExtractor(schema=IncidentReport),
+)
+# Now every document produces the same field names — filters are reliable
+```
+
 
 ---
 
@@ -631,10 +647,11 @@ Do you need extracted fields?
   │
   └─ Yes → Do you already have a schema (Pydantic / TypedDict / JSON Schema)?
              │
-             ├─ No  → LLMFieldExtractor() alone          ← start here for unfamiliar corpora
-             │         LLM names fields freely. Inspect the output once:
-             │           find_records() → see which field names were used → write filters
-             │         When field names are stable, move to StructuredFieldExtractor(schema).
+             ├─ No  → LLMFieldExtractor() alone          ← schema discovery, not production filtering
+             │         LLM names fields freely and inconsistently: "vendor" in one doc,
+             │         "supplier_name" in another. DOCUMENT.FIND filters will miss variants.
+             │         Use this to explore: find_records() → see what field names appeared →
+             │         define a StructuredFieldExtractor(schema) once names are understood.
              │
              └─ Yes → Do you also need document_type on each chunk?
                         │
@@ -648,7 +665,7 @@ Do you need extracted fields?
 | Scenario | Setup | `document_type` | Field names |
 |---|---|---|---|
 | Type classification only | `classifier=KeywordClassifier()` | detected type | — |
-| Unfamiliar corpus — discover fields | `field_extractor=LLMFieldExtractor()` only | `"unknown"` | LLM-chosen — inspect first, then stabilise |
+| Unfamiliar corpus — discover fields | `field_extractor=LLMFieldExtractor()` only | `"unknown"` | LLM-chosen, may vary per document — exploration only; define schema once names are understood |
 | Known types, typed fields | `classifier=KeywordClassifier()` + `field_extractor=LLMFieldExtractor()` | detected type | type-specific prompt |
 | Known schema, validated output | `field_extractor=StructuredFieldExtractor(schema)` | `"unknown"` | schema-defined, Pydantic-validated |
 | Typed + schema-validated | `classifier=KeywordClassifier()` + `field_extractor=StructuredFieldExtractor(schema)` | detected type | schema-defined, Pydantic-validated |

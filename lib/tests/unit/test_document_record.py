@@ -240,9 +240,57 @@ class TestLLMFieldExtractorExtraTypes:
 
     def test_builtin_fallback_used_for_unknown_type(self):
         extractor = LLMFieldExtractor()
-        # "unknown" type has no spec — falls back to generic instruction
-        spec = extractor._field_specs.get("unknown", "Extract any structured metadata you can find.")
-        assert "metadata" in spec
+        assert "metadata" in extractor._generic_spec
+
+
+# ---------------------------------------------------------------------------
+# LLMFieldExtractor — hint_fields
+# ---------------------------------------------------------------------------
+
+class TestLLMFieldExtractorHintFields:
+    def test_hint_fields_stored(self):
+        extractor = LLMFieldExtractor(hint_fields=["vendor", "total_due"])
+        assert extractor._hint_fields == ["vendor", "total_due"]
+
+    def test_hint_fields_none_by_default(self):
+        extractor = LLMFieldExtractor()
+        assert extractor._hint_fields is None
+
+    def test_hint_fields_appear_in_generic_spec(self):
+        extractor = LLMFieldExtractor(hint_fields=["vendor", "total_due", "date"])
+        assert "vendor" in extractor._generic_spec
+        assert "total_due" in extractor._generic_spec
+        assert "date" in extractor._generic_spec
+
+    def test_hint_fields_generic_spec_retains_base_instruction(self):
+        extractor = LLMFieldExtractor(hint_fields=["vendor"])
+        assert "Extract any structured metadata" in extractor._generic_spec
+
+    def test_no_hint_fields_generic_spec_is_plain(self):
+        extractor = LLMFieldExtractor()
+        assert extractor._generic_spec == "Extract any structured metadata you can find."
+
+    def test_hint_fields_do_not_modify_typed_specs(self):
+        extractor = LLMFieldExtractor(hint_fields=["vendor", "total_due"])
+        # Built-in typed specs must be unchanged
+        assert "parties" in extractor._field_specs["contract"]
+        assert "invoice_number" in extractor._field_specs["invoice"]
+
+    def test_hint_fields_used_as_fallback_for_unknown_type(self):
+        extractor = LLMFieldExtractor(hint_fields=["vendor", "amount"])
+        fallback = extractor._field_specs.get("unknown", extractor._generic_spec)
+        assert "vendor" in fallback
+        assert "amount" in fallback
+
+    def test_hint_fields_compatible_with_extra_types(self):
+        extractor = LLMFieldExtractor(
+            extra_types={"lease": "Extract: lessor (string), lessee (string)."},
+            hint_fields=["vendor", "date"],
+        )
+        # hint_fields must not bleed into the named extra type
+        assert "vendor" not in extractor._field_specs["lease"]
+        # hint_fields still appear in the generic fallback
+        assert "vendor" in extractor._generic_spec
 
 
 # ---------------------------------------------------------------------------
