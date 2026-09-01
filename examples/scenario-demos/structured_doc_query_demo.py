@@ -18,8 +18,8 @@ The three failure modes:
      to the query — it's the one where parties = "Acme Corp".
 
   2. Structured filter  — "Find all invoices where total exceeds $30,000"
-     Embedding distance cannot compare "$35,154" to 30000. No RAG library
-     solves this with a prompt.
+     Embedding distance cannot compare "$35,154" to 30000 — typed field
+     extraction and a structured filter over persisted values are needed.
 
   3. Cross-document disambiguation  — "Which contract is governed by California?"
      A keyword or semantic search returns chunks mentioning California from
@@ -365,7 +365,8 @@ def run() -> None:
     _chunk_table(naive_invoice)
     print()
     print("  The search returns chunks with the word 'total' — it cannot compare")
-    print("  '$35,154' against the threshold 30,000. Every RAG library has this problem.")
+    print("  '$35,154' against the threshold 30,000 — a structured filter over extracted")
+    print("  typed fields is needed; embedding distance alone cannot evaluate this predicate.")
 
     if has_openai:
         print()
@@ -680,9 +681,9 @@ def run() -> None:
     # ====================================================================
     # Summary
     # ====================================================================
-    _banner("Summary — What existing RAG libraries can't do")
+    _banner("Summary — What vector search alone cannot do")
     print()
-    print("  Every RAG library (LangChain, LlamaIndex, Haystack) gives you:")
+    print("  A vector-only pipeline gives you:")
     print("    embed query → nearest k chunks → paste into LLM context")
     print()
     print("  That fails for:")

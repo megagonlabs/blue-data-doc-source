@@ -52,6 +52,24 @@ window_chunker = WindowChunker(chunk_size=500, overlap=50)
 chunks = window_chunker.chunk_with_titles(text)
 ```
 
+`SentenceChunker` aligns chunks to sentence boundaries — no sentence is ever split across chunk boundaries. Uses `nltk.sent_tokenize` when available; falls back to punctuation regex without NLTK.
+
+```python
+from blue_data_doc_source.source.document.chunkers import SentenceChunker
+
+chunker = SentenceChunker(chunk_size=200, overlap=40)
+pipeline = DocumentPipeline(chunker=chunker, embedding_model=..., vector_source=...)
+```
+
+Install NLTK for higher-quality sentence detection:
+
+```bash
+pip install blue-data-doc-source[nlp]
+python -c "import nltk; nltk.download('punkt_tab')"
+```
+
+`SentenceChunker` produces no `section_title` — use `SectionChunker` when heading preservation matters.
+
 Both chunkers operate on **word count**, not character count. PDF chunks never span page boundaries.
 
 ---
@@ -567,7 +585,7 @@ pipeline = DocumentPipeline(
 
 `LLMFieldExtractor` can be used **without** a `KeywordClassifier`. When no classifier is set, the pipeline assigns `document_type = "unknown"` and `confidence = 0.0`, then runs the field extractor on the raw document text with no type hint. The LLM discovers and names fields freely based on whatever it finds in the document.
 
-This is useful when you are ingesting a heterogeneous or unfamiliar corpus and want structured fields immediately, without having to define document types or signal phrases upfront:
+**This mode is for schema discovery, not production filtering.** The LLM chooses field names freely and inconsistently — one document might produce `{"vendor": "Acme"}` while another produces `{"supplier_name": "Acme Corp"}` for the same concept. `DOCUMENT.FIND` filters on exact field names, so those two records would not both match `{"fields.vendor": {"contains": "Acme"}}`. Use this mode to understand what fields your corpus contains, then define a `StructuredFieldExtractor` schema once field names are understood.
 
 ```python
 from blue_data_doc_source import DocumentPipeline, LLMFieldExtractor
@@ -581,35 +599,131 @@ pipeline.ingest_text(incident_report_text, file_name="incident.txt")
 
 records = pipeline.find_records()
 # document_type = 'unknown', confidence = 0.0
-# fields = whatever the LLM found: researcher, protocol, sample_id, ...
+# fields = whatever the LLM named: researcher, protocol, sample_id, ...
+# Warning: field names may differ across documents for the same concept
 ```
 
-Extracted fields are fully queryable via `DOCUMENT.FIND` — the only difference from typed extraction is that field names are LLM-chosen, so you should inspect the records once to learn what names were used before writing filters:
+Inspect what was extracted across all records before writing any filters:
 
 ```python
-# Discover what the LLM extracted
+# See all field names the LLM chose across the corpus
 for rec in pipeline.find_records():
-    print(rec["document_id"], list(rec.get("fields", {}).keys()))
-# doc_abc123: ['report_id', 'severity', 'root_cause', 'status', ...]
-
-# Then filter normally
-pipeline.find_records({"fields.severity": {"contains": "High"}})
+    print(rec["document_id"], sorted(rec.get("fields", {}).keys()))
+# doc_abc123: ['root_cause', 'severity', 'status']
+# doc_def456: ['incident_severity', 'root_cause_analysis', 'ticket_status']
+# ↑ same concepts, different names — filters on one will miss the other
 ```
 
-Once you have seen the fields the LLM produces, you can stabilise them with a `StructuredFieldExtractor` or a typed `LLMFieldExtractor` prompt — but no code change is needed until then.
+Once you have identified which field names the LLM consistently produces, define a `StructuredFieldExtractor` schema to enforce those names going forward:
+
+```python
+from pydantic import BaseModel
+from blue_data_doc_source import StructuredFieldExtractor
+
+class IncidentReport(BaseModel):
+    severity: str
+    root_cause: str
+    status: str
+
+pipeline = DocumentPipeline(
+    field_extractor=StructuredFieldExtractor(schema=IncidentReport),
+)
+# Now every document produces the same field names — filters are reliable
+```
+
 
 ---
 
 ### Choosing your extraction setup
 
+Start here — pick your path based on what you already know:
+
+```
+Do you need extracted fields?
+  │
+  ├─ No  → KeywordClassifier() alone
+  │         Assigns document_type to every chunk at zero API cost.
+  │         Use DOCUMENT.SEARCH with filters={"document_type": "contract"}.
+  │
+  └─ Yes → Do you already have a schema (Pydantic / TypedDict / JSON Schema)?
+             │
+             ├─ No  → LLMFieldExtractor() alone          ← schema discovery, not production filtering
+             │         LLM names fields freely and inconsistently: "vendor" in one doc,
+             │         "supplier_name" in another. DOCUMENT.FIND filters will miss variants.
+             │         Use this to explore: find_records() → see what field names appeared →
+             │         define a StructuredFieldExtractor(schema) once names are understood.
+             │
+             └─ Yes → Do you also need document_type on each chunk?
+                        │
+                        ├─ No  → StructuredFieldExtractor(schema)
+                        │         Schema-defined names. Pydantic-validated output.
+                        │
+                        └─ Yes → KeywordClassifier() + StructuredFieldExtractor(schema)
+                                  Detected document_type + schema-defined, validated fields.
+```
+
 | Scenario | Setup | `document_type` | Field names |
 |---|---|---|---|
-| Unfamiliar corpus, get started fast | `field_extractor=LLMFieldExtractor()` only | `"unknown"` | LLM-chosen — inspect first |
-| Known document types, typed fields | `classifier=KeywordClassifier()` + `field_extractor=LLMFieldExtractor()` | detected type | type-specific prompt |
+| Type classification only | `classifier=KeywordClassifier()` | detected type | — |
+| Unfamiliar corpus — discover fields | `field_extractor=LLMFieldExtractor()` only | `"unknown"` | LLM-chosen, may vary per document — exploration only; define schema once names are understood |
+| Known types, typed fields | `classifier=KeywordClassifier()` + `field_extractor=LLMFieldExtractor()` | detected type | type-specific prompt |
 | Known schema, validated output | `field_extractor=StructuredFieldExtractor(schema)` | `"unknown"` | schema-defined, Pydantic-validated |
 | Typed + schema-validated | `classifier=KeywordClassifier()` + `field_extractor=StructuredFieldExtractor(schema)` | detected type | schema-defined, Pydantic-validated |
 
-All four paths write to the same `DocumentRecord`, use the same `DOCUMENT.FIND` filter syntax, and store fields under the same `fields.*` dot-notation. The setup decision only affects type detection accuracy and how predictable field names are.
+All five paths write to the same `DocumentRecord`, use the same `DOCUMENT.FIND` filter syntax, and store fields under the same `fields.*` dot-notation. The setup decision only affects type detection accuracy and how predictable field names are.
+
+---
+
+## Schema-validated extraction (StructuredFieldExtractor)
+
+`StructuredFieldExtractor` accepts a Pydantic model class, TypedDict, or JSON Schema dict and auto-generates the extraction prompt from the schema — no manual field spec string needed. For Pydantic models the output is validated and coerced via `model_validate` before storage; invalid LLM output falls back to the raw parsed dict.
+
+```python
+from pydantic import BaseModel
+from blue_data_doc_source import DocumentPipeline, StructuredFieldExtractor
+
+class EmploymentContract(BaseModel):
+    employee_name: str
+    start_date: str
+    base_salary: str
+    notice_period: str
+    non_compete: bool
+
+pipeline = DocumentPipeline(
+    field_extractor=StructuredFieldExtractor(schema=EmploymentContract),
+    embedding_model=...,
+    vector_source=...,
+)
+pipeline.ingest("employment_contract.pdf")
+
+rec = pipeline.get_record(records[0]["document_id"])
+# rec["fields"] == {
+#   "employee_name": "Jane Smith",
+#   "start_date": "2026-01-15",
+#   "base_salary": "$120,000",
+#   "notice_period": "30 days",
+#   "non_compete": True,
+# }
+```
+
+TypedDict and JSON Schema dict also work:
+
+```python
+from typing import TypedDict
+
+class InvoiceFields(TypedDict):
+    vendor: str
+    total_due: str
+    due_date: str
+
+pipeline = DocumentPipeline(
+    field_extractor=StructuredFieldExtractor(schema=InvoiceFields),
+)
+```
+
+`document_type` is set to `"unknown"` unless a `KeywordClassifier` is also provided — but the extraction prompt is derived entirely from the schema, so no classifier is required to get typed, predictable field names.
+
+See `examples/feature-demos/structured_extractor_demo.py` for a runnable demo.
 
 ---
 
@@ -744,7 +858,7 @@ Node IDs are deterministic: `doc:{document_id}`, `section:{document_id}:{title.l
 
 **`APPEARS_IN` edges** go directly from Entity to Document (not via Chunk). This means "which documents mention Acme Corp?" is a single hop, regardless of how many chunks in the document mention it. The edge is written once per document per entity, not once per chunk.
 
-**`graph_neighbors()` is O(1)** because entity node IDs are deterministic — the lookup constructs `entity:{entity_type}:{name.lower()}` directly and calls `get_node()` rather than scanning the graph for a match. No embeddings, no index, no full scan.
+**`graph_neighbors()` uses a deterministic entity node ID** — constructed as `entity:{entity_type}:{name.lower()}` — so finding the entity node is a single dict lookup rather than a node scan. The subsequent edge traversal to collect all MENTIONS edges is proportional to the number of entity mentions, not total corpus size. No embeddings, no scoring.
 
 **Entity nodes survive `delete_document()`** because they are shared across documents. Deleting one document must not break entity lookups that other documents depend on. Only Document, Section, and Chunk nodes are removed on delete.
 
@@ -768,7 +882,7 @@ pipeline.ingest_text(
 
 ### Entity-centric retrieval — `graph_neighbors()`
 
-O(1) exact lookup by entity name — no embeddings required. Uses deterministic node-ID lookup, not a full scan.
+Exact lookup by entity name — no embeddings, no scoring. Entity node ID is constructed deterministically, so the node is found in a single lookup. Results are proportional to the number of mentions, not total corpus size.
 
 ```python
 # Find all chunks that mention "Acme Corp" across the entire corpus
@@ -898,7 +1012,7 @@ python src/server.py
 }
 ```
 
-Tools exposed: `ensure_index`, `ingest_document`, `ingest_documents`, `search`, `delete_document`.
+Tools exposed: `ensure_index`, `ingest_document`, `search_documents`, `delete_document`.
 
 See [`docs/mcp.md`](mcp.md) for the full tool reference and environment variable documentation.
 
@@ -913,14 +1027,14 @@ BLUE_DOC_EMBEDDING=openai OPENAI_API_KEY=sk-... uvicorn doc_api.main:app --port 
 
 | Endpoint | Method | Op equivalent |
 |---|---|---|
-| `/health` | GET | — |
-| `/ensure-index` | POST | `DOCUMENT.ENSURE_INDEX` |
-| `/ingest` | POST | `DOCUMENT.INGEST` |
-| `/search` | POST | `DOCUMENT.SEARCH` |
-| `/find` | POST | `DOCUMENT.FIND` |
-| `/find-then-search` | POST | `DOCUMENT.FIND_THEN_SEARCH` |
-| `/record/{document_id}` | GET | `DOCUMENT.GET_RECORD` |
-| `/document` | DELETE | `DOCUMENT.DELETE` |
+| `/documents/health` | GET | — |
+| `/documents/ensure-index` | POST | `DOCUMENT.ENSURE_INDEX` |
+| `/documents/ingest` | POST | `DOCUMENT.INGEST` |
+| `/documents/search` | POST | `DOCUMENT.SEARCH` |
+| `/documents/find` | POST | `DOCUMENT.FIND` |
+| `/documents/find-then-search` | POST | `DOCUMENT.FIND_THEN_SEARCH` |
+| `/documents/record/{document_id}` | GET | `DOCUMENT.GET_RECORD` |
+| `/documents/document` | DELETE | `DOCUMENT.DELETE` |
 
 ### CLI
 

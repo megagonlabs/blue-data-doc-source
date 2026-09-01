@@ -16,7 +16,8 @@ Story:
 
   Vector search can't reliably answer exact-name questions because short
   entity strings don't dominate embedding space. Graph traversal answers
-  them in O(1) regardless of corpus size.
+  them without scoring every chunk — the entity node ID is constructed
+  deterministically, so no corpus scan is needed.
 
 Full graph schema written during ingest
 ---------------------------------------
@@ -263,7 +264,7 @@ def run() -> None:
     print("  pipeline.graph_neighbors('Acme Corp')")
     print()
     print("  Under the hood: entity:PROPER_NOUN:acme corp → MENTIONS edges (in) → Chunks")
-    print("  O(1) node lookup — no KNN, no embeddings required.")
+    print("  Deterministic node ID lookup — no KNN, no embeddings, no corpus scan.")
     print()
 
     results = pipeline.graph_neighbors("Acme Corp", k=10)
@@ -272,7 +273,7 @@ def run() -> None:
     doc_ids = {r["document_id"] for r in results}
     print(f"  → Found in {len(doc_ids)} document(s) across {len(results)} chunk(s)")
     print("    Vector search would need to score all chunks by embedding distance.")
-    print("    Graph traversal answers this in O(1) — no embeddings needed.")
+    print("    Graph traversal answers this without scoring any chunks — no embeddings needed.")
 
     # ── Step 6: Sequential navigation — NEXT / PREV ───────────────────────
     _step(6, "Sequential navigation — Chunk -[:NEXT]-> Chunk / Chunk -[:PREV]-> Chunk")
@@ -487,7 +488,7 @@ def run() -> None:
     print("      Entity    -[:APPEARS_IN]->      Document (direct doc membership)")
     print()
     print("  What you get that vector search alone cannot provide:")
-    print("    * Exact entity lookup — O(1), no embedding required")
+    print("    * Exact entity lookup — deterministic node ID, no corpus scan, no embedding")
     print("    * Cross-document links — one entity node shared across all documents")
     print("    * Section hierarchy — Document → Section → Chunk navigable structure")
     print("    * Sequential navigation — walk reading order via NEXT/PREV")

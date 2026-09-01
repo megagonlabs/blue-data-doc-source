@@ -95,8 +95,7 @@ results = source.execute_query({
 | Op | Required fields | Returns |
 |---|---|---|
 | `DOCUMENT.INGEST` | `path` | `list[dict]` — one dict per chunk |
-| `DOCUMENT.SEARCH` | `query` | `list[dict]` — ranked matching chunks |
-| `DOCUMENT.SEARCH_RICH` | `query` | `dict` — ranked results with provenance, context, and grouping |
+| `DOCUMENT.SEARCH` | `query` | `list[dict]` — ranked chunks; add `"rich": true` for provenance + context + `by_document` grouping |
 | `DOCUMENT.ENSURE_INDEX` | — | `None` |
 | `DOCUMENT.DELETE` | `path` OR (`document_id` + `chunk_count`) | `int` — deleted chunk count |
 | `DOCUMENT.GET_RECORD` | `document_id` | `dict` — DocumentRecord; raises if document unknown or no classifier was set |
@@ -107,33 +106,99 @@ results = source.execute_query({
 
 ## Registering with DataRegistry
 
-`DocumentDataSource` extends blue-data's `DataSource` ABC, so it can be registered alongside SQL and graph sources in a single `DataRegistry`. This is the primary reason `execute_query_nl` exists: the `DataSource` ABC requires it so that a registry or agent can address any source — SQL, graph, document — through the same plain-English interface, without knowing which specific ops each source supports.
+`DocumentDataSource` extends blue-data's `DataSource` ABC, so it registers in the same `DataRegistry` as SQL, graph, and JSON sources. An agent or MCP client talking to the registry does not need to know that documents use `DOCUMENT.SEARCH` while a SQL source uses `SELECT` — each source's `NLQueryParser` handles the translation internally.
+
+### Register and ingest
 
 ```python
 from blue_data.registry.data_registry import DataRegistry
+from blue_data.source.json.memory_json_source import MemoryJSONSource
+from blue_data.source.vector.memory_vector_source import MemoryVectorSource
 from blue_data_doc_source import DocumentDataSource, OpenAIEmbeddingModel, NLQueryParser
 
-registry = DataRegistry()
+registry = DataRegistry(
+    store=MemoryJSONSource(),           # registry metadata store
+    vector_source=MemoryVectorSource(), # registry search engine
+    embedding_fn=my_embed_fn,           # for registry metadata search
+)
+
 doc_source = DocumentDataSource(
-    name="contracts",
+    name="legal_corpus",
     embedding_model=OpenAIEmbeddingModel(),
-    vector_source=my_vector_source,
-    nl_parser=NLQueryParser(),   # satisfies the DataSource ABC's NL contract
+    vector_source=MemoryVectorSource(),  # doc chunk store (separate from registry store)
+    classifier=KeywordClassifier(),
+    nl_parser=NLQueryParser(),           # satisfies the DataSource ABC's NL contract
+    default_collection="legal_corpus",
 )
 registry.register_source(doc_source)
 
-# Structured op — works on any registered source
+# Ingest via the registry
 registry.execute_query(
-    source="contracts",
-    query={"op": "DOCUMENT.INGEST", "path": "contract.pdf"},
+    source="legal_corpus",
+    query={"op": "DOCUMENT.INGEST", "path": "contract.pdf", "collection": "legal_corpus"},
 )
-
-# Natural language — same call works across all registered sources
-# The registry dispatches to each source's execute_query_nl
-registry.execute_query_nl(source="contracts", text="find the termination clause")
 ```
 
-An agent or MCP client talking to the registry does not need to know that documents use `DOCUMENT.SEARCH` while a SQL source uses `SELECT`. Each source's `NLQueryParser` handles the translation internally.
+### sync_source — schema discovery
+
+After ingesting, call `sync_source` to have the registry walk the live source and record its schema (databases → collections → ChunkRecord attributes). This is what powers registry-level discoverability and metadata search.
+
+```python
+registry.sync_source("legal_corpus", recursive=True)
+
+# Registry now knows the ChunkRecord schema
+databases   = registry.list_source_databases("legal_corpus")
+collections = registry.get_source_database_collections("legal_corpus", "documents")
+entities    = registry.get_source_database_collection_entities(
+    "legal_corpus", "documents", "legal_corpus"
+)
+attrs = registry.get_source_database_collection_entity_attributes(
+    "legal_corpus", "documents", "legal_corpus", "ChunkRecord"
+)
+print([a["name"] for a in attrs])
+# ['document_id', 'chunk_id', 'text', 'file_name', 'mime_type',
+#  'page_start', 'page_end', 'section_title', 'document_type', ...]
+```
+
+`sync_source` is non-destructive — run it any time after new documents are ingested. It adds new entries and removes stale ones without touching existing records.
+
+### search_records — registry metadata search
+
+Search across all registered sources by their schema descriptions:
+
+```python
+# Find which registered source holds document chunks
+hits = registry.search_records("document chunks", page_size=5)
+for h in hits:
+    print(h["name"], h["type"], h["scope"])
+```
+
+This searches registry metadata (source names, entity descriptions, attribute descriptions), not the document content. Use `DOCUMENT.SEARCH` for content retrieval.
+
+### execute_query and execute_query_nl
+
+```python
+# Structured op via registry
+contracts = registry.execute_query(
+    source="legal_corpus",
+    query={"op": "DOCUMENT.FIND", "filter": {"document_type": "contract"}},
+)
+
+chunks = registry.execute_query(
+    source="legal_corpus",
+    query={"op": "DOCUMENT.SEARCH", "query": "termination clause", "k": 5},
+)
+
+# Natural language — dispatched through NLQueryParser
+result = registry.execute_query_nl(
+    source="legal_corpus",
+    text="find the indemnification clause in Acme Corp contracts",
+)
+```
+
+`execute_query_nl` requires `nl_parser=NLQueryParser()` on the `DocumentDataSource`. Without it, the method raises `ValueError`.
+
+See `examples/integration-demos/data_registry_demo.py` for a fully runnable demo (no API key required).
 
 ---
 
@@ -355,10 +420,11 @@ Via `DocumentDataSource`:
 
 ```python
 response = source.execute_query({
-    "op": "DOCUMENT.SEARCH_RICH",
+    "op": "DOCUMENT.SEARCH",
     "query": "termination clause",
     "collection": "contracts",
     "k": 5,
+    "rich": True,
     "context_chunks": 1,          # neighbors before/after each result
     "filter": {"document_id": "doc_abc123"},
 })
@@ -544,18 +610,25 @@ For document types with no matching spec (including `"unknown"`), `LLMFieldExtra
 
 ### Generic extraction without a classifier
 
-Pass only `field_extractor` — no `classifier` needed. The pipeline calls `extract()` with `document_type="unknown"`, which triggers the generic fallback prompt. Useful for unknown corpora where document types are not defined in advance.
+Pass only `field_extractor` — no `classifier` needed. The pipeline calls `extract()` with `document_type="unknown"`, which triggers the generic fallback prompt. Use this when you are exploring an unfamiliar corpus and want to understand what structured fields it contains before committing to a schema.
+
+**This mode is for schema discovery, not reliable production filtering.** The LLM names fields freely — `"vendor"` in one document, `"supplier_name"` in another — and `DOCUMENT.FIND` matches on exact field names, so inconsistent names mean filters silently miss records. Inspect the output across multiple documents before relying on any filter.
 
 ```python
 pipeline = DocumentPipeline(
     field_extractor=LLMFieldExtractor(),   # no classifier
 )
-records = pipeline.ingest("mystery_doc.pdf")
-schema = pipeline.find_records()
-# → [{"document_type": "unknown", "confidence": 0.0, "fields": {...}}]
+pipeline.ingest("doc_a.pdf")
+pipeline.ingest("doc_b.pdf")
+
+# Inspect before filtering — names may differ across documents
+for rec in pipeline.find_records():
+    print(rec["document_id"], sorted(rec.get("fields", {}).keys()))
+# doc_abc: ['total_amount', 'vendor']
+# doc_def: ['amount_due', 'supplier_name']   ← same concept, different names
 ```
 
-`find_records()` works exactly as when a classifier is set — `document_type` is `"unknown"` and field names are whatever the LLM extracted.
+Once you know which field names the LLM consistently produces, define a `StructuredFieldExtractor` schema to enforce those names on all future ingests. See [features.md — Generic extraction](features.md#generic-extraction--field_extractor-without-a-classifier) for the full stabilization workflow.
 
 ### StructuredFieldExtractor — schema-driven extraction
 

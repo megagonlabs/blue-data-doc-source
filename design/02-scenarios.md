@@ -505,7 +505,7 @@ pipeline = DocumentPipeline(
 for path in document_paths:
     pipeline.ingest(path)
 
-# O(1) entity lookup — all chunks that mention "Acme Corp", across all 300 docs
+# exact entity lookup — no corpus scan, no embeddings; returns all mentions across all 300 docs
 results = pipeline.graph_neighbors("Acme Corp")
 print(f"Found in {len({r['document_id'] for r in results})} documents")
 

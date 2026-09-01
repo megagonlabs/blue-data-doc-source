@@ -83,7 +83,8 @@ FAILURE 2 — Structured questions need structured answers
   contract            beta_contract.txt           TERMINATION                   Either party may terminate this agr...
 
   The search returns chunks with the word 'total' — it cannot compare
-  '$35,154' against the threshold 30,000. Every RAG library has this problem.
+  '$35,154' against the threshold 30,000 — a structured filter over extracted
+  typed fields is needed; embedding distance alone cannot evaluate this predicate.
 
   ✓  FIX (requires OPENAI_API_KEY):
 
@@ -215,10 +216,10 @@ execute_query_nl — Natural language dispatches to FIND_THEN_SEARCH
     # query = 'termination notice period'
 
 ========================================================================
-Summary — What existing RAG libraries can't do
+Summary — What vector search alone cannot do
 ========================================================================
 
-  Every RAG library (LangChain, LlamaIndex, Haystack) gives you:
+  A vector-only pipeline gives you:
     embed query → nearest k chunks → paste into LLM context
 
   That fails for:

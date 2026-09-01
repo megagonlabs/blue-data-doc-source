@@ -4,12 +4,12 @@ The MCP server exposes blue-data-doc-source as four AI-callable tools over the M
 
 ## Tools
 
-| Tool | Description |
-|---|---|
-| `ingest_document` | Parse, chunk, enrich, embed, and upsert a document |
-| `search_documents` | Semantic search over ingested documents |
-| `ensure_index` | Create the vector index before first ingest |
-| `delete_document` | Remove all chunks for a document from the vector store |
+| Tool | Op equivalent | Description |
+|---|---|---|
+| `ensure_index` | `DOCUMENT.ENSURE_INDEX` | Create the vector index before first ingest |
+| `ingest_document` | `DOCUMENT.INGEST` | Parse, chunk, enrich, embed, and upsert a document |
+| `search_documents` | `DOCUMENT.SEARCH` | Semantic search over ingested documents |
+| `delete_document` | `DOCUMENT.DELETE` | Remove all chunks for a document from the vector store |
 
 ## Installation
 

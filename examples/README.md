@@ -37,6 +37,8 @@ examples/
 | Demo | What it shows | Deps |
 |---|---|---|
 | `scenario-demos/structured_doc_query_demo.py` | **Start here.** Three concrete RAG failures (wrong document, structured comparison, category ambiguity) — each shown broken, then fixed with DOCUMENT.FIND + DOCUMENT.SEARCH two-step | none (OpenAI optional for FIND filters) |
+| `scenario-demos/graph_value_demo.py` | Graph vs vector search for entity questions: exact entity lookup via MENTIONS edges (no corpus scan, no k cap), multi-entity intersection, reading-order context expansion via NEXT/PREV — three questions, both approaches side-by-side | none |
+| `scenario-demos/multi_document_demo.py` | Single collection, multiple documents: targeted and cross-document queries, full provenance (file, section, page) on every result | none |
 | `scenario-demos/section_vs_window_demo.py` | SectionChunker vs WindowChunker: fewer cross-topic chunks, cleaner retrieval | none |
 | `scenario-demos/provenance_demo.py` | Every search result carries file, page, and section provenance | none |
 | `scenario-demos/semantic_search_demo.py` | Semantic paraphrase search vs keyword substring match | OpenAI |
@@ -47,6 +49,12 @@ python3 examples/scenario-demos/structured_doc_query_demo.py
 
 # With LLM field extraction (enables DOCUMENT.FIND structured filters):
 OPENAI_API_KEY=sk-... python3 examples/scenario-demos/structured_doc_query_demo.py
+
+# Graph vs vector for entity questions (no API key):
+python3 examples/scenario-demos/graph_value_demo.py
+
+# Multi-document provenance (no API key):
+python3 examples/scenario-demos/multi_document_demo.py
 
 python3 examples/scenario-demos/section_vs_window_demo.py
 python3 examples/scenario-demos/provenance_demo.py --format txt
@@ -69,7 +77,7 @@ OPENAI_API_KEY=sk-... python3 examples/scenario-demos/semantic_search_demo.py
 | `feature-demos/field_extraction_demo.py` | KeywordClassifier type detection + LLMFieldExtractor field extraction on four real PDFs; document_type on chunks; DOCUMENT.GET_RECORD | none (OpenAI optional) |
 | `feature-demos/pdf_formats_demo.py` | PlumberPDFParser structured table extraction vs pypdf flat text; embedded images silently skipped; multi-page docs; real arXiv + Berkshire annual report PDFs; scanned image-only PDFs via Tesseract OCR | pdfplumber (OCR: tesseract + poppler) |
 | `feature-demos/rich_search_demo.py` | DOCUMENT.SEARCH plain vs rich=True side-by-side; provenance block anatomy; neighbor context (context_chunks); by_document grouping with top_sections; in-process caveat | none |
-| `feature-demos/graph_backend_demo.py` | Full graph schema written during ingest (Document/Section/Chunk/Entity nodes + HAS_SECTION, HAS_CHUNK, NEXT, PREV, MENTIONS, APPEARS_IN, CO_OCCURS_WITH edges); graph_neighbors() O(1) entity lookup; graph_query() general traversal; DOCUMENT.GRAPH_NEIGHBORS and DOCUMENT.GRAPH_QUERY ops; sequential chunk navigation; delete cascade; Neo4j production path | none (Neo4j optional) |
+| `feature-demos/graph_backend_demo.py` | Full graph schema written during ingest (Document/Section/Chunk/Entity nodes + HAS_SECTION, HAS_CHUNK, NEXT, PREV, MENTIONS, APPEARS_IN, CO_OCCURS_WITH edges); graph_neighbors() exact entity lookup via deterministic node ID; graph_query() general traversal; DOCUMENT.GRAPH_NEIGHBORS and DOCUMENT.GRAPH_QUERY ops; sequential chunk navigation; delete cascade; Neo4j production path | none (Neo4j optional) |
 | `feature-demos/structured_extractor_demo.py` | StructuredFieldExtractor with Pydantic model, TypedDict, and JSON Schema; auto-generated extraction prompt; DOCUMENT.FIND syntax on extracted fields | OpenAI optional |
 | `feature-demos/generic_extraction_demo.py` | field_extractor without a classifier; extraction from unknown-type corpora; decision guide (when to use field_extractor vs classifier+extractor) | OpenAI optional |
 
@@ -121,6 +129,7 @@ python3 examples/feature-demos/rich_search_demo.py
 | `integration-demos/multi_format_demo.py` | TXT + PDF + DOCX through one pipeline; ingest_text() and ingest_pages() bypass methods | none |
 | `integration-demos/corpus_update_demo.py` | Add / replace / remove documents; DOCUMENT.DELETE; stale-chunk management | none |
 | `integration-demos/custom_parser_demo.py` | Parser ABC extension (LlamaIndex wrapper) and ingest_pages() bypass for external extractors | none (LlamaIndex optional) |
+| `integration-demos/data_registry_demo.py` | DocumentDataSource registered in DataRegistry alongside other source types; sync_source, search_records, execute_query, execute_query_nl via the registry | none |
 | `integration-demos/pdf_redis_demo.py` | Full end-to-end: PDF → parse → chunk → embed → Redis → search; NLQueryParser dispatch | Redis Stack (OpenAI optional) |
 
 ```bash
@@ -129,6 +138,9 @@ python3 examples/integration-demos/multi_format_demo.py
 python3 examples/integration-demos/corpus_update_demo.py
 python3 examples/integration-demos/custom_parser_demo.py                   # bypass mode, no deps
 python3 examples/integration-demos/custom_parser_demo.py --mode llamaindex  # requires llama-index
+
+# DataRegistry integration (no API key):
+python3 examples/integration-demos/data_registry_demo.py
 
 # PDF + Redis + NLQueryParser:
 docker run -p 6379:6379 redis/redis-stack-server:latest

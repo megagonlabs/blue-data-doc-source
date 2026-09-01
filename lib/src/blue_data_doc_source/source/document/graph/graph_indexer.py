@@ -259,8 +259,10 @@ class GraphIndexer:
     ) -> List[Dict[str, Any]]:
         """Find chunks that mention *entity_name*, via graph traversal.
 
-        Uses deterministic node-ID lookup (O(1) per entity type) rather than
-        a full ``match_nodes`` scan, so it is fast even on large graphs.
+        Constructs the entity node ID deterministically (one dict lookup per
+        entity type) rather than a full ``match_nodes`` scan. The subsequent
+        edge traversal to collect MENTIONS neighbours is proportional to the
+        number of entity mentions, not total corpus size.
         Matching is case-insensitive on the stored name.
 
         Args:
