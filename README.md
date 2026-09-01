@@ -581,6 +581,13 @@ pipeline.ingest_pages(
 
 `document_id` is derived from a SHA-256 hash of the content, so calling these methods twice with the same text is safe — it overwrites rather than duplicates.
 
+`DocumentDataSource` also exposes `ingest_text` directly, for callers working at the source level rather than the pipeline level (it delegates to `pipeline.ingest_text` under the hood — no need to reach into `_pipeline`, and no `DOCUMENT.INGEST_TEXT` op exists since this bypasses `execute_query` entirely):
+
+```python
+source = DocumentDataSource(embedding_model=..., vector_source=...)
+source.ingest_text(text, file_name="report.txt")
+```
+
 ### Scanned PDF support (OCR)
 
 By default, `PDFParser` uses pypdf to read the text layer embedded in a PDF. Pages with no text layer — scanned documents, photographed pages — are silently skipped.

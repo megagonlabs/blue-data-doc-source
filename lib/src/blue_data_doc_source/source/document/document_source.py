@@ -169,6 +169,30 @@ class DocumentDataSource(DataSource):
         ".docx": "document/docx",
     }
 
+    def ingest_text(
+        self,
+        text: str,
+        file_name: str,
+        mime_type: str = "text/plain",
+        collection: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Chunk, enrich, and embed pre-extracted text, bypassing file parsing and execute_query.
+
+        Thin public wrapper around ``DocumentPipeline.ingest_text`` for callers
+        that already have text in hand (e.g. a transcript) and don't want to
+        go through the ``DOCUMENT.INGEST`` op, which only accepts file paths.
+
+        Args:
+            text: Full document text.
+            file_name: Used for provenance fields on each ``ChunkRecord``.
+            mime_type: MIME type recorded on each chunk.
+            collection: Override the instance-level collection for this call.
+
+        Returns:
+            List of ``ChunkRecord.to_dict()`` dicts, one per chunk.
+        """
+        return self._pipeline.ingest_text(text, file_name=file_name, mime_type=mime_type, collection=collection)
+
     def _ingest(self, request: Dict[str, Any], collection_override=None) -> List[Dict[str, Any]]:
         path = request.get("path")
         if not path:

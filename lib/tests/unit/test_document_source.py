@@ -25,6 +25,27 @@ def test_ingest_op_missing_path_raises():
         source.execute_query({"op": "DOCUMENT.INGEST"})
 
 
+def test_ingest_text_returns_records():
+    source = DocumentDataSource(chunk_size=5, overlap=1)
+    records = source.ingest_text("The quick brown fox jumps over the lazy dog", file_name="transcript.txt")
+    assert isinstance(records, list)
+    assert len(records) > 0
+    assert records[0]["file_name"] == "transcript.txt"
+
+
+def test_ingest_text_upserts_to_vector_source():
+    vector_source = MagicMock()
+    source = DocumentDataSource(
+        chunk_size=5,
+        overlap=1,
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=vector_source,
+    )
+    source.ingest_text("hello world", file_name="note.txt", collection="my_collection")
+    call_kwargs = vector_source.upsert.call_args_list[0]
+    assert call_kwargs.kwargs["collection"] == "my_collection"
+
+
 def test_ingest_op_uses_collection(tmp_path):
     vector_source = MagicMock()
     source = DocumentDataSource(
