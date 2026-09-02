@@ -67,9 +67,11 @@ chunks = source.execute_query({
     "k": 5,
 })
 
-# Or in plain English via NLQueryParser:
+# Or in plain English via NLQueryParser (requires OPENAI_API_KEY):
 chunks = source.execute_query_nl("find the termination clause in Acme Corp contracts")
-# NLQueryParser detects FIND_THEN_SEARCH intent and builds the op dict automatically
+# NLQueryParser uses GPT-4o-mini to detect FIND_THEN_SEARCH intent and build the op dict.
+# Replace with a deterministic parse_fn for keyless use:
+#   NLQueryParser(parse_fn=lambda text: my_parser(text))
 ```
 
 **Failure 4 — Exact entity lookup returns wrong results or misses mentions**
@@ -77,6 +79,8 @@ chunks = source.execute_query_nl("find the termination clause in Acme Corp contr
 An audit team needs every chunk that explicitly names "Acme Corp" — not the 5 most semantically similar chunks, but every occurrence, regardless of surrounding context. Vector search embeds "Acme Corp" and returns the k nearest chunks, missing exact mentions in short passages or tables where the entity name appears without rich surrounding prose to drive embedding quality.
 
 blue-data-doc-source adds optional graph indexing. Every entity extracted by `BasicEnricher` becomes a shared node; every chunk that mentions it gets a `MENTIONS` edge. "Acme Corp" is a graph node with a deterministic ID — resolved without a corpus scan — and its MENTIONS edges lead directly to every chunk where the entity was recognized by the enricher.
+
+Entity coverage depends on what the enricher recognises. `BasicEnricher`'s PROPER_NOUN pattern requires two or more title-case words — single-word names like "IBM" or "Oracle" are not captured. Use `LLMEnricher` or a custom `Enricher` subclass for broader entity coverage.
 
 ```python
 from blue_data.source.graph.memory_graph_source import MemoryGraphSource
