@@ -316,11 +316,15 @@ class DocumentDataSource(DataSource):
             ``{"gt": N}``               numeric or lexicographic comparison
             ``{"lt": N}``, ``{"gte": N}``, ``{"lte": N}``
 
-        Returns a list of schema records — one per matching document.
+        Returns a list of schema records — one per matching document (or a
+        :class:`FindResult` when ``coverage=True`` is passed in the request).
         Each record includes ``document_id``, ``document_type``, ``confidence``,
         ``classifier``, and ``fields``.
         """
-        return self._pipeline.find_records(request.get("filter"))
+        return self._pipeline.find_records(
+            request.get("filter"),
+            coverage=bool(request.get("coverage", False)),
+        )
 
     def _find_then_search(self, request: Dict[str, Any], collection_override=None) -> List[Dict[str, Any]]:
         """Implement DOCUMENT.FIND_THEN_SEARCH.

@@ -13,8 +13,9 @@ from .enrichment import Enricher
 from .chunk_record import ChunkRecord
 from .graph import GraphIndexer
 from .parsers import DocxParser, Parser, PDFParser, TextParser
+from .find_result import CoverageReport, FindResult
 from .schema.base import DocumentClassifier, FieldExtractor
-from .schema.schema_store import MemoryRecordStore, RecordStore
+from .schema.schema_store import MemoryRecordStore, RecordStore, _get_nested
 
 if TYPE_CHECKING:
     from blue_data.source.graph.graph_source import GraphSource
@@ -627,13 +628,73 @@ class DocumentPipeline:
         """
         return self.record_store.get(document_id)
 
-    def find_records(self, filter: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    def find_records(
+        self,
+        filter: Optional[Dict[str, Any]] = None,
+        coverage: bool = False,
+    ) -> "List[Dict[str, Any]] | FindResult":
         """Return all DocumentRecords matching *filter*.
 
         See ``RecordStore.find`` for the filter syntax (dot notation, operators).
         Returns every record when *filter* is ``None`` or ``{}``.
+
+        Args:
+            filter: Structured filter dict (dot notation + operators). ``None`` returns all.
+            coverage: When ``True``, return a :class:`FindResult` instead of a plain list.
+                The result carries a :class:`CoverageReport` indicating how many documents
+                were missing the queried ``fields.*`` keys — alerting the caller to
+                possible false negatives from incomplete extraction.
         """
-        return self.record_store.find(filter)
+        if not coverage:
+            return self.record_store.find(filter)
+
+        all_records = self.record_store.find(None)
+        matched = self.record_store.find(filter)
+
+        field_keys = [k for k in (filter or {}) if k.startswith("fields.")]
+        documents_missing_field = (
+            sum(
+                1
+                for r in all_records
+                if any(_get_nested(r, k) is None for k in field_keys)
+            )
+            if field_keys
+            else 0
+        )
+
+        documents_considered = len(all_records)
+        field_coverage_rate = (
+            (documents_considered - documents_missing_field) / documents_considered
+            if documents_considered > 0
+            else 0.0
+        )
+
+        if documents_considered == 0:
+            status = "no_data"
+        elif documents_missing_field == 0:
+            status = "ok"
+        else:
+            status = "partial"
+
+        warning: Optional[str] = None
+        if status == "partial":
+            names = ", ".join(f"'{k}'" for k in field_keys)
+            warning = (
+                f"Result may be incomplete: {documents_missing_field} of "
+                f"{documents_considered} documents are missing the field(s) {names}."
+            )
+
+        return FindResult(
+            records=matched,
+            status=status,
+            coverage=CoverageReport(
+                documents_considered=documents_considered,
+                documents_matched=len(matched),
+                documents_missing_field=documents_missing_field,
+                field_coverage_rate=field_coverage_rate,
+            ),
+            warning=warning,
+        )
 
     def graph_neighbors(
         self,

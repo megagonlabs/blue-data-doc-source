@@ -1,6 +1,7 @@
 from .source.document.document_source import DocumentDataSource
 from .source.document.pipeline import DocumentPipeline
 from .source.document.chunk_record import ChunkRecord
+from .source.document.find_result import CoverageReport, FindResult
 from .source.document.nl_parser import NLQueryParser
 from .source.document.chunkers import Chunker, SectionChunker, SentenceChunker, WindowChunker
 from .source.document.embeddings import EmbeddingModel, DummyEmbeddingModel, OpenAIEmbeddingModel
@@ -49,4 +50,6 @@ __all__ = [
     "MemoryRecordStore",
     "FileRecordStore",
     "JsonSourceRecordStore",
+    "CoverageReport",
+    "FindResult",
 ]

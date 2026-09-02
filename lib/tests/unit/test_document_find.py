@@ -10,10 +10,12 @@ from blue_data.source.json.file_json_source import FileJSONSource
 from blue_data.source.json.memory_json_source import MemoryJSONSource
 
 from blue_data_doc_source import (
+    CoverageReport,
     DocumentDataSource,
     DocumentPipeline,
     DummyEmbeddingModel,
     FileRecordStore,
+    FindResult,
     JsonSourceRecordStore,
     KeywordClassifier,
     MemoryRecordStore,
@@ -554,3 +556,159 @@ class TestJsonSourceRecordStoreIntegration:
         })
         assert len(results) == 1
         assert results[0]["document_id"] == "doc_contract_a"
+
+
+# ---------------------------------------------------------------------------
+# Coverage reporting — FindResult / CoverageReport
+# ---------------------------------------------------------------------------
+
+class TestFindRecordsCoverage:
+    """Unit tests for find_records(coverage=True) on DocumentPipeline."""
+
+    def _pipeline_with_records(self, *records) -> DocumentPipeline:
+        pipeline = DocumentPipeline(chunk_size=100, overlap=10)
+        for r in records:
+            pipeline.record_store.upsert(r)
+        return pipeline
+
+    # ------------------------------------------------------------------
+    # Return-type checks
+    # ------------------------------------------------------------------
+
+    def test_returns_list_when_coverage_false(self):
+        pipeline = self._pipeline_with_records(CONTRACT_A)
+        result = pipeline.find_records({"document_type": "contract"}, coverage=False)
+        assert isinstance(result, list)
+
+    def test_returns_find_result_when_coverage_true(self):
+        pipeline = self._pipeline_with_records(CONTRACT_A)
+        result = pipeline.find_records({"document_type": "contract"}, coverage=True)
+        assert isinstance(result, FindResult)
+
+    # ------------------------------------------------------------------
+    # status values
+    # ------------------------------------------------------------------
+
+    def test_status_no_data_when_store_empty(self):
+        pipeline = DocumentPipeline(chunk_size=100, overlap=10)
+        result = pipeline.find_records({"fields.governing_law": "Delaware"}, coverage=True)
+        assert result.status == "no_data"
+        assert result.coverage.documents_considered == 0
+        assert result.coverage.field_coverage_rate == 0.0
+
+    def test_status_ok_when_all_docs_have_field(self):
+        # Both contracts have governing_law
+        pipeline = self._pipeline_with_records(CONTRACT_A, CONTRACT_B)
+        result = pipeline.find_records({"fields.governing_law": "Delaware"}, coverage=True)
+        assert result.status == "ok"
+        assert result.coverage.documents_missing_field == 0
+        assert result.coverage.field_coverage_rate == 1.0
+        assert result.warning is None
+
+    def test_status_partial_when_some_docs_missing_field(self):
+        # CONTRACT_A and CONTRACT_B have governing_law; INVOICE does not
+        pipeline = self._pipeline_with_records(CONTRACT_A, CONTRACT_B, INVOICE)
+        result = pipeline.find_records({"fields.governing_law": "Delaware"}, coverage=True)
+        assert result.status == "partial"
+        assert result.coverage.documents_missing_field == 1
+        assert result.warning is not None
+        assert "governing_law" in result.warning
+
+    # ------------------------------------------------------------------
+    # Coverage counts
+    # ------------------------------------------------------------------
+
+    def test_coverage_counts_match_store_size(self):
+        pipeline = self._pipeline_with_records(CONTRACT_A, CONTRACT_B, INVOICE, POLICY)
+        result = pipeline.find_records({"fields.governing_law": {"contains": "California"}}, coverage=True)
+        assert result.coverage.documents_considered == 4
+        assert result.coverage.documents_matched == 1  # only CONTRACT_B
+
+    def test_field_coverage_rate_calculation(self):
+        # 3 docs total, 1 missing the field → rate = 2/3
+        pipeline = self._pipeline_with_records(CONTRACT_A, CONTRACT_B, INVOICE)
+        result = pipeline.find_records({"fields.governing_law": "Delaware"}, coverage=True)
+        assert abs(result.coverage.field_coverage_rate - 2 / 3) < 1e-6
+
+    def test_coverage_no_field_keys_means_zero_missing(self):
+        # Filtering on document_type only (no fields.*) — missing count should be 0
+        pipeline = self._pipeline_with_records(CONTRACT_A, INVOICE)
+        result = pipeline.find_records({"document_type": "contract"}, coverage=True)
+        assert result.coverage.documents_missing_field == 0
+        assert result.status == "ok"
+
+    def test_coverage_none_filter_returns_all_status_ok(self):
+        pipeline = self._pipeline_with_records(CONTRACT_A, CONTRACT_B)
+        result = pipeline.find_records(None, coverage=True)
+        assert result.status == "ok"
+        assert len(result) == 2
+
+    # ------------------------------------------------------------------
+    # FindResult iteration compatibility
+    # ------------------------------------------------------------------
+
+    def test_find_result_is_iterable(self):
+        pipeline = self._pipeline_with_records(CONTRACT_A, CONTRACT_B)
+        result = pipeline.find_records({"document_type": "contract"}, coverage=True)
+        ids = [r["document_id"] for r in result]
+        assert set(ids) == {"doc_contract_a", "doc_contract_b"}
+
+    def test_find_result_len(self):
+        pipeline = self._pipeline_with_records(CONTRACT_A, CONTRACT_B, INVOICE)
+        result = pipeline.find_records({"document_type": "contract"}, coverage=True)
+        assert len(result) == 2
+
+    def test_find_result_getitem(self):
+        pipeline = self._pipeline_with_records(CONTRACT_A)
+        result = pipeline.find_records({"document_type": "contract"}, coverage=True)
+        assert result[0]["document_id"] == "doc_contract_a"
+
+    def test_find_result_to_dict(self):
+        pipeline = self._pipeline_with_records(CONTRACT_A)
+        result = pipeline.find_records({"document_type": "contract"}, coverage=True)
+        d = result.to_dict()
+        assert "records" in d
+        assert "status" in d
+        assert "coverage" in d
+        assert d["coverage"]["documents_considered"] == 1
+
+    # ------------------------------------------------------------------
+    # DocumentDataSource DOCUMENT.FIND with coverage=True
+    # ------------------------------------------------------------------
+
+    def test_document_source_coverage_true(self):
+        store = MemoryRecordStore()
+        store.upsert(CONTRACT_A)
+        store.upsert(INVOICE)
+
+        source = DocumentDataSource(
+            name="test",
+            chunk_size=100,
+            overlap=10,
+            record_store=store,
+        )
+        result = source.execute_query({
+            "op": "DOCUMENT.FIND",
+            "filter": {"fields.governing_law": {"contains": "Delaware"}},
+            "coverage": True,
+        })
+        assert isinstance(result, FindResult)
+        assert result.status == "partial"   # INVOICE lacks governing_law
+        assert result.coverage.documents_considered == 2
+        assert result.coverage.documents_matched == 1
+
+    def test_document_source_coverage_false_returns_list(self):
+        store = MemoryRecordStore()
+        store.upsert(CONTRACT_A)
+
+        source = DocumentDataSource(
+            name="test",
+            chunk_size=100,
+            overlap=10,
+            record_store=store,
+        )
+        result = source.execute_query({
+            "op": "DOCUMENT.FIND",
+            "filter": {"document_type": "contract"},
+        })
+        assert isinstance(result, list)

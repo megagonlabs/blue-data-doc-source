@@ -84,6 +84,12 @@ def _try_numeric(value: Any) -> Optional[float]:
 
 def _check(record: Dict[str, Any], key: str, condition: Any) -> bool:
     value = _get_nested(record, key)
+
+    # exists must be evaluated before the None guard
+    if isinstance(condition, dict) and "exists" in condition:
+        field_present = value is not None
+        return field_present == bool(condition["exists"])
+
     if value is None:
         return False
 
