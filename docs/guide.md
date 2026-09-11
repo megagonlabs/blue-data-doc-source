@@ -1,5 +1,52 @@
 # Developer Guide
 
+## Which entry point to use
+
+There are two public entry points. The choice is straightforward:
+
+| | `DocumentDataSource` | `DocumentPipeline` |
+|---|---|---|
+| **Use when** | Integrating with blue-data (`DataRegistry`, MCP server, REST API, other sources) | Standalone script or tool with no other blue-data sources |
+| **API style** | `execute_query({"op": "DOCUMENT.*", ...})` — same as every other blue-data source | Direct method calls: `pipeline.ingest()`, `pipeline.search()` |
+| **Registry** | Yes — registers alongside SQL, graph, JSON sources | No |
+| **MCP / REST / CLI** | Yes — all platform components use `DocumentDataSource` internally | No |
+| **`DocumentPipeline`** | Used internally — you never instantiate it | You instantiate it directly |
+
+**Default choice: `DocumentDataSource`.**
+
+If you are combining document retrieval with any other blue-data source, or if your documents will be accessed via the MCP server, REST API, or CLI, use `DocumentDataSource`. It wraps `DocumentPipeline` internally — all the same capabilities, same constructor arguments, same behaviour — but behind the `DataSource` interface that the rest of the ecosystem expects.
+
+```python
+# The right default for almost all use cases
+from blue_data_doc_source import DocumentDataSource, OpenAIEmbeddingModel, KeywordClassifier
+
+source = DocumentDataSource(
+    name="legal_corpus",
+    embedding_model=OpenAIEmbeddingModel(),
+    vector_source=my_vector_source,
+    classifier=KeywordClassifier(),
+    default_collection="legal_corpus",
+)
+source.execute_query({"op": "DOCUMENT.INGEST", "path": "contract.pdf"})
+source.execute_query({"op": "DOCUMENT.SEARCH", "query": "termination clause", "k": 5})
+```
+
+**When to use `DocumentPipeline` directly:**
+
+Only when you have no other blue-data sources and no need for the registry or platform interfaces — for example, a one-off script, a Jupyter notebook, or a unit test that inspects chunk structure.
+
+```python
+# Standalone use only — no registry, no MCP, no other sources
+from blue_data_doc_source import DocumentPipeline
+
+pipeline = DocumentPipeline(chunk_size=500, overlap=100)
+records = pipeline.ingest("policy.pdf")
+```
+
+If you start with `DocumentPipeline` and later need registry integration, the migration is mechanical: replace `DocumentPipeline(...)` with `DocumentDataSource(name=..., ...)` and replace direct method calls with `execute_query({...})` calls.
+
+---
+
 ## Quick start
 
 Parse and chunk a file with no embeddings — useful for inspecting chunk structure before wiring up a vector store:
