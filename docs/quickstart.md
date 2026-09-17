@@ -14,10 +14,10 @@ pip install -e .
 from blue_data_doc_source import DocumentPipeline
 
 pipeline = DocumentPipeline(chunk_size=500, overlap=100)
-records = pipeline.ingest("mydoc.pdf")
+records = pipeline.ingest("data/sample_policy.txt")
 
 for r in records:
-    print(r["chunk_id"], r["page_start"], r["text"][:80])
+    print(r["chunk_id"], r.get("page_start"), r["text"][:80])
 ```
 
 Supported file types: `.txt`, `.pdf`, `.docx`

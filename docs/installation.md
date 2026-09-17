@@ -2,12 +2,14 @@
 
 ## Components
 
-`blue-data-doc-source` ships a single installable package that covers the core library and the MCP platform component.
+`blue-data-doc-source` ships four installable packages:
 
 | Component | Location | Description |
 |---|---|---|
 | `blue-data-doc-source` | `lib/` | Core Python library — parsing, chunking, enrichment, embeddings, pipeline |
-| `document-mcp` | `platform/document-mcp/` | MCP server — exposes all pipeline ops as tools for Claude Desktop |
+| `blue-data-doc-api` | `platform/api/` | FastAPI REST server — HTTP interface with interactive docs at `/docs` |
+| `blue-data-doc-cli` | `platform/cli/` | CLI — ingest, search, and delete documents from a terminal |
+| `blue-data-doc-mcp` | `platform/document-mcp/` | MCP server — exposes all pipeline ops as tools for Claude Desktop |
 
 ---
 
@@ -26,6 +28,33 @@ To install with optional extras:
 pip install -e ".[ocr]"   # Tesseract OCR support for scanned PDFs
 pip install -e ".[mcp]"   # MCP server support (platform/document-mcp)
 pip install -e ".[nlp]"   # NLTK-based processing
+```
+
+## Installing the REST API
+
+```bash
+pip install -e lib/
+pip install -e platform/api/
+
+blue-data-doc-api          # starts on http://localhost:8001
+```
+
+## Installing the CLI
+
+```bash
+pip install -e lib/
+pip install -e platform/cli/
+
+doc --help
+```
+
+## Installing the MCP server
+
+```bash
+pip install -e lib/
+pip install -e ".[mcp]"
+
+python platform/document-mcp/src/server.py
 ```
 
 ---
