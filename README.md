@@ -4,7 +4,7 @@ Documents are data — not merely search-index content. blue-data-doc-source mak
 
 It handles the full pipeline from raw file to queryable data source: parsing PDFs, DOCX, and text files; assigning document type and extracting typed fields at ingest; chunking with section awareness; enriching with entities and keyphrases; embedding; and upserting into blue-data's vector layer. The result is a `DocumentDataSource` — a first-class member of the blue-data intelligence layer, not a standalone search box.
 
-→ **[Full feature list](docs/features.md)** · **[Installation](docs/installation.md)** · **[Guide](docs/guide.md)** · **[Extending](docs/extending.md)** · **[Examples](examples/README.md)** · **[MCP server](docs/mcp.md)**
+→ **[Quick start](docs/quickstart.md)** · **[Full feature list](docs/features.md)** · **[Installation](docs/installation.md)** · **[Guide](docs/guide.md)** · **[Extending](docs/extending.md)** · **[Examples](examples/README.md)** · **[MCP server](docs/mcp.md)**
 
 ## Why blue-data-doc-source
 
@@ -232,6 +232,15 @@ Two design decisions are specific to this architecture:
 - **Pluggable parsers** — `Parser` ABC for external processors (LlamaIndex, vision models, cloud OCR); bypass via `ingest_text` / `ingest_pages`
 - **MCP server** — `platform/document-mcp` exposes all ops as tools callable from Claude Desktop
 
+## Packages
+
+| Package | Description | README |
+|---|---|---|
+| `blue-data-doc-source` | Core library — parsing, chunking, enrichment, embedding, vector + graph | [lib/README.md](lib/README.md) |
+| `blue-data-doc-api` | FastAPI REST server | [platform/api/README.md](platform/api/README.md) |
+| `blue-data-doc-cli` | Command-line interface | [platform/cli/README.md](platform/cli/README.md) |
+| `blue-data-doc-mcp` | MCP server for Claude Desktop | [platform/document-mcp/README.md](platform/document-mcp/README.md) |
+
 ## Repository layout
 
 ```
@@ -240,7 +249,9 @@ blue-data-doc-source/
 │   ├── src/blue_data_doc_source/
 │   └── tests/
 ├── platform/
-│   └── document-mcp/                 # MCP server for document operations
+│   ├── api/                          # REST API (blue-data-doc-api)
+│   ├── cli/                          # CLI (blue-data-doc-cli)
+│   └── document-mcp/                 # MCP server (blue-data-doc-mcp)
 ├── docs/                             # Documentation
 ├── data/                             # Sample documents used by examples
 ├── design/                           # Architecture and design documents

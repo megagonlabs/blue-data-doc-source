@@ -999,7 +999,7 @@ python src/server.py
 ```json
 {
   "mcpServers": {
-    "blue-doc": {
+    "blue-data-doc": {
       "command": "python",
       "args": ["/path/to/platform/document-mcp/src/server.py"],
       "env": {
