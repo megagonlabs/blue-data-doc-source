@@ -5,7 +5,11 @@
 ```
 blue-data-doc-source/
 │
-├── design/                              # design documents
+├── README.md                            # project overview, quick start, package table
+├── CLAUDE.md                            # Claude Code instructions for this repo
+├── pyproject.toml                       # root package metadata and tool config (ruff, pytest)
+│
+├── design/                              # contributor-facing design documents (ADRs, architecture)
 │
 ├── docs/                                # user-facing documentation
 │   ├── architecture.md                  # pipeline layers and component responsibilities
@@ -13,10 +17,11 @@ blue-data-doc-source/
 │   ├── chunkers.md                      # SectionChunker / WindowChunker / SentenceChunker reference
 │   ├── extending.md                     # extension points: custom parsers, chunkers, enrichers
 │   ├── features.md                      # feature-by-feature documentation with code examples
-│   ├── guide.md                         # quick start and how-to guide
+│   ├── guide.md                         # DataRegistry integration, NL routing, entry point guide
 │   ├── installation.md                  # install instructions, extras, external deps
 │   ├── mcp.md                           # MCP server setup and tool reference
-│   └── parsers.md                       # parser comparison: TextParser, PDFParser, PlumberPDFParser, DocxParser
+│   ├── parsers.md                       # parser comparison: TextParser, PDFParser, PlumberPDFParser, DocxParser
+│   └── quickstart.md                    # minimal install + first ingest in under 5 minutes
 │
 ├── data/                                # fixture documents for integration tests and examples
 │   ├── sample.txt
@@ -72,6 +77,7 @@ blue-data-doc-source/
 │       └── structured_doc_query_demo.py # classify → extract → find → search pipeline
 │
 ├── lib/                                 # Python library (blue-data-doc-source PyPI package)
+│   ├── README.md                        # package overview; defers to root README
 │   ├── src/
 │   │   └── blue_data_doc_source/
 │   │       ├── __init__.py              # re-exports DocumentDataSource, DocumentPipeline, ChunkRecord, all ABCs, concrete classes
@@ -143,13 +149,15 @@ blue-data-doc-source/
 │           └── runner.py                    # benchmark harness
 │
 └── platform/                                # external interface services
-    ├── README.md
+    ├── README.md                            # combined platform docs (API, CLI, MCP)
     ├── document-mcp/                        # MCP server (fastmcp)
+    │   ├── README.md                        # package overview; defers to platform/README.md
     │   ├── src/
     │   │   └── server.py                    # fastmcp server; 7 MCP tools; DocumentPipeline singleton
     │   └── tests/
     │       └── test_server.py
     ├── api/                                 # REST API (FastAPI, port 8001)
+    │   ├── README.md                        # package overview; defers to platform/README.md
     │   ├── pyproject.toml
     │   ├── src/doc_api/
     │   │   ├── main.py                      # FastAPI app; lifespan; uvicorn entry point (port 8001)
@@ -157,6 +165,7 @@ blue-data-doc-source/
     │   │   └── routers/
     │   │       └── documents.py             # /documents/* routes; Pydantic request models
     └── cli/                                 # CLI (blue-data-doc-cli PyPI package)
+        ├── README.md                        # package overview; defers to platform/README.md
         ├── pyproject.toml
         ├── src/blue_data_doc_cli/
         │   ├── main.py                      # Click command group: ensure-index, ingest, search, delete

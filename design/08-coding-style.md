@@ -2,11 +2,11 @@
 
 ## Tools
 
-| Tool | Role |
-|------|------|
-| `ruff` | Linter + formatter (replaces Black, isort, flake8) |
-| `pyright` (strict) | Static type checker |
-| `pytest` | Test runner |
+| Tool | Role | Config location |
+|------|------|----------------|
+| `ruff` | Linter + formatter (replaces Black, isort, flake8) | `pyproject.toml` → `[tool.ruff]` |
+| `pyright` (strict) | Static type checker | `pyproject.toml` → `[tool.pyright]` |
+| `pytest` | Test runner | `pyproject.toml` → `[tool.pytest.ini_options]` |
 
 All three are declared as `dev` dependencies. CI fails on any lint, type, or test failure.
 
