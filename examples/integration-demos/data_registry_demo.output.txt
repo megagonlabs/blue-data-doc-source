@@ -1,0 +1,88 @@
+
+====================================================================
+DataRegistry Integration Demo
+====================================================================
+
+  Storage : MemoryJSONSource (registry) + MemoryVectorSource (doc store)
+  Embed   : DummyEmbeddingModel (SHA-256 hash — no API key)
+  Classify: KeywordClassifier (no API key)
+
+--------------------------------------------------------------------
+Step 1 — Build DataRegistry
+--------------------------------------------------------------------
+  DataRegistry created (in-process store)
+
+--------------------------------------------------------------------
+Step 2 — Register DocumentDataSource
+--------------------------------------------------------------------
+  Registered sources: ['legal_corpus']
+
+--------------------------------------------------------------------
+Step 3 — Ingest documents
+--------------------------------------------------------------------
+  master_services_agreement.txt            → 1 chunks  type=contract
+  invoice_2026_042.txt                     → 1 chunks  type=invoice
+  health_policy_2026.txt                   → 1 chunks  type=policy
+
+--------------------------------------------------------------------
+Step 4 — sync_source (registry discovers schema)
+--------------------------------------------------------------------
+  sync_source complete
+  Databases   : ['documents']
+  Collections : ['legal_corpus']
+  Entities    : ['ChunkRecord']
+  Attributes on 'ChunkRecord' (13 total):
+    section_title        
+    content_type         
+    chunk_id             
+    page_start           
+    document_type        
+    … and 8 more
+
+--------------------------------------------------------------------
+Step 5 — search_records (find sources by metadata)
+--------------------------------------------------------------------
+  query='document chunks'  →  3 result(s)
+    [entity] ChunkRecord  scope=/source/legal_corpus/database/documents/collection/legal_corpus
+    [attribute] semantic_hints  scope=/source/legal_corpus/database/documents/collection/legal_corpus/entity/ChunkRecord
+  query='invoice billing'  →  3 result(s)
+    [entity] ChunkRecord  scope=/source/legal_corpus/database/documents/collection/legal_corpus
+    [attribute] semantic_hints  scope=/source/legal_corpus/database/documents/collection/legal_corpus/entity/ChunkRecord
+
+--------------------------------------------------------------------
+Step 6 — execute_query via registry (DOCUMENT.FIND)
+--------------------------------------------------------------------
+  DOCUMENT.FIND document_type=contract → 1 record(s)
+    doc_e6c90cada943cddf  type=contract  confidence=0.28
+
+  DOCUMENT.SEARCH 'termination clause' → 2 chunk(s)
+    [policy] Health Insurance Policy — 2026 Plan Year Eligibility: All full-time employees wo…
+    [contract] Master Services Agreement This Agreement is entered into between Acme Corp ("Cli…
+
+--------------------------------------------------------------------
+Step 7 — execute_query_nl (NL dispatch — BM25, no embedding cost)
+--------------------------------------------------------------------
+  Note: NLQueryParser requires OPENAI_API_KEY.  Skipping NL demo.
+  To enable, add nl_parser=NLQueryParser() to DocumentDataSource
+  and set OPENAI_API_KEY.  The registry call is then:
+
+    result = registry.execute_query_nl(
+        source="legal_corpus",
+        text="find the termination clause in contracts",
+    )
+
+====================================================================
+Result
+====================================================================
+
+  DocumentDataSource participates in DataRegistry like any other source:
+  - register_source  → source is addressable by name
+  - sync_source      → registry learns ChunkRecord schema automatically
+  - search_records   → registry metadata is searchable
+  - execute_query    → DOCUMENT.* ops run via the registry interface
+  - execute_query_nl → NL dispatch when NLQueryParser is wired up
+
+  Agents built on DataRegistry can retrieve document evidence and
+  cross-reference it with SQL, graph, or JSON sources — no per-
+  integration glue code required.
+

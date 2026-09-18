@@ -34,11 +34,11 @@ mcp = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["lib/src"]
+where = ["src"]
 include = ["blue_data_doc_source*"]
 
 [tool.pytest.ini_options]
-testpaths = ["lib/tests/unit"]
+testpaths = ["tests/unit"]
 markers = [
     "integration: end-to-end tests requiring external services (Redis)",
 ]

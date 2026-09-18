@@ -400,6 +400,8 @@ results = source.execute_query({
 
 `"bm25"` is useful for testing without an embedding model, for keyword-heavy corpora where semantic similarity adds noise, and for the `NLQueryParser` demo path where dummy embeddings would produce meaningless scores.
 
+> **In-process only.** `"bm25"`, `"hybrid"`, and `"rerank"` all score against an in-memory chunk index built during `ingest()`. This index is lost when the process exits. After a restart, these modes silently return empty results even if the vector store is intact. `"vector"` mode is unaffected — it queries the persistent vector store. If you need BM25 or hybrid across restarts, re-ingest documents in the current process before searching, or use `"vector"` mode only.
+
 ---
 
 ## Natural language queries

@@ -5,7 +5,7 @@
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e lib/
 ```
 
 ## Inspect chunks (no API key, no vector store)

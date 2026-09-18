@@ -88,7 +88,7 @@ Embed a query and return the k most relevant chunks.
 | `k` | int | `5` | Number of results |
 | `collection` | string | env default | Collection to search |
 | `filter` | object | — | Pre-filter applied before KNN (e.g. `{"document_id": "..."}`) |
-| `mode` | string | `"vector"` | Search mode: `"vector"` (KNN cosine), `"bm25"` (keyword, no embeddings needed), `"hybrid"` (RRF fusion of KNN + BM25), `"rerank"` (BM25 shortlist re-ranked by cosine) |
+| `mode` | string | `"vector"` | Search mode: `"vector"` (KNN cosine), `"bm25"` (keyword, no embeddings needed), `"hybrid"` (RRF fusion of KNN + BM25), `"rerank"` (BM25 shortlist re-ranked by cosine). **Note:** `"bm25"`, `"hybrid"`, and `"rerank"` require documents to have been ingested in the current server process — they use an in-memory index that is lost on restart. |
 | `rich` | bool | `false` | Return structured response with provenance + `by_document` grouping |
 | `context_chunks` | int | `1` | Neighbor chunks to include per result when `rich=true` |
 

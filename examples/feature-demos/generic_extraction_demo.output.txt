@@ -1,0 +1,192 @@
+
+========================================================================
+Generic field extraction — field_extractor without a classifier
+========================================================================
+
+  Three document types the pipeline has never seen:
+    lab_notebook, equipment_log, incident_report
+
+  No classifier. No extra_types. LLM discovers fields as-is.
+
+  No OPENAI_API_KEY — showing pipeline setup and filter syntax.
+  Set OPENAI_API_KEY to see actual extracted fields.
+
+------------------------------------------------------------------------
+Step 1 -- Pipeline setup — field_extractor alone, no classifier
+------------------------------------------------------------------------
+
+  pipeline = DocumentPipeline(
+      field_extractor=LLMFieldExtractor(),
+      # No classifier= argument
+  )
+
+  For each document ingested:
+    document_type = 'unknown'   (no classifier to determine type)
+    confidence    = 0.0
+    fields        = { ... }      (LLM extracts whatever it finds)
+
+
+------------------------------------------------------------------------
+Step 2 -- Ingest three mixed documents
+------------------------------------------------------------------------
+
+  pipeline.ingest_text(<Lab Notebook>, file_name='lab_notebook_2026.txt')
+  pipeline.ingest_text(<Equipment Log>, file_name='equipment_log_cf800.txt')
+  pipeline.ingest_text(<Incident Report>, file_name='incident_INC-2026-0088.txt')
+
+  (Set OPENAI_API_KEY to see extracted fields)
+
+------------------------------------------------------------------------
+Step 3 -- DOCUMENT.FIND — query across unknown-type records
+------------------------------------------------------------------------
+
+  find_records() and filter syntax work identically for unknown-type records.
+  Fields are LLM-discovered, so key names depend on what the LLM extracted.
+
+  Showing filter syntax — set OPENAI_API_KEY to see real results:
+
+    # All records (document_type='unknown')
+    pipeline.find_records()
+
+    # Records where the LLM found a 'Severity' field
+    pipeline.find_records({'fields.Severity': {'exists': True}})
+
+    # Records where Result is 'PASS'
+    pipeline.find_records({'fields.Result': 'PASS'})
+
+    # Records where status is resolved
+    pipeline.find_records({'fields.Status': 'Resolved'})
+
+------------------------------------------------------------------------
+Step 4 -- Adding a classifier later — typed records + extracted fields
+------------------------------------------------------------------------
+
+  Once you've defined extra_types, add a classifier alongside the extractor:
+
+    EXTRA_TYPES = {
+        'lab_notebook': [
+            'experiment', 'researcher', 'protocol', 'sample id',
+            'observations', 'assay',
+        ],
+        'equipment_log': [
+            'maintenance', 'equipment', 'asset id', 'technician',
+            'service', 'parts replaced', 'certification',
+        ],
+        'incident_report': [
+            'incident', 'severity', 'root cause', 'immediate actions',
+            'follow-up', 'compressor',
+        ],
+    }
+
+    pipeline = DocumentPipeline(
+        classifier=KeywordClassifier(extra_types=EXTRA_TYPES),
+        field_extractor=LLMFieldExtractor(extra_types={
+            'lab_notebook'    : 'Extract: researcher, date, sample_id, result, next_steps',
+            'equipment_log'   : 'Extract: asset_id, technician, service_date, next_service_due, status',
+            'incident_report' : 'Extract: report_id, severity, incident_date, root_cause, status',
+        }),
+    )
+
+  Now each record gets:
+    document_type = 'lab_notebook' | 'equipment_log' | 'incident_report'
+    confidence    = 0.0–1.0  (keyword score)
+    fields        = { ... }   (type-specific extraction)
+
+
+------------------------------------------------------------------------
+Step 5 -- Decision guide — pick your path
+------------------------------------------------------------------------
+
+  Do you need extracted fields?
+    │
+    ├─ No  → KeywordClassifier() alone
+    │         document_type on every chunk, filterable in KNN — zero API cost
+    │
+    └─ Yes → Do you already have a schema (Pydantic / TypedDict / JSON Schema)?
+               │
+               ├─ No  → LLMFieldExtractor() alone   ← schema discovery only
+               │         LLM names fields inconsistently across documents:
+               │           'vendor' in one doc, 'supplier_name' in another.
+               │         DOCUMENT.FIND matches exact names — variants are missed.
+               │         Use to explore: find_records() → learn what fields exist
+               │         → define StructuredFieldExtractor(schema) to stabilise.
+               │
+               └─ Yes → Do you also need document_type on each chunk?
+                          │
+                          ├─ No  → StructuredFieldExtractor(schema)
+                          │         schema-defined names, Pydantic-validated
+                          │
+                          └─ Yes → KeywordClassifier() + StructuredFieldExtractor(schema)
+                                    detected document_type + schema-validated fields
+
+------------------------------------------------------------------------
+Step 6 -- hint_fields — stabilise key names without a full schema
+------------------------------------------------------------------------
+
+  Problem: field names vary across documents because the LLM chooses them freely.
+    lab_notebook   : 'Date', 'Researcher', 'Lab Location', 'Result'
+    equipment_log  : 'Service Date', 'Technician', 'Certification Status'
+    incident_report: 'Date of Incident', 'Reported By', 'Location', 'Status'
+
+  DOCUMENT.FIND({'fields.date': {'exists': True}}) misses records where the LLM
+  chose 'Service Date' or 'Date of Incident' instead.
+
+  hint_fields tells the LLM which exact names to prefer:
+
+    LLMFieldExtractor(
+        hint_fields=['date', 'status', 'responsible_person', 'location'],
+    )
+
+  The prompt becomes:
+    'Extract any structured metadata you can find. When you find values
+     that correspond to any of the following concepts, use exactly these
+     field names: date, status, responsible_person, location.
+     You may extract additional fields beyond this list.'
+
+  Expected outcome (set OPENAI_API_KEY to see real results):
+
+  ┌──────────────────────────┬──────────────────────────┬───────────────────────────┐
+  │ Document                 │ Without hint_fields      │ With hint_fields           │
+  ├──────────────────────────┼──────────────────────────┼───────────────────────────┤
+  │ lab_notebook_2026.txt    │ 'Date', 'Researcher',    │ 'date',                   │
+  │                          │ 'Lab Location', 'Result' │ 'responsible_person',     │
+  │                          │                          │ 'location', 'status'      │
+  ├──────────────────────────┼──────────────────────────┼───────────────────────────┤
+  │ equipment_log_cf800.txt  │ 'Service Date',          │ 'date',                   │
+  │                          │ 'Technician',            │ 'responsible_person',     │
+  │                          │ 'Certification Status'   │ 'status'                  │
+  ├──────────────────────────┼──────────────────────────┼───────────────────────────┤
+  │ incident_INC-2026-0088   │ 'Date of Incident',      │ 'date',                   │
+  │                          │ 'Reported By',           │ 'responsible_person',     │
+  │                          │ 'Location', 'Status'     │ 'location', 'status'      │
+  └──────────────────────────┴──────────────────────────┴───────────────────────────┘
+
+  Without hints:  find_records({'fields.date': {'exists': True}})  ->  0 records
+  With hints:     find_records({'fields.date': {'exists': True}})  ->  3 records
+
+========================================================================
+Summary
+========================================================================
+
+  LLMFieldExtractor() without a classifier = schema discovery mode.
+
+  What it does:
+    Assigns document_type='unknown', runs the extractor on every document,
+    stores whatever fields the LLM names. Zero classifier setup.
+
+  The limitation:
+    Field names are LLM-chosen and inconsistent across documents.
+    'vendor' in one doc, 'supplier_name' in another — both mean the same
+    thing, but DOCUMENT.FIND on 'fields.vendor' misses the second record.
+
+  How to use it correctly:
+    1. Ingest a representative sample of your corpus.
+    2. Call find_records() and list all field names that appeared.
+    3. Add hint_fields=[...] to reduce naming variance for the names you care about.
+       Field names still vary for un-hinted fields; hints are best-effort, not guaranteed.
+    4. Once names are stable, define a StructuredFieldExtractor(schema).
+    5. Re-ingest (or use the schema from that point forward).
+
+  To see real extraction output:
+    OPENAI_API_KEY=sk-... python3 examples/feature-demos/generic_extraction_demo.py
+

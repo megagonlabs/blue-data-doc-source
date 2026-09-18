@@ -8,7 +8,7 @@ Runnable demos organized in five categories. Most self-contained demos work with
 
 ```bash
 # install the package
-pip install -e .
+pip install -e lib/
 
 # run the minimal quickstart
 python3 examples/backends/memory_quickstart.py
@@ -21,6 +21,7 @@ python3 examples/backends/memory_quickstart.py
 ```
 examples/
   local_memory_store.py        # shared helper: in-process VectorStore (no Redis)
+  local_redis_store.py         # demo-only LocalRedisVectorStore (requires Redis Stack)
   README.md                    # this file
 
   scenario-demos/              # Problem → Solution story demos

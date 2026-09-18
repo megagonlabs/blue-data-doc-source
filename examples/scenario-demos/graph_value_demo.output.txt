@@ -1,0 +1,186 @@
+
+======================================================================
+  Graph Backend — Value Proposition Demo
+======================================================================
+
+  Corpus  : 6 documents (contracts, vendor agreements, incident reports)
+  Entities: BasicEnricher extracts PROPER_NOUN automatically
+  Backend : MemoryGraphSource (in-process, no infra required)
+
+  Each question answered two ways:
+    Attempt A — keyword/BM25 search  (shows the limitation)
+    Attempt B — graph traversal        (shows the solution)
+
+----------------------------------------------------------------------
+Ingesting corpus …
+----------------------------------------------------------------------
+  ✓  6 documents  |  9 chunks total
+
+======================================================================
+  Question 1 — Find every mention of Acme Corp across all documents
+======================================================================
+
+----------------------------------------------------------------------
+  Attempt A — BM25 keyword search  (k=4 cap)
+  
+    pipeline.search('Acme Corp', mode='bm25', k=4)
+  
+    Problem: k caps the result set and you cannot know the right k in
+    advance. In this 6-document corpus k=10 would retrieve everything.
+    In a 50,000-document corpus an entity might appear in thousands of
+    documents — any fixed k silently drops results beyond it.
+  
+    BM25 returned 4 chunk(s) from 3 distinct document(s)  [k=4 cap]
+    hit: incident_0088.txt  [3. ROOT CAUSE AND VENDOR NOTIFICATION] 'Preliminary diagnosis by James Ortega confirmed compressor failure caused b'…
+    hit: incident_0088.txt  [4. FOLLOW-UP ACTIONS] 'Action 1: James Ortega to oversee Acme Corp repair visit on August 3. Actio'…
+    hit: employment_chen.txt  [EMPLOYMENT AGREEMENT] 'This Employment Agreement is entered into between Acme Corp and Sarah Chen '…
+    hit: vendor_apex.txt  [VENDOR SERVICES AGREEMENT] 'This agreement is between Acme Corp (the "Client") and Apex Data Systems LL'…
+
+----------------------------------------------------------------------
+  Attempt B — graph traversal  (no k cap)
+  
+    pipeline.graph_neighbors('Acme Corp')
+  
+    Constructs node ID 'entity:PROPER_NOUN:acme corp' deterministically
+    (one dict lookup), then follows all inbound MENTIONS edges to chunk
+    nodes. No scoring. No k cap. Returns every mention exactly.
+  
+    Graph returned 7 chunk(s) across 6 document(s)  [no cap]
+    hit: employment_chen.txt  [EMPLOYMENT AGREEMENT] 'This Employment Agreement is entered into between Acme Corp and Sarah Chen '…
+    hit: vendor_apex.txt  [VENDOR SERVICES AGREEMENT] 'This agreement is between Acme Corp (the "Client") and Apex Data Systems LL'…
+    hit: incident_0088.txt  [3. ROOT CAUSE AND VENDOR NOTIFICATION] 'Preliminary diagnosis by James Ortega confirmed compressor failure caused b'…
+    hit: incident_0088.txt  [4. FOLLOW-UP ACTIONS] 'Action 1: James Ortega to oversee Acme Corp repair visit on August 3. Actio'…
+    hit: nda_ortega.txt  [NON-DISCLOSURE AGREEMENT] 'This NDA is entered into between Acme Corp and James Ortega effective March'…
+    hit: board_resolution_q1.txt  'BOARD RESOLUTION — Q1 2026 Resolved that Acme Corp authorises the renewal o'…
+    hit: incident_0091.txt  [2. ROOT CAUSE] 'The HVAC fan motor failed due to bearing wear. The unit is maintained under'…
+
+    entity:PROPER_NOUN:acme corp
+        ├──MENTIONS──►  employment_chen.txt  [EMPLOYMENT AGREEMENT]
+        ├──MENTIONS──►  vendor_apex.txt  [VENDOR SERVICES AGREEMENT]
+        ├──MENTIONS──►  incident_0088.txt  [3. ROOT CAUSE AND VENDOR NOTIFICATION]
+        ├──MENTIONS──►  incident_0088.txt  [4. FOLLOW-UP ACTIONS]
+        ├──MENTIONS──►  nda_ortega.txt  [NON-DISCLOSURE AGREEMENT]
+        ├──MENTIONS──►  board_resolution_q1.txt
+        └──MENTIONS──►  incident_0091.txt  [2. ROOT CAUSE]
+
+    ↑ Graph found 3 more document(s) than BM25 with k=4.
+
+
+======================================================================
+  Question 2 — Which documents mention BOTH Sarah Chen AND Acme Corp?
+======================================================================
+
+----------------------------------------------------------------------
+  Attempt A — two separate BM25 searches + manual intersection
+  
+    hits_a = pipeline.search('Sarah Chen', mode='bm25', k=4)
+    hits_b = pipeline.search('Acme Corp',  mode='bm25', k=4)
+    shared = doc_ids_with_exact_match(hits_a) & doc_ids_with_exact_match(hits_b)
+  
+    Problem: k caps each result set independently. A document where
+    Sarah Chen appears only past position k is silently excluded.
+    Correctness requires knowing k in advance — impossible for a growing
+    corpus where entity frequency is unpredictable.
+  
+    BM25 — Sarah Chen exact hits: 2 doc(s)  [k=4]
+    BM25 — Acme Corp  exact hits: 3 doc(s)  [k=4]
+    Intersection: 2 doc(s)
+      employment_chen.txt
+      incident_0088.txt
+
+----------------------------------------------------------------------
+  Attempt B — graph entity intersection  (complete at any corpus size)
+  
+    sc_chunks = pipeline.graph_neighbors('Sarah Chen', k=999)
+    ac_chunks = pipeline.graph_neighbors('Acme Corp',  k=999)
+    both      = {c['document_id'] for c in sc_chunks}
+              & {c['document_id'] for c in ac_chunks}
+  
+    Document                   Sarah Chen    Acme Corp
+    ──────────────────────────────────────────────────────
+    board_resolution_q1.txt    ✓             ✓   ◄ both
+    vendor_apex.txt                          ✓
+    incident_0091.txt          ✓             ✓   ◄ both
+    employment_chen.txt        ✓             ✓   ◄ both
+    incident_0088.txt          ✓             ✓   ◄ both
+    nda_ortega.txt                           ✓
+    ──────────────────────────────────────────────────────
+    Intersection: 4 document(s)
+
+    One intersection. No k risk. Scales to any corpus size.
+
+
+======================================================================
+  Question 3 — Show context around the Acme Corp incident finding
+======================================================================
+
+----------------------------------------------------------------------
+    Found via graph_neighbors('Acme Corp'):
+    File   : incident_0088.txt
+    Chunk  : doc_af6b43ca81a1ae57_chunk_000003
+    Text   : 'Preliminary diagnosis by James Ortega confirmed compressor failure caused b'…
+
+----------------------------------------------------------------------
+  Attempt A — re-query with an expanded keyword string
+  
+    pipeline.search('Acme Corp freezer incident compressor warranty', mode='bm25', k=4)
+  
+    Problem: BM25 ranks by term overlap across the FULL corpus.
+    Chunks from incident_0091 (HVAC failure) score similarly and
+    appear in the results — even though you only want context from
+    incident_0088. Reading order within the document is ignored.
+  
+    BM25 returned 4 chunk(s):
+    hit: incident_0088.txt  [3. ROOT CAUSE AND VENDOR NOTIFICATION] 'Preliminary diagnosis by James Ortega confirmed compressor failure caused b'…
+    hit: incident_0088.txt  [4. FOLLOW-UP ACTIONS] 'Action 1: James Ortega to oversee Acme Corp repair visit on August 3. Actio'…
+    hit: incident_0088.txt  [1. INCIDENT SUMMARY] 'At 02:14 on August 1 2026, the building management system triggered an auto'…
+    hit: employment_chen.txt  [EMPLOYMENT AGREEMENT] 'This Employment Agreement is entered into between Acme Corp and Sarah Chen '…
+
+    ↑ 1 chunk(s) came from OTHER documents — context pollution.
+
+----------------------------------------------------------------------
+  Attempt B — walk NEXT / PREV from the target chunk
+  
+    Resolving PREV → THIS → NEXT for chunk:doc_af6b43ca81a1ae57_chunk_000003
+  
+    All neighbours are from the same document, in reading order.
+    No query. No scoring. No other documents involved.
+  
+    reading order ───────────────────────────────────────────────►
+
+    ┌────────────────────┐         ┌────────────────────┐         ┌────────────────────┐
+    │       ◄ PREV       │         │       ● THIS       │         │       NEXT ►       │
+    ├────────────────────┤         ├────────────────────┤         ├────────────────────┤
+    │ 02:14 — Automated  │ ──────► │ Preliminary        │ ──────► │ Action 1: James    │
+    │ alert generated    │         │ diagnosis by       │         │ Ortega to oversee  │
+    └────────────────────┘         └────────────────────┘         └────────────────────┘
+
+    All three chunks from incident_0088.txt — same document, in reading order.
+
+    The analyst can now read the incident timeline in sequence:
+    what happened before the Acme Corp mention, and what follow-up
+    actions were assigned after it — all from the same document,
+    in the order they were written.
+
+
+======================================================================
+  Summary — when graph traversal outperforms keyword/vector search
+======================================================================
+
+  Question                                 Search                           Graph
+----------------------------------------------------------------------
+  Exact entity lookup across corpus        BM25/KNN — k-capped, may miss docs Node lookup + MENTIONS hop — exact, no cap
+  Docs mentioning entity A AND B           Two queries + intersect (k-limited) Neighbour intersection — complete
+  Reading-order context expansion          Re-query — cross-doc noise       NEXT/PREV — same doc, in order
+
+  Graph traversal complements — not replaces — vector search:
+
+    Vector/BM25:  'find chunks about cost-sharing arrangements'
+    Graph:        'find every chunk naming Acme Corp'
+    Graph:        'which docs mention both Sarah Chen and Acme Corp?'
+    Graph:        'show me what comes before and after this finding'
+
+  Combined:  DOCUMENT.FIND_THEN_SEARCH filters documents by entity
+  or extracted field first, then runs vector search only within
+  the matched documents — best of both in a single call.
+

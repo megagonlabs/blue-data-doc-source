@@ -1,0 +1,68 @@
+
+====================================================================
+PDF Pipeline Demo
+====================================================================
+
+--------------------------------------------------------------------
+PDF ingest  —  page_start, page_end, section_title per chunk
+--------------------------------------------------------------------
+
+  Ingesting PDF: sample_policy.pdf
+  → 14 chunks
+
+--------------------------------------------------------------------
+Chunk distribution across pages
+--------------------------------------------------------------------
+
+  Page    Chunks
+  ------  ------
+  1            1
+  2            2
+  3            2
+  4            2
+  5            2
+  6            2
+  7            2
+  8            1
+
+--------------------------------------------------------------------
+Provenance fields on first 10 PDF chunks
+--------------------------------------------------------------------
+
+  chunk_id                                  page  section_title
+  ----------------------------------------  ----  ------------------------------
+  doc_6b20ed6b01efe68a_chunk_000000            1  BLUE SHIELD HEALTH INSURANCE POLICY
+  doc_6b20ed6b01efe68a_chunk_000001            2  1. ELIGIBILITY
+  doc_6b20ed6b01efe68a_chunk_000002            2  26. Dependent children who are full
+  doc_6b20ed6b01efe68a_chunk_000003            3  2. COVERAGE
+  doc_6b20ed6b01efe68a_chunk_000004            3  2. COVERAGE
+  doc_6b20ed6b01efe68a_chunk_000005            4  3. EXCLUSIONS
+  doc_6b20ed6b01efe68a_chunk_000006            4  3. EXCLUSIONS
+  doc_6b20ed6b01efe68a_chunk_000007            5  4. COST SHARING
+  doc_6b20ed6b01efe68a_chunk_000008            5  4. COST SHARING
+  doc_6b20ed6b01efe68a_chunk_000009            6  5. CLAIMS
+
+--------------------------------------------------------------------
+Verifying chunks never span page boundaries
+--------------------------------------------------------------------
+
+  ✓ All 14 chunks have page_start == page_end
+  PDF chunks are strictly page-scoped (V1 design constraint).
+
+--------------------------------------------------------------------
+Re-ingest stability  —  same PDF bytes → same chunk IDs
+--------------------------------------------------------------------
+
+  First ingest  : 14 chunks
+  Second ingest : 14 chunks
+  IDs identical : ✓ yes
+
+====================================================================
+Result
+====================================================================
+
+  PDF pipeline adds page-scoped provenance to every chunk.
+  page_start == page_end is a V1 design constraint: chunks never cross pages.
+  Otherwise the pipeline behaves identically to TXT ingestion:
+  same content-addressed IDs, same upsert idempotency, same enrichment.
+

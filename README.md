@@ -276,7 +276,7 @@ export OPENAI_API_KEY=sk-...
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e lib/
 ```
 
 ## Quick start
@@ -379,7 +379,7 @@ docker run -d -p 6379:6379 redis/redis-stack-server:latest
 **Install dependencies** (includes `redis[hiredis]`):
 
 ```bash
-pip install -e .
+pip install -e lib/
 ```
 
 ### Run

@@ -15,11 +15,11 @@
 
 ## Installing the library
 
-`blue-data-doc-source` depends on [`blue-data`](../blue-data). Install it first, then install this package:
+`blue-data-doc-source` depends on `blue-data` (a sibling package in the same monorepo). Install it first, then install this package:
 
 ```bash
 pip install -e ../blue-data
-pip install -e .
+pip install -e lib/
 ```
 
 To install with optional extras:

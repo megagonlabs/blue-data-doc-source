@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blue-data-doc-mcp"
+version = "0.1.0"
+description = "MCP server for blue-data-doc-source"
+requires-python = ">=3.10"
+dependencies = [
+    "blue-data-doc-source>=0.1.0",
+    "mcp>=1.0.0",
+]
+
+[project.optional-dependencies]
+openai = ["openai>=1.0.0"]
+redis  = ["redis[hiredis]>=4.5.0"]
+dev    = ["pytest"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["server"]

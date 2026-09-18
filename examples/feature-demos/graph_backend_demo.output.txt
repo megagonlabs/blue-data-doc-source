@@ -1,0 +1,305 @@
+
+========================================================================
+Graph backend — entity-centric retrieval and structural navigation
+========================================================================
+
+  Three documents with overlapping entities:
+    employment_chen.txt  — Acme Corp, Sarah Chen, January 15 2026
+    vendor_apex.txt      — Acme Corp, Apex Data Systems, January 15 2026
+    incident_0088.txt    — Sarah Chen, James Ortega, Acme Corp
+
+  Backend: MemoryGraphSource (in-process, no infra required)
+  Entities: BasicEnricher extracts PROPER_NOUN and DATE automatically
+
+------------------------------------------------------------------------
+Step 1 -- Build pipeline with graph_source=MemoryGraphSource()
+------------------------------------------------------------------------
+
+  graph = MemoryGraphSource('demo')
+  pipeline = DocumentPipeline(
+      enricher=BasicEnricher(),   # extracts entities from each chunk
+      graph_source=graph,          # enables graph indexing
+      graph_database='documents',
+  )
+
+
+------------------------------------------------------------------------
+Step 2 -- Ingest three documents — graph nodes created automatically
+------------------------------------------------------------------------
+
+  employment_chen.txt  →  1 chunk(s)
+  vendor_apex.txt  →  1 chunk(s)
+  incident_0088.txt  →  1 chunk(s)
+
+  Graph state after ingest:
+    Document nodes : 3
+    Section nodes  : 3
+    Chunk nodes    : 3
+    Entity nodes   : 17
+
+  Entity nodes (all shared across documents):
+    [DATE        ]  January 15, 2026
+    [DATE        ]  August 1, 2026
+    [MONEY       ]  $145,000
+    [MONEY       ]  $240,000
+    [PERCENT     ]  99.5%
+    [PROPER_NOUN ]  This Employment Agreement
+    [PROPER_NOUN ]  Acme Corp
+    [PROPER_NOUN ]  Sarah Chen
+    [PROPER_NOUN ]  Senior Software Engineer Base Salary
+    [PROPER_NOUN ]  Notice Period
+    [PROPER_NOUN ]  Apex Data Systems
+    [PROPER_NOUN ]  Contract Value
+    [PROPER_NOUN ]  Reported By
+    [PROPER_NOUN ]  Lab Manager Assigned To
+    [PROPER_NOUN ]  James Ortega
+    [PROPER_NOUN ]  Facilities Description
+    [PROPER_NOUN ]  Root Cause
+
+------------------------------------------------------------------------
+Step 3 -- Richer Document node — mime_type, ingested_at, chunk_count
+------------------------------------------------------------------------
+
+  Document nodes now carry provenance metadata set at ingest time:
+
+  employment_chen.txt
+    document_id  : doc_ab47570d1bcac412
+    document_type: unknown
+    mime_type    : text/plain
+    ingested_at  : 2026-09-17T04:58:04.876616+00:00
+    chunk_count  : 1
+
+  vendor_apex.txt
+    document_id  : doc_3119d4c48e607d0e
+    document_type: unknown
+    mime_type    : text/plain
+    ingested_at  : 2026-09-17T04:58:04.877298+00:00
+    chunk_count  : 1
+
+  incident_0088.txt
+    document_id  : doc_ce3602ae6b6dec3a
+    document_type: unknown
+    mime_type    : text/plain
+    ingested_at  : 2026-09-17T04:58:04.877618+00:00
+    chunk_count  : 1
+
+
+------------------------------------------------------------------------
+Step 4 -- Section nodes — Document -[:HAS_SECTION]-> Section -[:HAS_CHUNK]-> Chunk
+------------------------------------------------------------------------
+
+  Each distinct section_title per document becomes a Section node.
+  Section nodes sit between the Document and its Chunks in the graph,
+  preserving document structure for structural navigation.
+
+  Section: 'EMPLOYMENT AGREEMENT'  (position=0, doc=doc_ab47570d1bcac412)
+    └─ chunk 0  'This Employment Agreement is entered into between '
+  Section: 'VENDOR SERVICES AGREEMENT'  (position=0, doc=doc_3119d4c48e607d0e)
+    └─ chunk 0  'This agreement is between Acme Corp (the "Client")'
+  Section: 'INCIDENT REPORT  INC-2026-0088'  (position=0, doc=doc_ce3602ae6b6dec3a)
+    └─ chunk 0  'Date: August 1, 2026 Reported By: Sarah Chen, Lab '
+
+------------------------------------------------------------------------
+Step 5 -- graph_neighbors('Acme Corp') — cross-document entity traversal
+------------------------------------------------------------------------
+
+  pipeline.graph_neighbors('Acme Corp')
+
+  Under the hood: entity:PROPER_NOUN:acme corp → MENTIONS edges (in) → Chunks
+  Deterministic node ID lookup — no KNN, no embeddings, no corpus scan.
+
+  chunk: doc_ab47570d1bcac412_chunk_000000
+  doc:   doc_ab47570d1bcac412  [EMPLOYMENT AGREEMENT]
+  text:  'This Employment Agreement is entered into between Acme Corp and Sar...'
+
+  chunk: doc_3119d4c48e607d0e_chunk_000000
+  doc:   doc_3119d4c48e607d0e  [VENDOR SERVICES AGREEMENT]
+  text:  'This agreement is between Acme Corp (the "Client") and Apex Data Sy...'
+
+  chunk: doc_ce3602ae6b6dec3a_chunk_000000
+  doc:   doc_ce3602ae6b6dec3a  [INCIDENT REPORT  INC-2026-0088]
+  text:  'Date: August 1, 2026 Reported By: Sarah Chen, Lab Manager Assigned ...'
+
+  → Found in 3 document(s) across 3 chunk(s)
+    Vector search would need to score all chunks by embedding distance.
+    Graph traversal answers this without scoring any chunks — no embeddings needed.
+
+------------------------------------------------------------------------
+Step 6 -- Sequential navigation — Chunk -[:NEXT]-> Chunk / Chunk -[:PREV]-> Chunk
+------------------------------------------------------------------------
+
+  Every consecutive pair of chunks in a document is linked with NEXT and PREV.
+  Walk the chain to expand context around a hit — without storing full text in
+  each node (text_preview is capped at 200 chars for node weight).
+
+  NEXT edges in corpus: 0
+
+  Walking NEXT chain from first chunk of 'employment_chen.txt':
+    [0] chunk:doc_ab47570d1bcac412_chunk_000000  'This Employment Agreement is entered into between Acme '
+
+  Use DOCUMENT.GRAPH_QUERY to walk this chain programmatically:
+    source.execute_query({
+        'op': 'DOCUMENT.GRAPH_QUERY',
+        'node_id': 'chunk:doc_abc_chunk_000003',
+        'edge_type': 'NEXT',
+        'direction': 'out',
+    })
+
+------------------------------------------------------------------------
+Step 7 -- Entity -[:APPEARS_IN]-> Document — direct document membership
+------------------------------------------------------------------------
+
+  Every entity gets a direct APPEARS_IN edge to each Document it appears in.
+  This lets you answer 'which documents mention Acme Corp?' in one hop,
+  rather than a two-hop traversal (entity → chunk → document).
+
+  APPEARS_IN edges in corpus: 21
+
+  Documents that 'Acme Corp' APPEARS_IN (3 document(s)):
+    → [Document]  doc:doc_ab47570d1bcac412  (employment_chen.txt)
+    → [Document]  doc:doc_3119d4c48e607d0e  (vendor_apex.txt)
+    → [Document]  doc:doc_ce3602ae6b6dec3a  (incident_0088.txt)
+
+  Compare: the old two-hop path (entity → MENTIONS ← chunk → HAS_CHUNK ← doc)
+  is still valid but APPEARS_IN makes document membership a single hop.
+
+------------------------------------------------------------------------
+Step 8 -- CO_OCCURS_WITH — entities co-occurring in the same chunk
+------------------------------------------------------------------------
+
+  Entities that appear in the same chunk get a CO_OCCURS_WITH edge.
+  Enables: 'what else was mentioned with Acme Corp in this chunk?'
+
+  64 CO_OCCURS_WITH edge(s) — 62 unique pair(s):
+    '$145,000'  <-->  'acme corp'
+    '$145,000'  <-->  'january 15, 2026'
+    '$145,000'  <-->  'notice period'
+    '$145,000'  <-->  'sarah chen'
+    '$145,000'  <-->  'senior software engineer base salary'
+    '$145,000'  <-->  'this employment agreement'
+    '$240,000'  <-->  '99.5%'
+    '$240,000'  <-->  'acme corp'
+
+------------------------------------------------------------------------
+Step 9 -- DOCUMENT.GRAPH_QUERY — general graph traversal via op interface
+------------------------------------------------------------------------
+
+  DOCUMENT.GRAPH_QUERY is a general-purpose traversal op. Start from any
+  node ID, follow any edge type, in any direction, with an optional limit.
+
+  Examples:
+
+    # All chunks in a document
+    source.execute_query({
+        'op': 'DOCUMENT.GRAPH_QUERY',
+        'node_id': 'doc:doc_abc123',
+        'edge_type': 'HAS_CHUNK',
+        'direction': 'out',
+    })
+
+    # Documents that mention a given entity (APPEARS_IN)
+    source.execute_query({
+        'op': 'DOCUMENT.GRAPH_QUERY',
+        'node_id': 'entity:PROPER_NOUN:acme corp',
+        'edge_type': 'APPEARS_IN',
+        'direction': 'out',
+    })
+
+    # Next chunk in reading order
+    source.execute_query({
+        'op': 'DOCUMENT.GRAPH_QUERY',
+        'node_id': 'chunk:doc_abc123_chunk_000003',
+        'edge_type': 'NEXT',
+        'direction': 'out',
+        'k': 1,
+    })
+
+    # All sections in a document
+    source.execute_query({
+        'op': 'DOCUMENT.GRAPH_QUERY',
+        'node_id': 'doc:doc_abc123',
+        'edge_type': 'HAS_SECTION',
+        'direction': 'out',
+    })
+
+  Live: graph_query('doc:doc_ab47570d1bcac412', edge_type='HAS_CHUNK', k=3)
+  → 1 result(s) (capped at k=3):
+  [Chunk]  chunk:doc_ab47570d1bcac412_chunk_000000
+           'This Employment Agreement is entered into between Acme Co...'
+
+
+------------------------------------------------------------------------
+Step 10 -- Delete cascade — Document + Section + Chunk removed; Entity nodes retained
+------------------------------------------------------------------------
+
+  Deleting: employment_chen.txt  (doc_ab47570d1bcac412)
+  After delete:
+    Document nodes : 2  (was 3)
+    Section nodes  : 2  (was 3)
+    Chunk nodes    : 2  (was 3)
+    Entity nodes   : 17  (unchanged — shared across docs)
+
+------------------------------------------------------------------------
+Step 11 -- Production path — swap MemoryGraphSource for NEO4JSource
+------------------------------------------------------------------------
+
+  Replace MemoryGraphSource with NEO4JSource for persistent storage.
+  No other code changes — the same GraphIndexer, same node IDs, same edges.
+
+    from blue_data.source.graph.neo4j.neo4j_graph_source import NEO4JSource
+
+    neo4j = NEO4JSource('neo4j', properties={
+        'connection': {
+            'host': 'localhost',
+            'port': 7687,
+            'user': 'neo4j',
+            'password': 'password',
+        }
+    })
+    pipeline = DocumentPipeline(
+        enricher=BasicEnricher(),
+        graph_source=neo4j,
+        graph_database='documents',
+    )
+
+  Quick start (Docker):
+    docker run -p 7687:7687 -e NEO4J_AUTH=none neo4j:community
+
+========================================================================
+Summary
+========================================================================
+
+  Full graph schema written during ingest:
+
+    (Document {document_id, file_name, document_type,
+               mime_type, ingested_at, chunk_count})
+        -[:HAS_SECTION]->
+    (Section {section_id, title, document_id, position})
+        -[:HAS_CHUNK]->
+    (Chunk {chunk_id, document_id, text_preview, chunk_index})
+        -[:MENTIONS]->
+    (Entity {name, entity_type})
+
+    Additional edges:
+      Document  -[:HAS_CHUNK]->       Chunk    (direct, regardless of section)
+      Chunk     -[:NEXT]->            Chunk    (sequential forward)
+      Chunk     -[:PREV]->            Chunk    (sequential backward)
+      Entity    -[:CO_OCCURS_WITH]->  Entity   (co-occurrence in same chunk)
+      Entity    -[:APPEARS_IN]->      Document (direct doc membership)
+
+  What you get that vector search alone cannot provide:
+    * Exact entity lookup — deterministic node ID, no corpus scan, no embedding
+    * Cross-document links — one entity node shared across all documents
+    * Section hierarchy — Document → Section → Chunk navigable structure
+    * Sequential navigation — walk reading order via NEXT/PREV
+    * Direct document membership — APPEARS_IN skips the chunk hop
+    * Co-occurrence graph — entities that appear together in the same chunk
+
+  All existing pipeline behaviour is unchanged — graph_source=None
+  (the default) disables the graph layer with zero overhead.
+
+  Backends supported (all from blue-data, no extra code needed):
+    MemoryGraphSource  — dev/test, in-process, no infra
+    FileGraphSource    — local persistence
+    NEO4JSource        — production, Bolt protocol
+

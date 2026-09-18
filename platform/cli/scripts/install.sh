@@ -2,9 +2,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLI_DIR="$(dirname "$SCRIPT_DIR")"
-REPO_ROOT="$(dirname "$(dirname "$CLI_DIR")")"
+PACKAGE_DIR="$(dirname "$SCRIPT_DIR")"                      # platform/cli/
+REPO_ROOT="$(dirname "$(dirname "$PACKAGE_DIR")")"          # blue-data-doc-source/
 
-pip install -e "$REPO_ROOT/../blue-data"
-pip install -e "$REPO_ROOT"
-pip install -e "$CLI_DIR"
+# Install lib (and its sibling deps) first
+bash "$REPO_ROOT/lib/scripts/install.sh"
+pip install -e "$PACKAGE_DIR"

@@ -1,0 +1,134 @@
+
+========================================================================
+StructuredFieldExtractor — schema-driven field extraction
+========================================================================
+
+  Extracts fields from any document type using a caller-supplied schema.
+  No manual field spec string. No hardcoded document types.
+
+  No OPENAI_API_KEY — showing auto-generated prompts only.
+  Set OPENAI_API_KEY to see actual extracted fields.
+
+------------------------------------------------------------------------
+Step 1 -- Pydantic model — auto-generated prompt + validated output
+------------------------------------------------------------------------
+
+  Define your schema as a Pydantic model:
+
+    from pydantic import BaseModel
+
+    class EmploymentContract(BaseModel):
+        employee_name: str
+        employer_name: str
+        start_date: str
+        base_salary: str
+        notice_period: str
+        non_compete: bool
+        jurisdiction: str
+
+  Auto-generated field spec:
+    Extract these fields: employee_name (string), employer_name (string), start_date (string), base_salary (string), notice_period (string), non_compete (boolean), jurisdiction (string).
+
+  (Set OPENAI_API_KEY to see extracted and validated fields)
+
+------------------------------------------------------------------------
+Step 2 -- TypedDict — prompt generated from annotations
+------------------------------------------------------------------------
+
+  Use a TypedDict when you don't need Pydantic validation:
+
+    class LeaseInfo(TypedDict):
+        landlord: str
+        tenant: str
+        property_address: str
+        monthly_rent: str
+        lease_term_months: int
+        security_deposit: str
+
+  Auto-generated field spec:
+    Extract these fields: landlord (str), tenant (str), property_address (str), monthly_rent (str), lease_term_months (int), security_deposit (str).
+
+  (Set OPENAI_API_KEY to see extracted fields)
+
+------------------------------------------------------------------------
+Step 3 -- JSON Schema dict — for schema-first or API-driven workflows
+------------------------------------------------------------------------
+
+  Pass a JSON Schema dict directly — useful when schema comes from
+  an external registry or is constructed programmatically:
+
+    schema = {
+        'type': 'object',
+        'properties': {
+            'vendor_name': {'type': 'string'},
+            'client_name': {'type': 'string'},
+            'contract_value': {'type': 'string'},
+            'payment_terms': {'type': 'string'},
+            'sla_uptime': {'type': 'string'},
+            'auto_renewal': {'type': 'boolean'},
+        },
+    }
+
+  Auto-generated field spec:
+    Extract these fields: vendor_name (string), client_name (string), contract_value (string), payment_terms (string), sla_uptime (string), auto_renewal (boolean).
+
+------------------------------------------------------------------------
+Step 4 -- DOCUMENT.FIND — same filter API regardless of schema format
+------------------------------------------------------------------------
+
+  Showing filter syntax — set OPENAI_API_KEY to see real results:
+
+    pipeline.find_records({'fields.non_compete': True})
+    pipeline.find_records({'fields.monthly_rent': {'contains': '$2'}})
+    pipeline.find_records({'fields.lease_term_months': {'gte': 12}})
+
+------------------------------------------------------------------------
+Step 5 -- Comparison: LLMFieldExtractor(extra_types=...) vs StructuredFieldExtractor
+------------------------------------------------------------------------
+
+  LLMFieldExtractor(extra_types=...)  -- manual string spec:
+
+    extractor = LLMFieldExtractor(extra_types={
+        'employment': (
+            'Extract: employee_name (string), employer_name (string),
+             start_date (ISO date), base_salary (string), non_compete (bool)'
+        )
+    })
+    # Requires pairing with KeywordClassifier(extra_types={'employment': [...]})
+    # Returns raw dict — no type validation
+
+  StructuredFieldExtractor(schema=EmploymentContract)  -- schema-driven:
+
+    extractor = StructuredFieldExtractor(schema=EmploymentContract)
+    # Prompt auto-generated from model fields and types
+    # Pydantic model_validate() coerces and validates output
+    # Works without a classifier — document_type='unknown'
+    # Add classifier= to get typed document_type alongside schema fields
+
+========================================================================
+Summary
+========================================================================
+
+  StructuredFieldExtractor extracts fields from any document type
+  using a caller-supplied schema — no manual spec string required:
+
+    Pydantic model  ->  auto-prompt + model_validate() output coercion
+    TypedDict       ->  auto-prompt from __annotations__
+    JSON Schema     ->  auto-prompt from properties dict
+
+  No classifier required:
+    pipeline = DocumentPipeline(
+        field_extractor=StructuredFieldExtractor(schema=MyModel),
+    )
+    # document_type='unknown', confidence=0.0
+    # fields validated against MyModel
+
+  Pair with a classifier to get typed document_type + schema fields:
+    pipeline = DocumentPipeline(
+        classifier=KeywordClassifier(),
+        field_extractor=StructuredFieldExtractor(schema=MyModel),
+    )
+
+  To see real extraction output:
+    OPENAI_API_KEY=sk-... python3 examples/feature-demos/structured_extractor_demo.py
+
