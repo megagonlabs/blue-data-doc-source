@@ -156,18 +156,18 @@ OPENAI_API_KEY=sk-... python3 examples/integration-demos/pdf_redis_demo.py --emb
 | Demo | What it shows | Deps |
 |---|---|---|
 | `framework-demos/langgraph_rag_demo.py` | Two-node RAG graph: [retrieve] → [generate] → END | OpenAI, langgraph |
-| `framework-demos/mcp_demo.py` | LLM agent using ingest/search/delete MCP tools from document-mcp server | OpenAI, langchain-mcp-adapters, langgraph |
+| `framework-demos/mcp_demo.py` | LLM agent using ingest/search/delete MCP tools from document-mcp server | OpenAI, langchain-mcp-adapters, langgraph — **not independently runnable** (see note below) |
 
 ```bash
 pip install langgraph langchain-openai
 OPENAI_API_KEY=sk-... python3 examples/framework-demos/langgraph_rag_demo.py
-
-# MCP demo also requires the server running:
-cd platform/document-mcp
-BLUE_DOC_EMBEDDING=dummy BLUE_DOC_REDIS_HOST=localhost python src/server.py
-# then in another terminal:
-OPENAI_API_KEY=sk-... python3 examples/framework-demos/mcp_demo.py
 ```
+
+> **`mcp_demo.py` — not independently runnable.**
+> The demo client connects via HTTP (`streamable_http` transport), but `platform/document-mcp/src/server.py`
+> currently only supports stdio transport (the default for Claude Desktop / Claude Code).
+> HTTP transport support needs to be added to the server before this demo can be run end-to-end.
+> Until then, use `langgraph_rag_demo.py` to test LLM-backed document retrieval.
 
 ---
 

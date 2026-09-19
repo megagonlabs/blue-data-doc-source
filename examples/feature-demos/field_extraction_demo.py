@@ -391,7 +391,7 @@ def run() -> None:
     print()
     if not has_openai:
         print("  To enable LLM field extraction and field-level filtering:")
-        print("    OPENAI_API_KEY=sk-... python3 examples/feature-demos/schema_inference_demo.py")
+        print("    OPENAI_API_KEY=sk-... python3 examples/feature-demos/field_extraction_demo.py")
         print()
 
 
