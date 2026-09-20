@@ -81,6 +81,7 @@ def _err(msg: str) -> None:
 
 @click.group()
 @click.option("--json", "as_json", is_flag=True, default=False, help="Output raw JSON.")
+@click.version_option(package_name="blue-data-doc-cli")
 @click.pass_context
 def cli(ctx: click.Context, as_json: bool) -> None:
     """blue-docdb — ingest, search, and manage documents."""
