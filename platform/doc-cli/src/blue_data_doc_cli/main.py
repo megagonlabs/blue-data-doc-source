@@ -1,7 +1,7 @@
 """blue-docdb — CLI for blue-data-doc-source.
 
 Usage:
-    blue-docdb [--json] COMMAND [ARGS]...
+    blue-docdb [--format FORMAT] COMMAND [ARGS]...
 
 Commands:
     ensure-index   Create the vector index for a collection
@@ -34,16 +34,23 @@ from blue_data_doc_cli.config import get_pipeline, reset_pipeline
 # Output helpers
 # ---------------------------------------------------------------------------
 
-def _out(data: object, as_json: bool) -> None:
-    if as_json:
+def _emit(data: object, fmt: str) -> None:
+    if fmt == "json":
         click.echo(json.dumps(data, indent=2, default=str))
-    elif isinstance(data, list):
-        for item in data:
-            click.echo(_fmt_chunk(item) if isinstance(item, dict) else str(item))
-    elif isinstance(data, dict):
-        click.echo(_fmt_chunk(data))
+    elif fmt == "nl":
+        if isinstance(data, list):
+            for item in data:
+                click.echo(json.dumps(item, default=str))
+        else:
+            click.echo(json.dumps(data, default=str))
     else:
-        click.echo(str(data))
+        if isinstance(data, list):
+            for item in data:
+                click.echo(_fmt_chunk(item) if isinstance(item, dict) else str(item))
+        elif isinstance(data, dict):
+            click.echo(_fmt_chunk(data))
+        else:
+            click.echo(str(data))
 
 
 def _fmt_chunk(r: dict) -> str:
@@ -80,13 +87,19 @@ def _err(msg: str) -> None:
 # ---------------------------------------------------------------------------
 
 @click.group()
-@click.option("--json", "as_json", is_flag=True, default=False, help="Output raw JSON.")
+@click.option(
+    "--format", "fmt",
+    type=click.Choice(["table", "json", "nl"], case_sensitive=False),
+    default="table",
+    show_default=True,
+    help="Output format: table (default), json, or nl (newline-delimited JSON).",
+)
 @click.version_option(package_name="blue-data-doc-cli")
 @click.pass_context
-def cli(ctx: click.Context, as_json: bool) -> None:
+def cli(ctx: click.Context, fmt: str) -> None:
     """blue-docdb — ingest, search, and manage documents."""
     ctx.ensure_object(dict)
-    ctx.obj["as_json"] = as_json
+    ctx.obj["fmt"] = fmt
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +107,7 @@ def cli(ctx: click.Context, as_json: bool) -> None:
 # ---------------------------------------------------------------------------
 
 @cli.command("ensure-index")
-@click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION).")
+@click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION, default: documents).")
 @click.pass_context
 def ensure_index(ctx: click.Context, collection: Optional[str]) -> None:
     """Create the vector index for a collection.
@@ -106,9 +119,16 @@ def ensure_index(ctx: click.Context, collection: Optional[str]) -> None:
         pipeline = get_pipeline()
         pipeline.ensure_index(collection=collection)
         coll = collection or pipeline.collection
-        click.echo(f"Index ready: {coll}")
     except Exception as exc:
         _err(str(exc))
+
+    fmt = ctx.obj["fmt"]
+    if fmt == "json":
+        click.echo(json.dumps({"status": "ready", "collection": coll}))
+    elif fmt == "nl":
+        click.echo(json.dumps({"status": "ready", "collection": coll}))
+    else:
+        click.echo(f"Index ready: {coll}")
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +137,7 @@ def ensure_index(ctx: click.Context, collection: Optional[str]) -> None:
 
 @cli.command()
 @click.argument("path")
-@click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION).")
+@click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION, default: documents).")
 @click.pass_context
 def ingest(ctx: click.Context, path: str, collection: Optional[str]) -> None:
     """Ingest a document into the vector store.
@@ -130,7 +150,7 @@ def ingest(ctx: click.Context, path: str, collection: Optional[str]) -> None:
     Supported: .txt, .pdf, .docx
 
     Prints document_id and chunk_count on success. Store these values to enable
-    cross-session deletion with `doc delete --id`.
+    cross-session deletion with `blue-docdb delete --id`.
     """
     try:
         pipeline = get_pipeline()
@@ -151,8 +171,9 @@ def ingest(ctx: click.Context, path: str, collection: Optional[str]) -> None:
         "chunk_count": len(records),
         "collection": collection or pipeline.collection,
     }
-    if ctx.obj["as_json"]:
-        click.echo(json.dumps(result, indent=2))
+    fmt = ctx.obj["fmt"]
+    if fmt in ("json", "nl"):
+        click.echo(json.dumps(result, indent=2 if fmt == "json" else None))
     else:
         click.echo(f"Ingested  {result['file_name']}")
         click.echo(f"  document_id:  {result['document_id']}")
@@ -166,7 +187,7 @@ def ingest(ctx: click.Context, path: str, collection: Optional[str]) -> None:
 
 @cli.command()
 @click.argument("query")
-@click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION).")
+@click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION, default: documents).")
 @click.option("-k", default=5, show_default=True, help="Number of results to return.")
 @click.pass_context
 def search(ctx: click.Context, query: str, collection: Optional[str], k: int) -> None:
@@ -186,25 +207,35 @@ def search(ctx: click.Context, query: str, collection: Optional[str], k: int) ->
     except Exception as exc:
         _err(f"Search failed: {exc}")
 
-    if ctx.obj["as_json"]:
+    fmt = ctx.obj["fmt"]
+    if fmt == "json":
         click.echo(json.dumps(results, indent=2, default=str))
+        return
+    if fmt == "nl":
+        for r in results:
+            click.echo(json.dumps(r, default=str))
         return
 
     if not results:
         click.echo("No results.")
         return
 
-    for i, r in enumerate(results, 1):
-        click.echo(f"\n{i}.  {r.get('file_name', '')}  [{r.get('chunk_id', '')}]")
-        if r.get("section_title"):
-            click.echo(f"    section: {r['section_title']}")
-        if r.get("page_start") is not None:
-            click.echo(f"    page:    {r['page_start']}")
-        text = r.get("text", "")
-        preview = text[:300].replace("\n", " ")
-        if len(text) > 300:
-            preview += "…"
-        click.echo(f"    {preview}")
+    col_w = {"file": 30, "section": 25, "page": 4, "preview": 60}
+    header = (
+        f"{'file':<{col_w['file']}}  {'section':<{col_w['section']}}  "
+        f"{'pg':>{col_w['page']}}  {'text preview':<{col_w['preview']}}"
+    )
+    click.echo(header)
+    click.echo("-" * len(header))
+    for r in results:
+        file_name = (r.get("file_name") or "")[:col_w["file"]]
+        section = (r.get("section_title") or "")[:col_w["section"]]
+        page = str(r["page_start"]) if r.get("page_start") is not None else "—"
+        text = (r.get("text") or "").replace("\n", " ")[:col_w["preview"]]
+        click.echo(
+            f"{file_name:<{col_w['file']}}  {section:<{col_w['section']}}  "
+            f"{page:>{col_w['page']}}  {text:<{col_w['preview']}}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +247,7 @@ def search(ctx: click.Context, query: str, collection: Optional[str], k: int) ->
 @click.option("--id", "document_id", default=None, help="document_id from a previous ingest.")
 @click.option("--chunks", "chunk_count", default=None, type=int,
               help="chunk_count from a previous ingest (required with --id).")
-@click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION).")
+@click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION, default: documents).")
 @click.pass_context
 def delete(
     ctx: click.Context,
@@ -231,13 +262,13 @@ def delete(
 
     \b
     By file path (file must still exist):
-        doc delete --path reports/policy.pdf
+        blue-docdb delete --path reports/policy.pdf
 
     \b
     By document_id + chunk_count (cross-session, file may be gone):
-        doc delete --id doc_3a7f1c2e --chunks 12
+        blue-docdb delete --id doc_3a7f1c2e --chunks 12
 
-    document_id and chunk_count are printed by `doc ingest`.
+    document_id and chunk_count are printed by `blue-docdb ingest`.
     """
     if not file_path and not document_id:
         _err("Provide --path or --id + --chunks.")
@@ -257,8 +288,12 @@ def delete(
     except Exception as exc:
         _err(f"Delete failed: {exc}")
 
-    if ctx.obj["as_json"]:
-        click.echo(json.dumps({"deleted": deleted}))
+    fmt = ctx.obj["fmt"]
+    result = {"deleted": deleted, "document": file_path or document_id}
+    if fmt == "json":
+        click.echo(json.dumps(result))
+    elif fmt == "nl":
+        click.echo(json.dumps(result))
     else:
         label = file_path or document_id
         click.echo(f"Deleted {deleted} chunk(s) for {label}.")

@@ -1,6 +1,7 @@
 """CLI tests — use MemoryVectorSource + DummyEmbeddingModel; no external services."""
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 import pytest
@@ -66,8 +67,17 @@ class TestEnsureIndex:
         assert "test" in result.output
 
     def test_json_output(self, runner, pipeline_env):
-        result = runner.invoke(cli, ["--json", "ensure-index", "--collection", "test"])
+        result = runner.invoke(cli, ["--format", "json", "ensure-index", "--collection", "test"])
         assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["status"] == "ready"
+        assert data["collection"] == "test"
+
+    def test_nl_output(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["--format", "nl", "ensure-index", "--collection", "test"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["status"] == "ready"
 
     def test_idempotent(self, runner, pipeline_env):
         runner.invoke(cli, ["ensure-index", "--collection", "test"])
@@ -88,13 +98,19 @@ class TestIngest:
         assert "chunks" in result.output
 
     def test_ingest_json_output(self, runner, pipeline_env, txt_file):
-        import json
         pipeline_env.ensure_index(collection="test")
-        result = runner.invoke(cli, ["--json", "ingest", txt_file, "--collection", "test"])
+        result = runner.invoke(cli, ["--format", "json", "ingest", txt_file, "--collection", "test"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert "document_id" in data
         assert data["chunk_count"] >= 1
+
+    def test_ingest_nl_output(self, runner, pipeline_env, txt_file):
+        pipeline_env.ensure_index(collection="test")
+        result = runner.invoke(cli, ["--format", "nl", "ingest", txt_file, "--collection", "test"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "document_id" in data
 
     def test_ingest_missing_file(self, runner, pipeline_env):
         result = runner.invoke(cli, ["ingest", "/nonexistent/file.txt"])
@@ -102,9 +118,8 @@ class TestIngest:
         assert "not found" in result.output.lower()
 
     def test_ingest_returns_document_id_for_delete(self, runner, pipeline_env, txt_file):
-        import json
         pipeline_env.ensure_index(collection="test")
-        result = runner.invoke(cli, ["--json", "ingest", txt_file, "--collection", "test"])
+        result = runner.invoke(cli, ["--format", "json", "ingest", txt_file, "--collection", "test"])
         data = json.loads(result.output)
         assert data["document_id"].startswith("doc_")
         assert data["chunk_count"] > 0
@@ -122,19 +137,35 @@ class TestSearch:
         assert result.exit_code == 0
 
     def test_search_json_output(self, runner, pipeline_env, txt_file):
-        import json
         pipeline_env.ensure_index(collection="test")
         pipeline_env.ingest(txt_file, collection="test")
-        result = runner.invoke(cli, ["--json", "search", "introduction", "--collection", "test"])
+        result = runner.invoke(cli, ["--format", "json", "search", "introduction", "--collection", "test"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert isinstance(data, list)
+
+    def test_search_nl_output(self, runner, pipeline_env, txt_file):
+        pipeline_env.ensure_index(collection="test")
+        pipeline_env.ingest(txt_file, collection="test")
+        result = runner.invoke(cli, ["--format", "nl", "search", "introduction", "--collection", "test", "-k", "2"])
+        assert result.exit_code == 0
+        lines = [l for l in result.output.strip().splitlines() if l]
+        for line in lines:
+            json.loads(line)  # each line must be valid JSON
 
     def test_search_no_results(self, runner, pipeline_env):
         pipeline_env.ensure_index(collection="test")
         result = runner.invoke(cli, ["search", "anything", "--collection", "test"])
         assert result.exit_code == 0
         assert "No results" in result.output
+
+    def test_search_table_output_has_header(self, runner, pipeline_env, txt_file):
+        pipeline_env.ensure_index(collection="test")
+        pipeline_env.ingest(txt_file, collection="test")
+        result = runner.invoke(cli, ["search", "introduction", "--collection", "test"])
+        assert result.exit_code == 0
+        assert "file" in result.output
+        assert "section" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -143,10 +174,9 @@ class TestSearch:
 
 class TestDelete:
     def test_delete_by_id(self, runner, pipeline_env, txt_file):
-        import json
         pipeline_env.ensure_index(collection="test")
         ingest_result = runner.invoke(
-            cli, ["--json", "ingest", txt_file, "--collection", "test"]
+            cli, ["--format", "json", "ingest", txt_file, "--collection", "test"]
         )
         data = json.loads(ingest_result.output)
 
@@ -169,15 +199,14 @@ class TestDelete:
         assert result.exit_code != 0
 
     def test_delete_json_output(self, runner, pipeline_env, txt_file):
-        import json
         pipeline_env.ensure_index(collection="test")
         ingest_result = runner.invoke(
-            cli, ["--json", "ingest", txt_file, "--collection", "test"]
+            cli, ["--format", "json", "ingest", txt_file, "--collection", "test"]
         )
         data = json.loads(ingest_result.output)
 
         result = runner.invoke(cli, [
-            "--json", "delete",
+            "--format", "json", "delete",
             "--id", data["document_id"],
             "--chunks", str(data["chunk_count"]),
             "--collection", "test",
@@ -186,3 +215,20 @@ class TestDelete:
         out = json.loads(result.output)
         assert "deleted" in out
         assert out["deleted"] >= 0
+
+    def test_delete_nl_output(self, runner, pipeline_env, txt_file):
+        pipeline_env.ensure_index(collection="test")
+        ingest_result = runner.invoke(
+            cli, ["--format", "json", "ingest", txt_file, "--collection", "test"]
+        )
+        data = json.loads(ingest_result.output)
+
+        result = runner.invoke(cli, [
+            "--format", "nl", "delete",
+            "--id", data["document_id"],
+            "--chunks", str(data["chunk_count"]),
+            "--collection", "test",
+        ])
+        assert result.exit_code == 0
+        out = json.loads(result.output)
+        assert "deleted" in out
