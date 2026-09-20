@@ -10,7 +10,7 @@ The canonical interface. All other interfaces delegate to it.
 
 ### `DocumentPipeline`
 
-The main orchestrator. Constructed once per process (see `platform/api/config.py` and `platform/cli/config.py` for singleton construction from env vars).
+The main orchestrator. Constructed once per process (see `platform/doc-api/config.py` and `platform/doc-cli/config.py` for singleton construction from env vars).
 
 ```python
 class DocumentPipeline:
@@ -317,7 +317,7 @@ Provide `path` **or** (`document_id` + `chunk_count`):
 
 ## 3. MCP Server
 
-Entry point: `platform/document-mcp/src/server.py`. Transport: **stdio** (fastmcp).
+Entry point: `platform/doc-mcp/src/server.py`. Transport: **stdio** (fastmcp).
 
 All tools return a JSON-encoded string. The pipeline singleton is constructed once from the same env vars as the REST API.
 

@@ -4,7 +4,7 @@ MCP Server Demo  (requires OPENAI_API_KEY + langchain-mcp-adapters)
 Shows how the document-mcp FastMCP server exposes DocumentDataSource
 as MCP tools that an LLM agent can call.
 
-MCP tools exposed by platform/document-mcp/src/server.py:
+MCP tools exposed by platform/doc-mcp/src/server.py:
   • ingest_document(path, collection)         → list of chunk records
   • search_documents(query, collection, k)    → list of chunk records
   • delete_document(path, collection)         → deletion status
@@ -19,7 +19,7 @@ Requirements:
     The MCP server must be running (see "Start MCP server" below)
 
 Start MCP server (in a separate terminal):
-    cd platform/document-mcp
+    cd platform/doc-mcp
     BLUE_DOC_EMBEDDING=dummy \\
     BLUE_DOC_REDIS_HOST=localhost \\
     BLUE_DOC_REDIS_PORT=6379 \\
@@ -133,7 +133,7 @@ def _show_manual_test_guidance(server_url: str, doc_path: str) -> None:
     print(DIV2)
     print()
     print("  Start the server first:")
-    print("    cd platform/document-mcp")
+    print("    cd platform/doc-mcp")
     print("    BLUE_DOC_EMBEDDING=dummy BLUE_DOC_REDIS_HOST=localhost python src/server.py")
     print()
     print("  Then in another terminal:")
@@ -146,7 +146,7 @@ def _show_manual_test_guidance(server_url: str, doc_path: str) -> None:
     print("MCP server configuration reference")
     print(DIV2)
     print()
-    print("  Environment variables (platform/document-mcp):")
+    print("  Environment variables (platform/doc-mcp):")
     print("    BLUE_DOC_EMBEDDING    dummy | openai   (default: openai)")
     print("    BLUE_DOC_OPENAI_KEY   sk-...           (required if embedding=openai)")
     print("    BLUE_DOC_REDIS_HOST   localhost")

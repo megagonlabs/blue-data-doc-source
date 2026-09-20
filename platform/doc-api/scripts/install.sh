@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PACKAGE_DIR="$(dirname "$SCRIPT_DIR")"                      # platform/cli/
+PACKAGE_DIR="$(dirname "$SCRIPT_DIR")"                      # platform/doc-api/
 REPO_ROOT="$(dirname "$(dirname "$PACKAGE_DIR")")"          # blue-data-doc-source/
 
 # Install lib (and its sibling deps) first

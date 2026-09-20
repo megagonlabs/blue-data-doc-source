@@ -1,4 +1,4 @@
-"""Tests for platform/document-mcp/src/server.py.
+"""Tests for platform/doc-mcp/src/server.py.
 
 The mcp package is stubbed out so these tests run without the MCP SDK on PATH
 and without any network or Redis connection. The pipeline singleton is patched
@@ -38,7 +38,7 @@ def _stub_mcp():
 
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-_SERVER_PATH = os.path.join(_REPO_ROOT, "platform/document-mcp/src/server.py")
+_SERVER_PATH = os.path.join(_REPO_ROOT, "platform/doc-mcp/src/server.py")
 
 
 def _load_server():

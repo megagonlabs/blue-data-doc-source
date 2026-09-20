@@ -7,7 +7,7 @@
 ## Install
 
 ```bash
-pip install -e lib/ -e platform/cli/
+pip install -e lib/ -e platform/doc-cli/
 ```
 
 ## Configuration

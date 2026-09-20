@@ -50,7 +50,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 The core library is **synchronous**. `DocumentPipeline` and all its stages (`Parser`, `Chunker`, `Enricher`, `EmbeddingModel`) are synchronous. There is no `async`/`await` in the library layer.
 
-The REST API (`platform/api/`) uses FastAPI with async route handlers, but the handlers call synchronous pipeline methods inside a `run_in_executor` shim or directly (for fast operations). The MCP server uses synchronous tool handlers.
+The REST API (`platform/doc-api/`) uses FastAPI with async route handlers, but the handlers call synchronous pipeline methods inside a `run_in_executor` shim or directly (for fast operations). The MCP server uses synchronous tool handlers.
 
 ---
 

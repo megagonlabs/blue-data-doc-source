@@ -58,10 +58,10 @@ lib/tests/
     ├── datasets.py                    # fixture documents and ground-truth relevance sets
     └── runner.py                      # benchmark harness
 
-platform/document-mcp/tests/
+platform/doc-mcp/tests/
 └── test_server.py                     # MCP tool handlers; patched DocumentPipeline singleton
 
-platform/cli/tests/
+platform/doc-cli/tests/
 └── test_cli.py                        # Click CliRunner; patched DocumentPipeline singleton
 ```
 
@@ -178,11 +178,11 @@ The retrieval benchmark uses `DummyEmbeddingModel` to isolate chunking quality f
 
 ## 7. Platform Adapter Tests
 
-### MCP (`platform/document-mcp/tests/test_server.py`)
+### MCP (`platform/doc-mcp/tests/test_server.py`)
 
 The `DocumentPipeline` singleton is patched. Tests assert that each MCP tool call dispatches to the correct `pipeline.*` method with the expected arguments.
 
-### CLI (`platform/cli/tests/test_cli.py`)
+### CLI (`platform/doc-cli/tests/test_cli.py`)
 
 Uses Click's `CliRunner`. The `DocumentPipeline` singleton is patched. Tests assert on:
 - Exit codes (0 for success; non-zero for missing required args or pipeline errors)
@@ -205,10 +205,10 @@ docker run -p 6379:6379 redis/redis-stack-server:latest
 .venv/bin/pytest lib/tests/integration/ -v
 
 # CLI adapter tests
-.venv/bin/pytest platform/cli/tests/ -v
+.venv/bin/pytest platform/doc-cli/tests/ -v
 
 # MCP adapter tests
-.venv/bin/pytest platform/document-mcp/tests/ -v
+.venv/bin/pytest platform/doc-mcp/tests/ -v
 
 # Coverage report
 .venv/bin/pytest lib/tests/unit/ --cov=blue_data_doc_source --cov-report=term-missing

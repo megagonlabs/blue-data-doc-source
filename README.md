@@ -230,16 +230,16 @@ Two design decisions are specific to this architecture:
 - **Pluggable embeddings** — `OpenAIEmbeddingModel`, `DummyEmbeddingModel`, or any custom `EmbeddingModel` subclass
 - **Pluggable vector storage** — any blue-data `VectorSource`; `MemoryVectorSource` for dev, `RedisVectorSource` for production
 - **Pluggable parsers** — `Parser` ABC for external processors (LlamaIndex, vision models, cloud OCR); bypass via `ingest_text` / `ingest_pages`
-- **MCP server** — `platform/document-mcp` exposes all ops as tools callable from Claude Desktop
+- **MCP server** — `platform/doc-mcp` exposes all ops as tools callable from Claude Desktop
 
 ## Packages
 
 | Package | Description | README |
 |---|---|---|
 | `blue-data-doc-source` | Core library — parsing, chunking, enrichment, embedding, vector + graph | [lib/README.md](lib/README.md) |
-| `blue-data-doc-api` | FastAPI REST server | [platform/api/README.md](platform/api/README.md) |
-| `blue-data-doc-cli` | Command-line interface | [platform/cli/README.md](platform/cli/README.md) |
-| `blue-data-doc-mcp` | MCP server for Claude Desktop | [platform/document-mcp/README.md](platform/document-mcp/README.md) |
+| `blue-data-doc-api` | FastAPI REST server | [platform/doc-api/README.md](platform/doc-api/README.md) |
+| `blue-data-doc-cli` | Command-line interface | [platform/doc-cli/README.md](platform/doc-cli/README.md) |
+| `blue-data-doc-mcp` | MCP server for Claude Desktop | [platform/doc-mcp/README.md](platform/doc-mcp/README.md) |
 
 ## Repository layout
 
@@ -264,7 +264,7 @@ blue-data-doc-source/
 - [`blue-data`](../blue-data) (local dependency)
 - Runtime: `openai`, `pypdf`, `python-docx`, `redis[hiredis]` — installed automatically via `pip install`
 - Optional: `[ocr]` — Tesseract OCR for scanned PDFs; also requires Tesseract on PATH (`brew install tesseract`)
-- Optional: `[mcp]` — MCP server support (`platform/document-mcp`)
+- Optional: `[mcp]` — MCP server support (`platform/doc-mcp`)
 - Optional: OpenAI API key for `OpenAIEmbeddingModel` and `NLQueryParser`
 
 ```bash

@@ -10,7 +10,7 @@
 | REST API | `blue-data-doc-api` | `uvicorn doc_api.main:app` |
 | CLI | `blue-data-doc-cli` | `blue-data-doc` |
 
-The MCP server (`platform/document-mcp/`) is not published separately — it is run directly via `python -m server` or invoked by an MCP host over stdio.
+The MCP server (`platform/doc-mcp/`) is not published separately — it is run directly via `python -m server` or invoked by an MCP host over stdio.
 
 ---
 
@@ -49,7 +49,7 @@ All variables are read once at startup during `DocumentPipeline` singleton const
 ### Development
 
 ```bash
-cd platform/api
+cd platform/doc-api
 pip install -e ".[dev]"
 BLUE_DOC_REDIS_HOST=localhost BLUE_DOC_EMBEDDING=openai OPENAI_API_KEY=sk-... \
   uvicorn doc_api.main:app --reload --host 0.0.0.0 --port 8001
@@ -61,7 +61,7 @@ BLUE_DOC_REDIS_HOST=localhost BLUE_DOC_EMBEDDING=openai OPENAI_API_KEY=sk-... \
 FROM python:3.10-slim
 WORKDIR /app
 COPY . .
-RUN pip install -e "lib/[openai]" && pip install -e "platform/api/"
+RUN pip install -e "lib/[openai]" && pip install -e "platform/doc-api/"
 EXPOSE 8001
 CMD ["uvicorn", "doc_api.main:app", "--host", "0.0.0.0", "--port", "8001"]
 ```
@@ -89,7 +89,7 @@ The MCP server communicates over **stdio** — it is launched by the MCP host (e
 ```bash
 # Direct invocation (for testing)
 BLUE_DOC_REDIS_HOST=localhost BLUE_DOC_EMBEDDING=openai OPENAI_API_KEY=sk-... \
-  python platform/document-mcp/src/server.py
+  python platform/doc-mcp/src/server.py
 ```
 
 MCP host config entry (e.g. `claude_desktop_config.json`):
@@ -99,7 +99,7 @@ MCP host config entry (e.g. `claude_desktop_config.json`):
     "mcpServers": {
         "blue-data-doc": {
             "command": "python",
-            "args": ["/path/to/blue-data-doc-source/platform/document-mcp/src/server.py"],
+            "args": ["/path/to/blue-data-doc-source/platform/doc-mcp/src/server.py"],
             "env": {
                 "BLUE_DOC_REDIS_HOST": "localhost",
                 "BLUE_DOC_EMBEDDING": "openai",
@@ -115,7 +115,7 @@ MCP host config entry (e.g. `claude_desktop_config.json`):
 ## Running the CLI
 
 ```bash
-pip install -e "lib/" -e "platform/cli/"
+pip install -e "lib/" -e "platform/doc-cli/"
 
 export BLUE_DOC_REDIS_HOST=localhost
 export BLUE_DOC_EMBEDDING=openai

@@ -7,7 +7,7 @@
 ## Install and run
 
 ```bash
-pip install -e lib/ -e platform/api/
+pip install -e lib/ -e platform/doc-api/
 
 # Dev server with auto-reload
 uvicorn doc_api.main:app --reload --port 8001

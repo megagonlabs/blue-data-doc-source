@@ -7,9 +7,9 @@
 | Component | Location | Description |
 |---|---|---|
 | `blue-data-doc-source` | `lib/` | Core Python library — parsing, chunking, enrichment, embeddings, pipeline |
-| `blue-data-doc-api` | `platform/api/` | FastAPI REST server — HTTP interface with interactive docs at `/docs` |
-| `blue-data-doc-cli` | `platform/cli/` | CLI — ingest, search, and delete documents from a terminal |
-| `blue-data-doc-mcp` | `platform/document-mcp/` | MCP server — exposes all pipeline ops as tools for Claude Desktop |
+| `blue-data-doc-api` | `platform/doc-api/` | FastAPI REST server — HTTP interface with interactive docs at `/docs` |
+| `blue-data-doc-cli` | `platform/doc-cli/` | CLI — ingest, search, and delete documents from a terminal |
+| `blue-data-doc-mcp` | `platform/doc-mcp/` | MCP server — exposes all pipeline ops as tools for Claude Desktop |
 
 ---
 
@@ -26,7 +26,7 @@ To install with optional extras:
 
 ```bash
 pip install -e ".[ocr]"   # Tesseract OCR support for scanned PDFs
-pip install -e ".[mcp]"   # MCP server support (platform/document-mcp)
+pip install -e ".[mcp]"   # MCP server support (platform/doc-mcp)
 pip install -e ".[nlp]"   # NLTK-based processing
 ```
 
@@ -34,7 +34,7 @@ pip install -e ".[nlp]"   # NLTK-based processing
 
 ```bash
 pip install -e lib/
-pip install -e platform/api/
+pip install -e platform/doc-api/
 
 blue-data-doc-api          # starts on http://localhost:8001
 ```
@@ -43,7 +43,7 @@ blue-data-doc-api          # starts on http://localhost:8001
 
 ```bash
 pip install -e lib/
-pip install -e platform/cli/
+pip install -e platform/doc-cli/
 
 doc --help
 ```
@@ -54,7 +54,7 @@ doc --help
 pip install -e lib/
 pip install -e ".[mcp]"
 
-python platform/document-mcp/src/server.py
+python platform/doc-mcp/src/server.py
 ```
 
 ---

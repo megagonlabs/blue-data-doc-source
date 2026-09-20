@@ -7,6 +7,6 @@ Full documentation — configuration, tool list, and Claude Desktop integration 
 ## Quick start
 
 ```bash
-pip install -e lib/ -e platform/document-mcp/
-python platform/document-mcp/src/server.py
+pip install -e lib/ -e platform/doc-mcp/
+python platform/doc-mcp/src/server.py
 ```

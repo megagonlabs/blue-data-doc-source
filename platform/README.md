@@ -15,18 +15,18 @@ The `platform/` directory contains deployable components built on top of `lib/`.
 pip install -e lib/
 
 # REST API
-pip install -e platform/api/
+pip install -e platform/doc-api/
 
 # CLI
-pip install -e platform/cli/
+pip install -e platform/doc-cli/
 
 # MCP server
-pip install -e platform/document-mcp/
+pip install -e platform/doc-mcp/
 ```
 
 ---
 
-## REST API (`platform/api`)
+## REST API (`platform/doc-api`)
 
 FastAPI-based HTTP server. Interactive docs available at `http://localhost:8001/docs` when running.
 
@@ -105,7 +105,7 @@ curl -X DELETE http://localhost:8001/documents/document \
 
 ---
 
-## CLI (`platform/cli`)
+## CLI (`platform/doc-cli`)
 
 The `doc` command wraps the full pipeline for terminal use. Supports `.txt`, `.pdf`, and `.docx`.
 
@@ -149,7 +149,7 @@ doc --json search "termination clause"
 ### Quick start (no API key, no Redis)
 
 ```bash
-pip install -e lib/ -e platform/cli/
+pip install -e lib/ -e platform/doc-cli/
 doc ingest mydoc.txt          # chunks printed to stdout, no vector store
 doc search "my query"         # requires BLUE_DOC_REDIS_HOST
 ```
@@ -170,7 +170,7 @@ doc search "governing law"
 
 ---
 
-## MCP Server (`platform/document-mcp`)
+## MCP Server (`platform/doc-mcp`)
 
 Exposes document operations as MCP tools so Claude and other MCP clients can ingest, search, and delete documents directly.
 
@@ -191,13 +191,13 @@ Same environment variables as the CLI (see table above).
 
 ```bash
 # In-memory, dummy embeddings (no deps beyond lib)
-BLUE_DOC_EMBEDDING=dummy python platform/document-mcp/src/server.py
+BLUE_DOC_EMBEDDING=dummy python platform/doc-mcp/src/server.py
 
 # With Redis and OpenAI embeddings
 BLUE_DOC_EMBEDDING=openai \
 OPENAI_API_KEY=sk-... \
 BLUE_DOC_REDIS_HOST=localhost \
-python platform/document-mcp/src/server.py
+python platform/doc-mcp/src/server.py
 ```
 
 ### Claude Desktop / Claude Code integration
@@ -209,7 +209,7 @@ Add to your MCP config:
   "mcpServers": {
     "blue-doc-source": {
       "command": "python",
-      "args": ["platform/document-mcp/src/server.py"],
+      "args": ["platform/doc-mcp/src/server.py"],
       "env": {
         "BLUE_DOC_EMBEDDING": "openai",
         "OPENAI_API_KEY": "sk-...",

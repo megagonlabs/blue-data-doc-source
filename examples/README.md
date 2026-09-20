@@ -164,7 +164,7 @@ OPENAI_API_KEY=sk-... python3 examples/framework-demos/langgraph_rag_demo.py
 ```
 
 > **`mcp_demo.py` — not independently runnable.**
-> The demo client connects via HTTP (`streamable_http` transport), but `platform/document-mcp/src/server.py`
+> The demo client connects via HTTP (`streamable_http` transport), but `platform/doc-mcp/src/server.py`
 > currently only supports stdio transport (the default for Claude Desktop / Claude Code).
 > HTTP transport support needs to be added to the server before this demo can be run end-to-end.
 > Until then, use `langgraph_rag_demo.py` to test LLM-backed document retrieval.

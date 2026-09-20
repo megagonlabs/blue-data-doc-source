@@ -49,7 +49,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
   "mcpServers": {
     "blue-data-doc-source": {
       "command": "python3",
-      "args": ["/path/to/blue-data-doc-source/platform/document-mcp/src/server.py"],
+      "args": ["/path/to/blue-data-doc-source/platform/doc-mcp/src/server.py"],
       "env": {
         "BLUE_DOC_EMBEDDING": "openai",
         "OPENAI_API_KEY": "sk-...",
@@ -73,7 +73,7 @@ Add to your project's `.mcp.json` or `~/.claude.json`:
   "mcpServers": {
     "blue-data-doc-source": {
       "command": "python3",
-      "args": ["platform/document-mcp/src/server.py"],
+      "args": ["platform/doc-mcp/src/server.py"],
       "env": {
         "BLUE_DOC_EMBEDDING": "openai",
         "OPENAI_API_KEY": "sk-...",
@@ -89,13 +89,13 @@ Add to your project's `.mcp.json` or `~/.claude.json`:
 For development or debugging, run the server directly:
 
 ```bash
-BLUE_DOC_EMBEDDING=dummy python3 platform/document-mcp/src/server.py
+BLUE_DOC_EMBEDDING=dummy python3 platform/doc-mcp/src/server.py
 ```
 
 The server listens on stdio (MCP standard transport). Use the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) to call tools interactively:
 
 ```bash
-npx @modelcontextprotocol/inspector python3 platform/document-mcp/src/server.py
+npx @modelcontextprotocol/inspector python3 platform/doc-mcp/src/server.py
 ```
 
 ## Redis setup
@@ -127,7 +127,7 @@ Agent: delete_document(document_id="doc_3a7f...", chunk_count=42, collection="co
 ## Running the tests
 
 ```bash
-python3 -m pytest platform/document-mcp/tests/ -v
+python3 -m pytest platform/doc-mcp/tests/ -v
 ```
 
 Tests stub out the MCP SDK and patch the pipeline, so no Redis or OpenAI connection is needed.

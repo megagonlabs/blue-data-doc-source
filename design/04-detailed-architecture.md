@@ -234,9 +234,9 @@ Optional extras:
     anthropic                        — NLQueryParser (Claude tool use)
 
 Platform services:
-    platform/api/            FastAPI + Uvicorn (REST API, port 8001)
-    platform/document-mcp/   fastmcp (MCP server, stdio)
-    platform/cli/            Click (CLI, blue-data-doc command)
+    platform/doc-api/            FastAPI + Uvicorn (REST API, port 8001)
+    platform/doc-mcp/   fastmcp (MCP server, stdio)
+    platform/doc-cli/            Click (CLI, blue-data-doc command)
 ```
 
 ---

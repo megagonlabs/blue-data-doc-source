@@ -983,10 +983,10 @@ The pipeline is accessible through four interfaces. All share the same environme
 
 ### MCP server
 
-`platform/document-mcp` exposes `DocumentDataSource` as tools for Claude and other MCP clients. Each tool maps to a `DOCUMENT.*` op and returns structured JSON.
+`platform/doc-mcp` exposes `DocumentDataSource` as tools for Claude and other MCP clients. Each tool maps to a `DOCUMENT.*` op and returns structured JSON.
 
 ```bash
-cd platform/document-mcp
+cd platform/doc-mcp
 BLUE_DOC_EMBEDDING=dummy python src/server.py
 
 # Production: OpenAI embeddings + Redis
@@ -1003,7 +1003,7 @@ python src/server.py
   "mcpServers": {
     "blue-data-doc": {
       "command": "python",
-      "args": ["/path/to/platform/document-mcp/src/server.py"],
+      "args": ["/path/to/platform/doc-mcp/src/server.py"],
       "env": {
         "BLUE_DOC_EMBEDDING": "openai",
         "OPENAI_API_KEY": "sk-...",
@@ -1020,10 +1020,10 @@ See [`docs/mcp.md`](mcp.md) for the full tool reference and environment variable
 
 ### REST API
 
-`platform/api` is a FastAPI service that exposes every `DOCUMENT.*` op as an HTTP endpoint. Useful for non-Python services, microservice architectures, or anywhere HTTP-based tool use is preferred.
+`platform/doc-api` is a FastAPI service that exposes every `DOCUMENT.*` op as an HTTP endpoint. Useful for non-Python services, microservice architectures, or anywhere HTTP-based tool use is preferred.
 
 ```bash
-cd platform/api
+cd platform/doc-api
 BLUE_DOC_EMBEDDING=openai OPENAI_API_KEY=sk-... uvicorn doc_api.main:app --port 8001
 ```
 
@@ -1040,10 +1040,10 @@ BLUE_DOC_EMBEDDING=openai OPENAI_API_KEY=sk-... uvicorn doc_api.main:app --port 
 
 ### CLI
 
-`platform/cli` provides a command-line interface for ingestion, search, and document management — useful for interactive development, shell scripts, and CI pipelines.
+`platform/doc-cli` provides a command-line interface for ingestion, search, and document management — useful for interactive development, shell scripts, and CI pipelines.
 
 ```bash
-pip install -e platform/cli
+pip install -e platform/doc-cli
 
 # Ingest a document
 blue-data-doc ingest path/to/policy.pdf --collection contracts

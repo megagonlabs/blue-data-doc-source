@@ -50,7 +50,7 @@
 
 | Package | Purpose |
 |---------|---------|
-| `mcp` ≥1.0.0 | fastmcp server runtime for `platform/document-mcp/src/server.py` |
+| `mcp` ≥1.0.0 | fastmcp server runtime for `platform/doc-mcp/src/server.py` |
 
 ---
 
@@ -148,7 +148,7 @@ Also provided by `blue-data`. `graph_source=None` (the default) disables graph i
 
 ## External Interfaces
 
-### MCP Server (`platform/document-mcp/`)
+### MCP Server (`platform/doc-mcp/`)
 
 | Concern | Choice |
 |---------|--------|
@@ -157,7 +157,7 @@ Also provided by `blue-data`. `graph_source=None` (the default) disables graph i
 
 Seven tools: `ensure_index`, `ingest_document`, `search_documents`, `find_documents`, `find_then_search`, `get_document_record`, `delete_document`.
 
-### REST API (`platform/api/`)
+### REST API (`platform/doc-api/`)
 
 | Concern | Choice |
 |---------|--------|
@@ -167,7 +167,7 @@ Seven tools: `ensure_index`, `ingest_document`, `search_documents`, `find_docume
 
 Routes under `/documents/` mirror the seven ops. Request/response models are Pydantic `BaseModel`. No business logic in handlers — all calls delegate to the `DocumentPipeline` singleton.
 
-### CLI (`platform/cli/`)
+### CLI (`platform/doc-cli/`)
 
 | Concern | Choice |
 |---------|--------|
@@ -203,8 +203,8 @@ Unit tests use `DummyEmbeddingModel`, `MemoryVectorSource`, `MemoryGraphSource`,
 | `pdf2image` | ≥1.16.0 | `[ocr]` | PDF page → PIL image for pytesseract |
 | `nltk` | ≥3.8 | `[nlp]` | Sentence tokenizer for SentenceChunker |
 | `mcp` | ≥1.0.0 | `[mcp]` | fastmcp runtime for document-mcp server |
-| `fastapi` | latest | `platform/api` | REST API framework |
-| `uvicorn` | latest | `platform/api` | ASGI server (port 8001) |
-| `click` | latest | `platform/cli` | CLI argument parsing |
+| `fastapi` | latest | `platform/doc-api` | REST API framework |
+| `uvicorn` | latest | `platform/doc-api` | ASGI server (port 8001) |
+| `click` | latest | `platform/doc-cli` | CLI argument parsing |
 | `pytest` | latest | dev | Test runner |
 | `pytest-cov` | latest | dev | Coverage measurement |

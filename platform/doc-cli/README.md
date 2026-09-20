@@ -7,7 +7,7 @@ Full documentation — configuration, commands, and examples — is in [platform
 ## Quick start
 
 ```bash
-pip install -e lib/ -e platform/cli/
+pip install -e lib/ -e platform/doc-cli/
 doc ingest mydoc.txt
 doc search "termination clause"
 ```

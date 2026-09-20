@@ -1,7 +1,7 @@
 """MCP server exposing blue-data-doc-source as AI-callable tools.
 
 Run:
-    python platform/document-mcp/src/server.py
+    python platform/doc-mcp/src/server.py
 
 Configure via environment variables:
 

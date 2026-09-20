@@ -7,7 +7,7 @@ Full documentation — configuration, endpoints, and example requests — is in 
 ## Quick start
 
 ```bash
-pip install -e lib/ -e platform/api/
+pip install -e lib/ -e platform/doc-api/
 blue-data-doc-api
 # → http://localhost:8001/docs
 ```
