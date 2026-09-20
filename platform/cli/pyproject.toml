@@ -18,7 +18,7 @@ redis  = ["redis[hiredis]>=4.5.0"]
 dev    = ["pytest"]
 
 [project.scripts]
-doc = "blue_data_doc_cli.main:cli"
+blue-docdb = "blue_data_doc_cli.main:cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]

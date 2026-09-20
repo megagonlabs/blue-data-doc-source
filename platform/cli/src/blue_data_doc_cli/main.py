@@ -1,7 +1,7 @@
-"""doc — CLI for blue-data-doc-source.
+"""blue-docdb — CLI for blue-data-doc-source.
 
 Usage:
-    doc [--json] COMMAND [ARGS]...
+    blue-docdb [--json] COMMAND [ARGS]...
 
 Commands:
     ensure-index   Create the vector index for a collection
@@ -83,7 +83,7 @@ def _err(msg: str) -> None:
 @click.option("--json", "as_json", is_flag=True, default=False, help="Output raw JSON.")
 @click.pass_context
 def cli(ctx: click.Context, as_json: bool) -> None:
-    """doc — ingest, search, and manage documents."""
+    """blue-docdb — ingest, search, and manage documents."""
     ctx.ensure_object(dict)
     ctx.obj["as_json"] = as_json
 
