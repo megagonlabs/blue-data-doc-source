@@ -29,28 +29,56 @@ All configuration is via environment variables:
 
 ```bash
 # Create the vector index before first ingest (idempotent)
-doc ensure-index
+blue-docdb ensure-index
 
 # Ingest a document
-doc ingest reports/policy.pdf
+blue-docdb ingest reports/policy.pdf
 
 # Search
-doc search "termination clause" -k 5
+blue-docdb search "termination clause" -k 5
 
 # Delete by file path (same session)
-doc delete --path reports/policy.pdf
+blue-docdb delete --path reports/policy.pdf
 
 # Delete by document_id + chunk_count (cross-session)
-doc delete --id <document_id> --chunks <chunk_count>
+blue-docdb delete --id <document_id> --chunks <chunk_count>
 
-# Output raw JSON for any command
-doc --json search "termination clause"
+# Output as JSON
+blue-docdb --format json search "termination clause"
+
+# Output as newline-delimited JSON (for piping)
+blue-docdb --format nl search "termination clause" | jq .chunk_id
+```
+
+## Output formats
+
+| Format | Description |
+|---|---|
+| `table` | Human-readable, aligned columns (default) |
+| `json` | Pretty-printed JSON |
+| `nl` | Newline-delimited JSON — one object per line, suitable for `jq`, `grep`, shell scripts |
+
+## Error codes
+
+| Code | Meaning |
+|---|---|
+| `NOT_FOUND` | File or resource does not exist |
+| `INVALID_ARGS` | Missing or incompatible arguments |
+| `INGEST_FAILED` | Parsing, chunking, or embedding error during ingest |
+| `SEARCH_FAILED` | Query execution error |
+| `DELETE_FAILED` | Chunk removal error |
+| `CONFIG_ERROR` | Pipeline configuration or index creation error |
+
+Errors are written to stderr. In `--format json` mode, errors are structured:
+
+```json
+{"error": {"code": "NOT_FOUND", "message": "File not found: foo.txt"}}
 ```
 
 ## Quick start (no API key, no Redis)
 
 ```bash
-doc ingest data/sample_policy.txt
+blue-docdb ingest data/sample_policy.txt
 # chunks printed to stdout; no vector store required
 ```
 
@@ -63,7 +91,7 @@ export BLUE_DOC_EMBEDDING=openai
 export OPENAI_API_KEY=sk-...
 export BLUE_DOC_REDIS_HOST=localhost
 
-doc ensure-index
-doc ingest contract.pdf
-doc search "governing law"
+blue-docdb ensure-index
+blue-docdb ingest contract.pdf
+blue-docdb search "governing law"
 ```

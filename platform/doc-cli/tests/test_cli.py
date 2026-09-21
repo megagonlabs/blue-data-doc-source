@@ -117,6 +117,13 @@ class TestIngest:
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
 
+    def test_ingest_json_error_is_structured(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["--format", "json", "ingest", "/nonexistent/file.txt"])
+        assert result.exit_code != 0
+        err = json.loads(result.output)
+        assert err["error"]["code"] == "NOT_FOUND"
+        assert "message" in err["error"]
+
     def test_ingest_returns_document_id_for_delete(self, runner, pipeline_env, txt_file):
         pipeline_env.ensure_index(collection="test")
         result = runner.invoke(cli, ["--format", "json", "ingest", txt_file, "--collection", "test"])
@@ -215,6 +222,13 @@ class TestDelete:
         out = json.loads(result.output)
         assert "deleted" in out
         assert out["deleted"] >= 0
+
+    def test_delete_json_error_is_structured(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["--format", "json", "delete"])
+        assert result.exit_code != 0
+        err = json.loads(result.output)
+        assert err["error"]["code"] == "INVALID_ARGS"
+        assert "message" in err["error"]
 
     def test_delete_nl_output(self, runner, pipeline_env, txt_file):
         pipeline_env.ensure_index(collection="test")

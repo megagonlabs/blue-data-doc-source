@@ -18,6 +18,15 @@ Configure via environment variables:
     BLUE_DOC_CHUNK_SIZE         default: 1000
     BLUE_DOC_OVERLAP            default: 150
     BLUE_DOC_OCR_FALLBACK       1 | true to enable Tesseract OCR
+
+Error codes:
+
+    NOT_FOUND       File or resource does not exist
+    INVALID_ARGS    Missing or incompatible arguments
+    INGEST_FAILED   Parsing, chunking, or embedding error during ingest
+    SEARCH_FAILED   Query execution error
+    DELETE_FAILED   Chunk removal error
+    CONFIG_ERROR    Pipeline configuration or index creation error
 """
 from __future__ import annotations
 
@@ -77,8 +86,11 @@ def _fmt_chunk(r: dict) -> str:
     return "\n".join(parts)
 
 
-def _err(msg: str) -> None:
-    click.echo(f"Error: {msg}", err=True)
+def _err(code: str, msg: str, fmt: str = "table") -> None:
+    if fmt in ("json", "nl"):
+        click.echo(json.dumps({"error": {"code": code, "message": msg}}), err=True)
+    else:
+        click.echo(f"ERROR: {code} {msg}", err=True)
     sys.exit(1)
 
 
@@ -115,14 +127,14 @@ def ensure_index(ctx: click.Context, collection: Optional[str]) -> None:
     Must be called once before the first ingest when using a vector store.
     Safe to call multiple times — skips creation if the index already exists.
     """
+    fmt = ctx.obj["fmt"]
     try:
         pipeline = get_pipeline()
         pipeline.ensure_index(collection=collection)
         coll = collection or pipeline.collection
     except Exception as exc:
-        _err(str(exc))
+        _err("CONFIG_ERROR", str(exc), fmt)
 
-    fmt = ctx.obj["fmt"]
     if fmt == "json":
         click.echo(json.dumps({"status": "ready", "collection": coll}))
     elif fmt == "nl":
@@ -152,18 +164,19 @@ def ingest(ctx: click.Context, path: str, collection: Optional[str]) -> None:
     Prints document_id and chunk_count on success. Store these values to enable
     cross-session deletion with `blue-docdb delete --id`.
     """
+    fmt = ctx.obj["fmt"]
     try:
         pipeline = get_pipeline()
         records = pipeline.ingest(path, collection=collection)
     except FileNotFoundError:
-        _err(f"File not found: {path}")
+        _err("NOT_FOUND", f"File not found: {path}", fmt)
     except ValueError as exc:
-        _err(str(exc))
+        _err("INVALID_ARGS", str(exc), fmt)
     except Exception as exc:
-        _err(f"Ingest failed: {exc}")
+        _err("INGEST_FAILED", str(exc), fmt)
 
     if not records:
-        _err("No chunks produced — file may be empty or unparseable.")
+        _err("INGEST_FAILED", "No chunks produced — file may be empty or unparseable.", fmt)
 
     result = {
         "document_id": records[0]["document_id"],
@@ -171,7 +184,6 @@ def ingest(ctx: click.Context, path: str, collection: Optional[str]) -> None:
         "chunk_count": len(records),
         "collection": collection or pipeline.collection,
     }
-    fmt = ctx.obj["fmt"]
     if fmt in ("json", "nl"):
         click.echo(json.dumps(result, indent=2 if fmt == "json" else None))
     else:
@@ -199,15 +211,15 @@ def search(ctx: click.Context, query: str, collection: Optional[str], k: int) ->
 
     Requires BLUE_DOC_REDIS_HOST and an indexed collection.
     """
+    fmt = ctx.obj["fmt"]
     try:
         pipeline = get_pipeline()
         results = pipeline.search(query, k=k, collection=collection)
     except ValueError as exc:
-        _err(str(exc))
+        _err("INVALID_ARGS", str(exc), fmt)
     except Exception as exc:
-        _err(f"Search failed: {exc}")
+        _err("SEARCH_FAILED", str(exc), fmt)
 
-    fmt = ctx.obj["fmt"]
     if fmt == "json":
         click.echo(json.dumps(results, indent=2, default=str))
         return
@@ -270,10 +282,11 @@ def delete(
 
     document_id and chunk_count are printed by `blue-docdb ingest`.
     """
+    fmt = ctx.obj["fmt"]
     if not file_path and not document_id:
-        _err("Provide --path or --id + --chunks.")
+        _err("INVALID_ARGS", "Provide --path or --id + --chunks.", fmt)
     if document_id and chunk_count is None:
-        _err("--chunks is required when using --id.")
+        _err("INVALID_ARGS", "--chunks is required when using --id.", fmt)
 
     try:
         pipeline = get_pipeline()
@@ -284,11 +297,10 @@ def delete(
             collection=collection,
         )
     except ValueError as exc:
-        _err(str(exc))
+        _err("INVALID_ARGS", str(exc), fmt)
     except Exception as exc:
-        _err(f"Delete failed: {exc}")
+        _err("DELETE_FAILED", str(exc), fmt)
 
-    fmt = ctx.obj["fmt"]
     result = {"deleted": deleted, "document": file_path or document_id}
     if fmt == "json":
         click.echo(json.dumps(result))
