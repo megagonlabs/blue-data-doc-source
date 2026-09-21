@@ -144,6 +144,7 @@ class TestFileRecordStore:
     def test_survives_reload(self):
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             path = f.name
+        os.unlink(path)  # remove empty file so FileJSONSource initialises it
         try:
             store = FileRecordStore(path)
             store.upsert(CONTRACT_A)
@@ -151,13 +152,13 @@ class TestFileRecordStore:
             store2 = FileRecordStore(path)
             assert store2.get("doc_contract_a")["document_type"] == "contract"
         finally:
-            os.unlink(path)
-            if os.path.exists(path + ".tmp"):
-                os.unlink(path + ".tmp")
+            if os.path.exists(path):
+                os.unlink(path)
 
     def test_delete_persists(self):
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             path = f.name
+        os.unlink(path)
         try:
             store = FileRecordStore(path)
             store.upsert(CONTRACT_A)
@@ -165,7 +166,8 @@ class TestFileRecordStore:
             store2 = FileRecordStore(path)
             assert store2.get("doc_contract_a") is None
         finally:
-            os.unlink(path)
+            if os.path.exists(path):
+                os.unlink(path)
 
     def test_missing_file_starts_empty(self):
         path = tempfile.mktemp(suffix=".json")
@@ -175,6 +177,7 @@ class TestFileRecordStore:
     def test_find_works_after_reload(self):
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             path = f.name
+        os.unlink(path)
         try:
             store = FileRecordStore(path)
             for r in ALL_RECORDS:
@@ -183,7 +186,8 @@ class TestFileRecordStore:
             results = store2.find({"document_type": "contract"})
             assert len(results) == 2
         finally:
-            os.unlink(path)
+            if os.path.exists(path):
+                os.unlink(path)
 
 
 # ---------------------------------------------------------------------------
@@ -494,12 +498,7 @@ class TestJsonSourceRecordStoreMemory:
 
 class TestJsonSourceRecordStoreFile:
     def _store(self, path):
-        return JsonSourceRecordStore(
-            FileJSONSource(
-                name="test_file_json",
-                properties={"connection": {"path": path}},
-            )
-        )
+        return JsonSourceRecordStore(FileJSONSource(path))
 
     def test_persists_across_instances(self):
         with tempfile.TemporaryDirectory() as d:

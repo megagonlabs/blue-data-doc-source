@@ -185,9 +185,4 @@ class FileRecordStore(JsonSourceRecordStore):
     """
 
     def __init__(self, path: str) -> None:
-        super().__init__(
-            FileJSONSource(
-                name="file_record_store",
-                properties={"connection": {"path": path}},
-            )
-        )
+        super().__init__(FileJSONSource(path))

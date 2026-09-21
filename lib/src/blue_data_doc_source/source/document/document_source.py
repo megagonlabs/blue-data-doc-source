@@ -100,7 +100,7 @@ class DocumentDataSource(DataSource):
             graph_database: Graph database name. Defaults to ``"documents"``.
         """
         super().__init__(name, properties)
-        self.properties["connection"]["protocol"] = "document"
+        self.properties.setdefault("connection", {})["protocol"] = "document"
         self._default_collection = default_collection
         self._nl_parser = nl_parser
         self._pipeline = DocumentPipeline(
