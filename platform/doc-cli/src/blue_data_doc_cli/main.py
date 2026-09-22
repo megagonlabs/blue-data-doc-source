@@ -161,7 +161,10 @@ def ingest(ctx: click.Context, path: str, collection: Optional[str]) -> None:
     """Ingest a document into the vector store.
 
     Parses the file, splits it into section-aware chunks, extracts entities and
-    keywords, generates embeddings, and upserts to the configured vector store.
+    keywords, and generates embeddings. When BLUE_DOC_REDIS_HOST is set, chunks
+    are upserted to the vector store; without it, ingest still runs and prints
+    results but nothing is persisted for search.
+
     Re-ingesting the same file is safe — content-hash deduplication means the
     same file always produces the same chunk IDs.
 
@@ -289,6 +292,8 @@ def delete(
     collection: Optional[str],
 ) -> None:
     """Delete all chunks for a document from the vector store.
+
+    Requires BLUE_DOC_REDIS_HOST and an indexed collection.
 
     Two ways to identify the document:
 
