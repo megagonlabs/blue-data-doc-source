@@ -126,6 +126,12 @@ def ensure_index(ctx: click.Context, collection: Optional[str]) -> None:
 
     Must be called once before the first ingest when using a vector store.
     Safe to call multiple times — skips creation if the index already exists.
+
+    \b
+    Examples:
+        blue-docdb ensure-index
+        blue-docdb ensure-index --collection contracts
+        blue-docdb --format json ensure-index --collection contracts
     """
     fmt = ctx.obj["fmt"]
     try:
@@ -163,6 +169,12 @@ def ingest(ctx: click.Context, path: str, collection: Optional[str]) -> None:
 
     Prints document_id and chunk_count on success. Store these values to enable
     cross-session deletion with `blue-docdb delete --id`.
+
+    \b
+    Examples:
+        blue-docdb ingest report.pdf
+        blue-docdb ingest contract.docx --collection contracts
+        blue-docdb --format json ingest report.pdf
     """
     fmt = ctx.obj["fmt"]
     try:
@@ -210,6 +222,14 @@ def search(ctx: click.Context, query: str, collection: Optional[str], k: int) ->
     and a text preview.
 
     Requires BLUE_DOC_REDIS_HOST and an indexed collection.
+
+    \b
+    Examples:
+        blue-docdb search "termination clause"
+        blue-docdb search "governing law" -k 10
+        blue-docdb search "deductible" --collection policies
+        blue-docdb --format json search "payment terms" | jq '.[0].text'
+        blue-docdb --format nl search "eligibility" | jq -r '.text'
     """
     fmt = ctx.obj["fmt"]
     try:
