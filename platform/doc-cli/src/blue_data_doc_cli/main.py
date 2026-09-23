@@ -4,10 +4,13 @@ Usage:
     blue-docdb [--format FORMAT] COMMAND [ARGS]...
 
 Commands:
-    ensure-index   Create the vector index for a collection
-    ingest         Ingest a document into the vector store
-    search         Search documents by semantic similarity
-    delete         Delete all chunks for a document
+    ensure-index      Create the vector index for a collection
+    ingest            Ingest a document into the vector store
+    search            Search documents by semantic similarity
+    find              Filter documents by extracted fields (no embedding)
+    find-then-search  Filter documents, then search text within matched docs
+    get-record        Retrieve the schema record for an ingested document
+    delete            Delete all chunks for a document
 
 Configure via environment variables:
 
@@ -32,7 +35,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import click
 
@@ -42,6 +45,16 @@ from blue_data_doc_cli.config import get_pipeline, reset_pipeline
 # ---------------------------------------------------------------------------
 # Output helpers
 # ---------------------------------------------------------------------------
+
+def _parse_filter(filter_str: Optional[str], fmt: str) -> Optional[Dict[str, Any]]:
+    """Parse a JSON filter string; exit with INVALID_ARGS on bad JSON."""
+    if not filter_str:
+        return None
+    try:
+        return json.loads(filter_str)
+    except json.JSONDecodeError as exc:
+        _err("INVALID_ARGS", f"--filter is not valid JSON: {exc}", fmt)
+
 
 def _emit(data: object, fmt: str) -> None:
     if fmt == "json":
@@ -84,6 +97,45 @@ def _fmt_chunk(r: dict) -> str:
             preview += "…"
         parts.append(f"  {preview}")
     return "\n".join(parts)
+
+
+def _fmt_record(r: dict) -> str:
+    """Table rendering for a DocumentRecord."""
+    lines = [f"document_id:    {r.get('document_id', '')}"]
+    if r.get("file_name"):
+        lines.append(f"file_name:      {r['file_name']}")
+    if r.get("document_type"):
+        lines.append(f"document_type:  {r['document_type']}")
+    if r.get("confidence") is not None:
+        lines.append(f"confidence:     {r['confidence']:.2f}")
+    fields = r.get("fields") or {}
+    if fields:
+        lines.append("fields:")
+        for k, v in fields.items():
+            lines.append(f"  {k}: {v}")
+    return "\n".join(lines)
+
+
+def _print_search_table(results: list) -> None:
+    if not results:
+        click.echo("No results.")
+        return
+    col_w = {"file": 30, "section": 25, "page": 4, "preview": 60}
+    header = (
+        f"{'file':<{col_w['file']}}  {'section':<{col_w['section']}}  "
+        f"{'pg':>{col_w['page']}}  {'text preview':<{col_w['preview']}}"
+    )
+    click.echo(header)
+    click.echo("-" * len(header))
+    for r in results:
+        file_name = (r.get("file_name") or "")[:col_w["file"]]
+        section = (r.get("section_title") or "")[:col_w["section"]]
+        page = str(r["page_start"]) if r.get("page_start") is not None else "—"
+        text = (r.get("text") or "").replace("\n", " ")[:col_w["preview"]]
+        click.echo(
+            f"{file_name:<{col_w['file']}}  {section:<{col_w['section']}}  "
+            f"{page:>{col_w['page']}}  {text:<{col_w['preview']}}"
+        )
 
 
 def _err(code: str, msg: str, fmt: str = "table") -> None:
@@ -216,8 +268,25 @@ def ingest(ctx: click.Context, path: str, collection: Optional[str]) -> None:
 @click.argument("query")
 @click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION, default: documents).")
 @click.option("-k", default=5, show_default=True, help="Number of results to return.")
+@click.option(
+    "--mode",
+    type=click.Choice(["vector", "hybrid", "bm25", "rerank"], case_sensitive=False),
+    default="vector",
+    show_default=True,
+    help="Search mode.",
+)
+@click.option("--filter", "filter_str", default=None, help="JSON filter applied before vector search, e.g. '{\"document_type\":\"contract\"}'.")
+@click.option("--context-chunks", default=1, show_default=True, help="Adjacent chunks to include around each result.")
 @click.pass_context
-def search(ctx: click.Context, query: str, collection: Optional[str], k: int) -> None:
+def search(
+    ctx: click.Context,
+    query: str,
+    collection: Optional[str],
+    k: int,
+    mode: str,
+    filter_str: Optional[str],
+    context_chunks: int,
+) -> None:
     """Search documents by semantic similarity.
 
     Embeds the query and returns the k most relevant chunks from the vector
@@ -231,13 +300,19 @@ def search(ctx: click.Context, query: str, collection: Optional[str], k: int) ->
         blue-docdb search "termination clause"
         blue-docdb search "governing law" -k 10
         blue-docdb search "deductible" --collection policies
+        blue-docdb search "liability" --mode hybrid
+        blue-docdb search "payment terms" --filter '{"document_type":"contract"}'
         blue-docdb --format json search "payment terms" | jq '.[0].text'
         blue-docdb --format nl search "eligibility" | jq -r '.text'
     """
     fmt = ctx.obj["fmt"]
+    filters = _parse_filter(filter_str, fmt)
     try:
         pipeline = get_pipeline()
-        results = pipeline.search(query, k=k, collection=collection)
+        results = pipeline.search(
+            query, k=k, collection=collection,
+            mode=mode, filters=filters, context_chunks=context_chunks,
+        )
     except ValueError as exc:
         _err("INVALID_ARGS", str(exc), fmt)
     except Exception as exc:
@@ -251,26 +326,182 @@ def search(ctx: click.Context, query: str, collection: Optional[str], k: int) ->
             click.echo(json.dumps(r, default=str))
         return
 
-    if not results:
-        click.echo("No results.")
+    _print_search_table(results)
+
+
+# ---------------------------------------------------------------------------
+# find
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.option("--filter", "filter_str", default=None, help="JSON filter dict, e.g. '{\"document_type\":\"contract\"}'.")
+@click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION, default: documents).")
+@click.pass_context
+def find(ctx: click.Context, filter_str: Optional[str], collection: Optional[str]) -> None:
+    """Filter documents by extracted fields — no embedding, no LLM.
+
+    Returns DocumentRecords matching the filter. Each record holds the
+    document_id, document_type, confidence score, and any fields extracted
+    at ingest time (parties, governing_law, total_due, etc.).
+
+    Records are only populated when a classifier is configured at pipeline
+    construction. Without a classifier, find always returns an empty list.
+
+    \b
+    Filter syntax (all conditions ANDed):
+        {"document_type": "contract"}
+        {"fields.total_due": {"gt": 10000}}
+        {"fields.vendor": {"contains": "Acme"}}
+
+    \b
+    Examples:
+        blue-docdb find
+        blue-docdb find --filter '{"document_type":"contract"}'
+        blue-docdb find --filter '{"fields.total_due":{"gt":50000}}'
+        blue-docdb --format json find --filter '{"document_type":"invoice"}'
+    """
+    fmt = ctx.obj["fmt"]
+    filters = _parse_filter(filter_str, fmt)
+    try:
+        pipeline = get_pipeline()
+        records = pipeline.find_records(filters)
+    except Exception as exc:
+        _err("SEARCH_FAILED", str(exc), fmt)
+
+    if fmt == "json":
+        click.echo(json.dumps(records, indent=2, default=str))
+        return
+    if fmt == "nl":
+        for r in records:
+            click.echo(json.dumps(r, default=str))
         return
 
-    col_w = {"file": 30, "section": 25, "page": 4, "preview": 60}
-    header = (
-        f"{'file':<{col_w['file']}}  {'section':<{col_w['section']}}  "
-        f"{'pg':>{col_w['page']}}  {'text preview':<{col_w['preview']}}"
-    )
-    click.echo(header)
-    click.echo("-" * len(header))
-    for r in results:
-        file_name = (r.get("file_name") or "")[:col_w["file"]]
-        section = (r.get("section_title") or "")[:col_w["section"]]
-        page = str(r["page_start"]) if r.get("page_start") is not None else "—"
-        text = (r.get("text") or "").replace("\n", " ")[:col_w["preview"]]
-        click.echo(
-            f"{file_name:<{col_w['file']}}  {section:<{col_w['section']}}  "
-            f"{page:>{col_w['page']}}  {text:<{col_w['preview']}}"
-        )
+    if not records:
+        click.echo("No records found.")
+        return
+    for r in records:
+        click.echo(_fmt_record(r))
+        click.echo("")
+
+
+# ---------------------------------------------------------------------------
+# find-then-search
+# ---------------------------------------------------------------------------
+
+@cli.command("find-then-search")
+@click.argument("query")
+@click.option("--filter", "filter_str", default=None, help="JSON filter to scope documents before searching.")
+@click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION, default: documents).")
+@click.option("-k", default=5, show_default=True, help="Number of results to return.")
+@click.option(
+    "--mode",
+    type=click.Choice(["vector", "hybrid", "bm25", "rerank"], case_sensitive=False),
+    default="vector",
+    show_default=True,
+    help="Search mode.",
+)
+@click.pass_context
+def find_then_search(
+    ctx: click.Context,
+    query: str,
+    filter_str: Optional[str],
+    collection: Optional[str],
+    k: int,
+    mode: str,
+) -> None:
+    """Filter documents by fields, then search text within matched docs.
+
+    Two-step operation: first filters DocumentRecords by --filter (same syntax
+    as `find`), then runs a semantic search scoped to those documents only.
+    Results are merged and ranked by score across all matched documents.
+
+    Useful when you need both structured filtering (document_type, fields) and
+    semantic retrieval in a single call.
+
+    \b
+    Examples:
+        blue-docdb find-then-search "termination clause" --filter '{"document_type":"contract"}'
+        blue-docdb find-then-search "deductible" --filter '{"document_type":"policy"}' -k 3
+        blue-docdb --format json find-then-search "payment" --filter '{"fields.total_due":{"gt":1000}}'
+    """
+    fmt = ctx.obj["fmt"]
+    filters = _parse_filter(filter_str, fmt)
+    try:
+        pipeline = get_pipeline()
+        matched_docs = pipeline.find_records(filters)
+        if not matched_docs:
+            results = []
+        else:
+            doc_ids = [r["document_id"] for r in matched_docs]
+            all_results: list = []
+            seen: set = set()
+            for doc_id in doc_ids:
+                doc_results = pipeline.search(
+                    query, k=k, collection=collection,
+                    filters={"document_id": doc_id}, mode=mode,
+                )
+                for r in doc_results:
+                    cid = r.get("chunk_id")
+                    if cid not in seen:
+                        seen.add(cid)
+                        all_results.append(r)
+            results = sorted(all_results, key=lambda r: r.get("score", 0))[:k]
+    except ValueError as exc:
+        _err("INVALID_ARGS", str(exc), fmt)
+    except Exception as exc:
+        _err("SEARCH_FAILED", str(exc), fmt)
+
+    if fmt == "json":
+        click.echo(json.dumps(results, indent=2, default=str))
+        return
+    if fmt == "nl":
+        for r in results:
+            click.echo(json.dumps(r, default=str))
+        return
+
+    _print_search_table(results)
+
+
+# ---------------------------------------------------------------------------
+# get-record
+# ---------------------------------------------------------------------------
+
+@cli.command("get-record")
+@click.option("--document-id", required=True, help="document_id from a previous ingest.")
+@click.pass_context
+def get_record(ctx: click.Context, document_id: str) -> None:
+    """Retrieve the schema record for an ingested document.
+
+    Returns the DocumentRecord written at ingest time: document_type,
+    confidence, classifier used, and any extracted fields (parties,
+    governing_law, total_due, etc.).
+
+    Records are only available when a classifier was configured at pipeline
+    construction. Returns NOT_FOUND if no record exists for the document_id.
+
+    \b
+    Examples:
+        blue-docdb get-record --document-id doc_3a7f1c2e
+        blue-docdb --format json get-record --document-id doc_3a7f1c2e
+    """
+    fmt = ctx.obj["fmt"]
+    try:
+        pipeline = get_pipeline()
+        record = pipeline.get_record(document_id)
+    except Exception as exc:
+        _err("SEARCH_FAILED", str(exc), fmt)
+
+    if record is None:
+        _err("NOT_FOUND", f"No record found for document_id: {document_id}", fmt)
+
+    if fmt == "json":
+        click.echo(json.dumps(record, indent=2, default=str))
+        return
+    if fmt == "nl":
+        click.echo(json.dumps(record, default=str))
+        return
+
+    click.echo(_fmt_record(record))
 
 
 # ---------------------------------------------------------------------------

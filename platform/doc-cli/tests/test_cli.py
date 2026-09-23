@@ -246,3 +246,178 @@ class TestDelete:
         assert result.exit_code == 0
         out = json.loads(result.output)
         assert "deleted" in out
+
+
+# ---------------------------------------------------------------------------
+# search — new options
+# ---------------------------------------------------------------------------
+
+class TestSearchOptions:
+    def test_search_mode_option_accepted(self, runner, pipeline_env, txt_file):
+        pipeline_env.ensure_index(collection="test")
+        pipeline_env.ingest(txt_file, collection="test")
+        result = runner.invoke(cli, ["search", "introduction", "--collection", "test", "--mode", "vector"])
+        assert result.exit_code == 0
+
+    def test_search_context_chunks_option_accepted(self, runner, pipeline_env, txt_file):
+        pipeline_env.ensure_index(collection="test")
+        pipeline_env.ingest(txt_file, collection="test")
+        result = runner.invoke(cli, ["search", "introduction", "--collection", "test", "--context-chunks", "2"])
+        assert result.exit_code == 0
+
+    def test_search_filter_option_accepted(self, runner, pipeline_env, txt_file):
+        pipeline_env.ensure_index(collection="test")
+        pipeline_env.ingest(txt_file, collection="test")
+        result = runner.invoke(cli, [
+            "search", "introduction", "--collection", "test",
+            "--filter", '{"document_type": "unknown"}',
+        ])
+        assert result.exit_code == 0
+
+    def test_search_invalid_filter_json_errors(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["search", "query", "--filter", "not-json"])
+        assert result.exit_code != 0
+
+    def test_search_invalid_mode_errors(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["search", "query", "--mode", "invalid"])
+        assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# find
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def pipeline_env_with_classifier(monkeypatch):
+    """Pipeline with KeywordClassifier so DocumentRecords are written at ingest."""
+    from blue_data_doc_source import BasicEnricher, DocumentPipeline, DummyEmbeddingModel, KeywordClassifier
+    from blue_data.source.vector.memory_vector_source import MemoryVectorSource
+
+    pipeline = DocumentPipeline(
+        chunk_size=200,
+        overlap=20,
+        embedding_model=DummyEmbeddingModel(),
+        vector_source=MemoryVectorSource(),
+        enricher=BasicEnricher(),
+        classifier=KeywordClassifier(),
+        collection="test",
+    )
+    with patch("blue_data_doc_cli.main.get_pipeline", return_value=pipeline):
+        yield pipeline
+
+
+class TestFind:
+    def test_find_returns_empty_without_records(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["find"])
+        assert result.exit_code == 0
+        assert "No records" in result.output
+
+    def test_find_json_returns_empty_list_without_records(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["--format", "json", "find"])
+        assert result.exit_code == 0
+        assert json.loads(result.output) == []
+
+    def test_find_nl_returns_empty_without_records(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["--format", "nl", "find"])
+        assert result.exit_code == 0
+        assert result.output.strip() == ""
+
+    def test_find_with_classifier_returns_records(self, runner, pipeline_env_with_classifier, txt_file):
+        pipeline_env_with_classifier.ensure_index(collection="test")
+        pipeline_env_with_classifier.ingest(txt_file, collection="test")
+        result = runner.invoke(cli, ["--format", "json", "find"])
+        assert result.exit_code == 0
+        records = json.loads(result.output)
+        assert isinstance(records, list)
+        assert len(records) >= 1
+        assert "document_id" in records[0]
+
+    def test_find_invalid_filter_json_errors(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["find", "--filter", "{bad json}"])
+        assert result.exit_code != 0
+
+    def test_find_filter_by_document_type(self, runner, pipeline_env_with_classifier, txt_file):
+        pipeline_env_with_classifier.ensure_index(collection="test")
+        pipeline_env_with_classifier.ingest(txt_file, collection="test")
+        result = runner.invoke(cli, [
+            "--format", "json", "find",
+            "--filter", '{"document_type": "nonexistent_type"}',
+        ])
+        assert result.exit_code == 0
+        assert json.loads(result.output) == []
+
+
+# ---------------------------------------------------------------------------
+# find-then-search
+# ---------------------------------------------------------------------------
+
+class TestFindThenSearch:
+    def test_find_then_search_no_records_returns_empty(self, runner, pipeline_env, txt_file):
+        pipeline_env.ensure_index(collection="test")
+        pipeline_env.ingest(txt_file, collection="test")
+        result = runner.invoke(cli, [
+            "find-then-search", "introduction",
+            "--filter", '{"document_type": "nonexistent"}',
+            "--collection", "test",
+        ])
+        assert result.exit_code == 0
+        assert "No results" in result.output
+
+    def test_find_then_search_json_empty(self, runner, pipeline_env, txt_file):
+        pipeline_env.ensure_index(collection="test")
+        pipeline_env.ingest(txt_file, collection="test")
+        result = runner.invoke(cli, [
+            "--format", "json", "find-then-search", "introduction",
+            "--filter", '{"document_type": "nonexistent"}',
+            "--collection", "test",
+        ])
+        assert result.exit_code == 0
+        assert json.loads(result.output) == []
+
+    def test_find_then_search_invalid_filter_errors(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["find-then-search", "query", "--filter", "bad"])
+        assert result.exit_code != 0
+
+    def test_find_then_search_with_records_returns_chunks(self, runner, pipeline_env_with_classifier, txt_file):
+        pipeline_env_with_classifier.ensure_index(collection="test")
+        pipeline_env_with_classifier.ingest(txt_file, collection="test")
+        result = runner.invoke(cli, [
+            "--format", "json", "find-then-search", "introduction",
+            "--collection", "test",
+        ])
+        assert result.exit_code == 0
+        chunks = json.loads(result.output)
+        assert isinstance(chunks, list)
+
+
+# ---------------------------------------------------------------------------
+# get-record
+# ---------------------------------------------------------------------------
+
+class TestGetRecord:
+    def test_get_record_missing_document_id_errors(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["get-record"])
+        assert result.exit_code != 0
+
+    def test_get_record_not_found_errors(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["get-record", "--document-id", "doc_nonexistent"])
+        assert result.exit_code != 0
+        assert "NOT_FOUND" in result.output or "not found" in result.output.lower()
+
+    def test_get_record_json_not_found_is_structured(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["--format", "json", "get-record", "--document-id", "doc_nonexistent"])
+        assert result.exit_code != 0
+        err = json.loads(result.output)
+        assert err["error"]["code"] == "NOT_FOUND"
+
+    def test_get_record_returns_record_after_ingest(self, runner, pipeline_env_with_classifier, txt_file):
+        pipeline_env_with_classifier.ensure_index(collection="test")
+        ingest_result = runner.invoke(
+            cli, ["--format", "json", "ingest", txt_file, "--collection", "test"]
+        )
+        doc_id = json.loads(ingest_result.output)["document_id"]
+
+        result = runner.invoke(cli, ["--format", "json", "get-record", "--document-id", doc_id])
+        assert result.exit_code == 0
+        record = json.loads(result.output)
+        assert record["document_id"] == doc_id
