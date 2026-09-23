@@ -4,13 +4,13 @@ Usage:
     blue-docdb [--format FORMAT] COMMAND [ARGS]...
 
 Commands:
-    ensure-index      Create the vector index for a collection
-    ingest            Ingest a document into the vector store
-    search            Search documents by semantic similarity
-    find              Filter documents by extracted fields (no embedding)
-    find-then-search  Filter documents, then search text within matched docs
-    get-record        Retrieve the schema record for an ingested document
-    delete            Delete all chunks for a document
+    doc ensure-index      Create the vector index for a collection
+    doc ingest            Ingest a document into the vector store
+    doc search            Search documents by semantic similarity
+    doc find              Filter documents by extracted fields (no embedding)
+    doc find-then-search  Filter documents, then search text within matched docs
+    doc get-record        Retrieve the schema record for an ingested document
+    doc delete            Delete all chunks for a document
 
 Configure via environment variables:
 
@@ -167,10 +167,21 @@ def cli(ctx: click.Context, fmt: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# ensure-index
+# doc component group
 # ---------------------------------------------------------------------------
 
-@cli.command("ensure-index")
+@cli.group("doc")
+@click.pass_context
+def doc_group(ctx: click.Context) -> None:
+    """Manage documents — ingest, search, find, and delete."""
+    ctx.ensure_object(dict)
+
+
+# ---------------------------------------------------------------------------
+# doc ensure-index
+# ---------------------------------------------------------------------------
+
+@doc_group.command("ensure-index")
 @click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION, default: documents).")
 @click.pass_context
 def ensure_index(ctx: click.Context, collection: Optional[str]) -> None:
@@ -181,9 +192,9 @@ def ensure_index(ctx: click.Context, collection: Optional[str]) -> None:
 
     \b
     Examples:
-        blue-docdb ensure-index
-        blue-docdb ensure-index --collection contracts
-        blue-docdb --format json ensure-index --collection contracts
+        blue-docdb doc ensure-index
+        blue-docdb doc ensure-index --collection contracts
+        blue-docdb --format json doc ensure-index --collection contracts
     """
     fmt = ctx.obj["fmt"]
     try:
@@ -202,10 +213,10 @@ def ensure_index(ctx: click.Context, collection: Optional[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# ingest
+# doc ingest
 # ---------------------------------------------------------------------------
 
-@cli.command()
+@doc_group.command("ingest")
 @click.argument("path")
 @click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION, default: documents).")
 @click.pass_context
@@ -223,13 +234,13 @@ def ingest(ctx: click.Context, path: str, collection: Optional[str]) -> None:
     Supported: .txt, .pdf, .docx
 
     Prints document_id and chunk_count on success. Store these values to enable
-    cross-session deletion with `blue-docdb delete --id`.
+    cross-session deletion with `blue-docdb doc delete --id`.
 
     \b
     Examples:
-        blue-docdb ingest report.pdf
-        blue-docdb ingest contract.docx --collection contracts
-        blue-docdb --format json ingest report.pdf
+        blue-docdb doc ingest report.pdf
+        blue-docdb doc ingest contract.docx --collection contracts
+        blue-docdb --format json doc ingest report.pdf
     """
     fmt = ctx.obj["fmt"]
     try:
@@ -261,10 +272,10 @@ def ingest(ctx: click.Context, path: str, collection: Optional[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# search
+# doc search
 # ---------------------------------------------------------------------------
 
-@cli.command()
+@doc_group.command("search")
 @click.argument("query")
 @click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION, default: documents).")
 @click.option("-k", default=5, show_default=True, help="Number of results to return.")
@@ -297,13 +308,13 @@ def search(
 
     \b
     Examples:
-        blue-docdb search "termination clause"
-        blue-docdb search "governing law" -k 10
-        blue-docdb search "deductible" --collection policies
-        blue-docdb search "liability" --mode hybrid
-        blue-docdb search "payment terms" --filter '{"document_type":"contract"}'
-        blue-docdb --format json search "payment terms" | jq '.[0].text'
-        blue-docdb --format nl search "eligibility" | jq -r '.text'
+        blue-docdb doc search "termination clause"
+        blue-docdb doc search "governing law" -k 10
+        blue-docdb doc search "deductible" --collection policies
+        blue-docdb doc search "liability" --mode hybrid
+        blue-docdb doc search "payment terms" --filter '{"document_type":"contract"}'
+        blue-docdb --format json doc search "payment terms" | jq '.[0].text'
+        blue-docdb --format nl doc search "eligibility" | jq -r '.text'
     """
     fmt = ctx.obj["fmt"]
     filters = _parse_filter(filter_str, fmt)
@@ -330,10 +341,10 @@ def search(
 
 
 # ---------------------------------------------------------------------------
-# find
+# doc find
 # ---------------------------------------------------------------------------
 
-@cli.command()
+@doc_group.command("find")
 @click.option("--filter", "filter_str", default=None, help="JSON filter dict, e.g. '{\"document_type\":\"contract\"}'.")
 @click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION, default: documents).")
 @click.pass_context
@@ -355,10 +366,10 @@ def find(ctx: click.Context, filter_str: Optional[str], collection: Optional[str
 
     \b
     Examples:
-        blue-docdb find
-        blue-docdb find --filter '{"document_type":"contract"}'
-        blue-docdb find --filter '{"fields.total_due":{"gt":50000}}'
-        blue-docdb --format json find --filter '{"document_type":"invoice"}'
+        blue-docdb doc find
+        blue-docdb doc find --filter '{"document_type":"contract"}'
+        blue-docdb doc find --filter '{"fields.total_due":{"gt":50000}}'
+        blue-docdb --format json doc find --filter '{"document_type":"invoice"}'
     """
     fmt = ctx.obj["fmt"]
     filters = _parse_filter(filter_str, fmt)
@@ -385,10 +396,10 @@ def find(ctx: click.Context, filter_str: Optional[str], collection: Optional[str
 
 
 # ---------------------------------------------------------------------------
-# find-then-search
+# doc find-then-search
 # ---------------------------------------------------------------------------
 
-@cli.command("find-then-search")
+@doc_group.command("find-then-search")
 @click.argument("query")
 @click.option("--filter", "filter_str", default=None, help="JSON filter to scope documents before searching.")
 @click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION, default: documents).")
@@ -420,9 +431,9 @@ def find_then_search(
 
     \b
     Examples:
-        blue-docdb find-then-search "termination clause" --filter '{"document_type":"contract"}'
-        blue-docdb find-then-search "deductible" --filter '{"document_type":"policy"}' -k 3
-        blue-docdb --format json find-then-search "payment" --filter '{"fields.total_due":{"gt":1000}}'
+        blue-docdb doc find-then-search "termination clause" --filter '{"document_type":"contract"}'
+        blue-docdb doc find-then-search "deductible" --filter '{"document_type":"policy"}' -k 3
+        blue-docdb --format json doc find-then-search "payment" --filter '{"fields.total_due":{"gt":1000}}'
     """
     fmt = ctx.obj["fmt"]
     filters = _parse_filter(filter_str, fmt)
@@ -463,10 +474,10 @@ def find_then_search(
 
 
 # ---------------------------------------------------------------------------
-# get-record
+# doc get-record
 # ---------------------------------------------------------------------------
 
-@cli.command("get-record")
+@doc_group.command("get-record")
 @click.option("--document-id", required=True, help="document_id from a previous ingest.")
 @click.pass_context
 def get_record(ctx: click.Context, document_id: str) -> None:
@@ -481,8 +492,8 @@ def get_record(ctx: click.Context, document_id: str) -> None:
 
     \b
     Examples:
-        blue-docdb get-record --document-id doc_3a7f1c2e
-        blue-docdb --format json get-record --document-id doc_3a7f1c2e
+        blue-docdb doc get-record --document-id doc_3a7f1c2e
+        blue-docdb --format json doc get-record --document-id doc_3a7f1c2e
     """
     fmt = ctx.obj["fmt"]
     try:
@@ -505,10 +516,10 @@ def get_record(ctx: click.Context, document_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# delete
+# doc delete
 # ---------------------------------------------------------------------------
 
-@cli.command()
+@doc_group.command("delete")
 @click.option("--path", "file_path", default=None, help="Path to the source file.")
 @click.option("--id", "document_id", default=None, help="document_id from a previous ingest.")
 @click.option("--chunks", "chunk_count", default=None, type=int,
@@ -530,13 +541,13 @@ def delete(
 
     \b
     By file path (file must still exist):
-        blue-docdb delete --path reports/policy.pdf
+        blue-docdb doc delete --path reports/policy.pdf
 
     \b
     By document_id + chunk_count (cross-session, file may be gone):
-        blue-docdb delete --id doc_3a7f1c2e --chunks 12
+        blue-docdb doc delete --id doc_3a7f1c2e --chunks 12
 
-    document_id and chunk_count are printed by `blue-docdb ingest`.
+    document_id and chunk_count are printed by `blue-docdb doc ingest`.
     """
     fmt = ctx.obj["fmt"]
     if not file_path and not document_id:
