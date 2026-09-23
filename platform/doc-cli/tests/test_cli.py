@@ -192,6 +192,7 @@ class TestDelete:
             "--id", data["document_id"],
             "--chunks", str(data["chunk_count"]),
             "--collection", "test",
+            "--confirm",
         ])
         assert result.exit_code == 0
         assert "Deleted" in result.output
@@ -202,7 +203,7 @@ class TestDelete:
         assert "--path" in result.output or "error" in result.output.lower()
 
     def test_delete_id_without_chunks(self, runner, pipeline_env):
-        result = runner.invoke(cli, ["doc", "delete", "--id", "doc_abc123"])
+        result = runner.invoke(cli, ["doc", "delete", "--id", "doc_abc123", "--confirm"])
         assert result.exit_code != 0
 
     def test_delete_json_output(self, runner, pipeline_env, txt_file):
@@ -217,6 +218,7 @@ class TestDelete:
             "--id", data["document_id"],
             "--chunks", str(data["chunk_count"]),
             "--collection", "test",
+            "--confirm",
         ])
         assert result.exit_code == 0
         out = json.loads(result.output)
@@ -242,10 +244,44 @@ class TestDelete:
             "--id", data["document_id"],
             "--chunks", str(data["chunk_count"]),
             "--collection", "test",
+            "--confirm",
         ])
         assert result.exit_code == 0
         out = json.loads(result.output)
         assert "deleted" in out
+
+    def test_delete_prompts_without_confirm(self, runner, pipeline_env, txt_file):
+        pipeline_env.ensure_index(collection="test")
+        ingest_result = runner.invoke(
+            cli, ["--format", "json", "doc", "ingest", txt_file, "--collection", "test"]
+        )
+        data = json.loads(ingest_result.output)
+
+        # Decline the prompt — should abort without deleting
+        result = runner.invoke(cli, [
+            "doc", "delete",
+            "--id", data["document_id"],
+            "--chunks", str(data["chunk_count"]),
+            "--collection", "test",
+        ], input="n\n")
+        assert result.exit_code != 0
+
+    def test_delete_prompt_accepted_deletes(self, runner, pipeline_env, txt_file):
+        pipeline_env.ensure_index(collection="test")
+        ingest_result = runner.invoke(
+            cli, ["--format", "json", "doc", "ingest", txt_file, "--collection", "test"]
+        )
+        data = json.loads(ingest_result.output)
+
+        # Accept the prompt
+        result = runner.invoke(cli, [
+            "doc", "delete",
+            "--id", data["document_id"],
+            "--chunks", str(data["chunk_count"]),
+            "--collection", "test",
+        ], input="y\n")
+        assert result.exit_code == 0
+        assert "Deleted" in result.output
 
 
 # ---------------------------------------------------------------------------

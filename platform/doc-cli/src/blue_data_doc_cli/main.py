@@ -525,6 +525,8 @@ def get_record(ctx: click.Context, document_id: str) -> None:
 @click.option("--chunks", "chunk_count", default=None, type=int,
               help="chunk_count from a previous ingest (required with --id).")
 @click.option("--collection", default=None, help="Collection name (overrides BLUE_DOC_COLLECTION, default: documents).")
+@click.option("--confirm", "confirmed", is_flag=True, default=False,
+              help="Skip the confirmation prompt.")
 @click.pass_context
 def delete(
     ctx: click.Context,
@@ -532,6 +534,7 @@ def delete(
     document_id: Optional[str],
     chunk_count: Optional[int],
     collection: Optional[str],
+    confirmed: bool,
 ) -> None:
     """Delete all chunks for a document from the vector store.
 
@@ -541,19 +544,24 @@ def delete(
 
     \b
     By file path (file must still exist):
-        blue-docdb doc delete --path reports/policy.pdf
+        blue-docdb doc delete --path reports/policy.pdf --confirm
 
     \b
     By document_id + chunk_count (cross-session, file may be gone):
-        blue-docdb doc delete --id doc_3a7f1c2e --chunks 12
+        blue-docdb doc delete --id doc_3a7f1c2e --chunks 12 --confirm
 
     document_id and chunk_count are printed by `blue-docdb doc ingest`.
+    Omit --confirm to be prompted interactively before deletion.
     """
     fmt = ctx.obj["fmt"]
     if not file_path and not document_id:
         _err("INVALID_ARGS", "Provide --path or --id + --chunks.", fmt)
     if document_id and chunk_count is None:
         _err("INVALID_ARGS", "--chunks is required when using --id.", fmt)
+
+    label = file_path or document_id
+    if not confirmed:
+        click.confirm(f"Delete all chunks for '{label}'?", abort=True)
 
     try:
         pipeline = get_pipeline()
