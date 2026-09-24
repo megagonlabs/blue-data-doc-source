@@ -1,7 +1,7 @@
 """blue-docdb — CLI for blue-data-doc-source.
 
 Usage:
-    blue-docdb [--format FORMAT] COMMAND [ARGS]...
+    blue-docdb [--profile PROFILE] [--format FORMAT] COMMAND [ARGS]...
 
 Commands:
     doc ensure-index      Create the vector index for a collection
@@ -11,16 +11,24 @@ Commands:
     doc find-then-search  Filter documents, then search text within matched docs
     doc get-record        Retrieve the schema record for an ingested document
     doc delete            Delete all chunks for a document
+    profile               Manage profiles and configuration
 
-Configure via environment variables:
+Profiles:
+
+    Configuration is stored in ~/.blue-docdb/ (override with BLUE_DATA_DOC_HOME).
+    Each profile holds the values below. Run `blue-docdb profile config` to set
+    them interactively, or `blue-docdb profile config PARAM VALUE` for a single
+    value.
 
     BLUE_DOC_EMBEDDING          openai | dummy  (default: dummy)
-    OPENAI_API_KEY              required when BLUE_DOC_EMBEDDING=openai
+    OPENAI_API_KEY              required when BLUE_DOC_EMBEDDING=openai (secret)
+    OPENAI_EMBEDDING_MODEL      default: text-embedding-3-small
     BLUE_DOC_REDIS_HOST         Redis host; omit to run without a vector store
+    BLUE_DOC_REDIS_PORT         default: 6379
     BLUE_DOC_COLLECTION         default collection name (default: documents)
     BLUE_DOC_CHUNK_SIZE         default: 1000
     BLUE_DOC_OVERLAP            default: 150
-    BLUE_DOC_OCR_FALLBACK       1 | true to enable Tesseract OCR
+    BLUE_DOC_OCR_FALLBACK       true | false to enable Tesseract OCR fallback
 
 Error codes:
 
@@ -147,6 +155,17 @@ def _err(code: str, msg: str, fmt: str = "table") -> None:
     sys.exit(1)
 
 
+def _require_vector_source(pipeline: Any, fmt: str, mode: str = "vector") -> None:
+    """Exit with a helpful message when a command needs Redis but it isn't configured."""
+    if mode not in ("bm25", "rerank") and pipeline.vector_source is None:
+        _err(
+            "CONFIG_ERROR",
+            "BLUE_DOC_REDIS_HOST is not configured — "
+            "set it via `blue-docdb profile config` or export the environment variable.",
+            fmt,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Root group
 # ---------------------------------------------------------------------------
@@ -173,9 +192,13 @@ def cli(ctx: click.Context, profile_name: Optional[str], fmt: Optional[str]) -> 
     """blue-docdb — ingest, search, and manage documents."""
     home = _cli_home()
     profile_store(home).initialize()
+    # Apply the profile: resolved values are written into os.environ so that
+    # config.py's os.getenv() calls and env-var-aware options pick them up.
+    # Command-line flags take precedence because they are passed directly to
+    # each command and override whatever the profile exported.
     resolver = resolver_for(home, profile_name)
     resolver.export()
-
+    # fmt: command flag > profile BLUE_DATA_CLI_FORMAT > default "table"
     resolved_fmt = fmt or resolver.get("BLUE_DATA_CLI_FORMAT") or "table"
 
     ctx.ensure_object(dict)
@@ -221,6 +244,7 @@ def ensure_index(ctx: click.Context, collection: Optional[str]) -> None:
     fmt = ctx.obj["fmt"]
     try:
         pipeline = get_pipeline()
+        _require_vector_source(pipeline, fmt)
         pipeline.ensure_index(collection=collection)
         coll = collection or pipeline.collection
     except Exception as exc:
@@ -342,6 +366,7 @@ def search(
     filters = _parse_filter(filter_str, fmt)
     try:
         pipeline = get_pipeline()
+        _require_vector_source(pipeline, fmt, mode)
         results = pipeline.search(
             query, k=k, collection=collection,
             mode=mode, filters=filters, context_chunks=context_chunks,
@@ -461,6 +486,7 @@ def find_then_search(
     filters = _parse_filter(filter_str, fmt)
     try:
         pipeline = get_pipeline()
+        _require_vector_source(pipeline, fmt, mode)
         matched_docs = pipeline.find_records(filters)
         if not matched_docs:
             results = []
