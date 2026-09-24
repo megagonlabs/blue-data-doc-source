@@ -40,6 +40,7 @@ from typing import Any, Dict, Optional
 import click
 
 from blue_data_doc_cli.config import get_pipeline, reset_pipeline
+from blue_data_doc_cli.profile import _cli_home, profile_group, profile_store, resolver_for
 
 
 # ---------------------------------------------------------------------------
@@ -152,18 +153,39 @@ def _err(code: str, msg: str, fmt: str = "table") -> None:
 
 @click.group()
 @click.option(
+    "--profile", "profile_name",
+    envvar="BLUE_DATA_PROFILE",
+    default=None,
+    help="Configuration profile. Overrides BLUE_DATA_PROFILE. "
+         "Defaults to the selection in ~/.blue-docdb/.selected.profile.",
+)
+@click.option(
     "--format", "fmt",
     type=click.Choice(["table", "json", "nl"], case_sensitive=False),
-    default="table",
+    default=None,
     show_default=True,
-    help="Output format: table (default), json, or nl (newline-delimited JSON).",
+    help="Output format: table (default), json, or nl (newline-delimited JSON). "
+         "Overrides BLUE_DATA_CLI_FORMAT.",
 )
 @click.version_option(package_name="blue-data-doc-cli")
 @click.pass_context
-def cli(ctx: click.Context, fmt: str) -> None:
+def cli(ctx: click.Context, profile_name: Optional[str], fmt: Optional[str]) -> None:
     """blue-docdb — ingest, search, and manage documents."""
+    home = _cli_home()
+    profile_store(home).initialize()
+    resolver = resolver_for(home, profile_name)
+    resolver.export()
+
+    resolved_fmt = fmt or resolver.get("BLUE_DATA_CLI_FORMAT") or "table"
+
     ctx.ensure_object(dict)
-    ctx.obj["fmt"] = fmt
+    ctx.obj["fmt"] = resolved_fmt
+    ctx.obj["home"] = home
+    ctx.obj["profile"] = resolver.profile
+    ctx.obj["config"] = resolver
+
+
+cli.add_command(profile_group)
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,50 @@
+{
+  "BLUE_DOC_EMBEDDING": {
+    "default": "dummy",
+    "prompt": "Embedding backend (dummy or openai)",
+    "required": true,
+    "cast": "str"
+  },
+  "OPENAI_EMBEDDING_MODEL": {
+    "default": "text-embedding-3-small",
+    "prompt": "OpenAI embedding model (used when BLUE_DOC_EMBEDDING=openai)",
+    "required": false,
+    "cast": "str"
+  },
+  "BLUE_DOC_REDIS_HOST": {
+    "default": null,
+    "prompt": "Redis host for the vector store (leave blank to run without vector search)",
+    "required": true,
+    "cast": "str"
+  },
+  "BLUE_DOC_REDIS_PORT": {
+    "default": "6379",
+    "prompt": "Redis port",
+    "required": false,
+    "cast": "int"
+  },
+  "BLUE_DOC_COLLECTION": {
+    "default": "documents",
+    "prompt": "Default collection name",
+    "required": true,
+    "cast": "str"
+  },
+  "BLUE_DOC_CHUNK_SIZE": {
+    "default": "1000",
+    "prompt": "Chunk size in words",
+    "required": false,
+    "cast": "int"
+  },
+  "BLUE_DOC_OVERLAP": {
+    "default": "150",
+    "prompt": "Chunk overlap in words",
+    "required": false,
+    "cast": "int"
+  },
+  "BLUE_DOC_OCR_FALLBACK": {
+    "default": "false",
+    "prompt": "Enable Tesseract OCR fallback for scanned PDFs (true/false)",
+    "required": false,
+    "cast": "bool"
+  }
+}

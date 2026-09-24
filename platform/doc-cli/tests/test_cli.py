@@ -19,8 +19,9 @@ def _reset():
 
 
 @pytest.fixture()
-def runner():
-    return CliRunner()
+def runner(tmp_path):
+    """CliRunner with an isolated profile home so tests never touch ~/.blue-docdb."""
+    return CliRunner(env={"BLUE_DATA_DOC_HOME": str(tmp_path / "docdb_home")})
 
 
 @pytest.fixture()
@@ -429,6 +430,65 @@ class TestFindThenSearch:
 # ---------------------------------------------------------------------------
 # get-record
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# profile
+# ---------------------------------------------------------------------------
+
+class TestProfile:
+    def test_profile_list_shows_default(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["profile", "list"])
+        assert result.exit_code == 0
+        assert "default" in result.output
+
+    def test_profile_list_json(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["profile", "list", "--format", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "profiles" in data
+        assert "default" in data["profiles"]
+
+    def test_profile_add_and_list(self, runner, pipeline_env):
+        runner.invoke(cli, ["profile", "add", "prod"])
+        result = runner.invoke(cli, ["profile", "list", "--format", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "prod" in data["profiles"]
+
+    def test_profile_select(self, runner, pipeline_env):
+        runner.invoke(cli, ["profile", "add", "prod"])
+        result = runner.invoke(cli, ["profile", "select", "prod"])
+        assert result.exit_code == 0
+        list_result = runner.invoke(cli, ["profile", "list", "--format", "json"])
+        data = json.loads(list_result.output)
+        assert data["selected"] == "prod"
+
+    def test_profile_remove_with_confirm(self, runner, pipeline_env):
+        runner.invoke(cli, ["profile", "add", "staging"])
+        result = runner.invoke(cli, ["profile", "remove", "staging", "--confirm"])
+        assert result.exit_code == 0
+        list_result = runner.invoke(cli, ["profile", "list", "--format", "json"])
+        data = json.loads(list_result.output)
+        assert "staging" not in data["profiles"]
+
+    def test_profile_remove_nonexistent_errors(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["profile", "remove", "nonexistent", "--confirm"])
+        assert result.exit_code != 0
+
+    def test_profile_config_set_value(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["profile", "config", "BLUE_DOC_COLLECTION", "contracts"])
+        assert result.exit_code == 0
+
+    def test_profile_inspect_shows_params(self, runner, pipeline_env):
+        result = runner.invoke(cli, ["profile", "inspect"])
+        assert result.exit_code == 0
+        assert "BLUE_DOC_EMBEDDING" in result.output
+
+    def test_profile_flag_selects_profile(self, runner, pipeline_env):
+        runner.invoke(cli, ["profile", "add", "prod"])
+        result = runner.invoke(cli, ["--profile", "prod", "profile", "inspect"])
+        assert result.exit_code == 0
+
 
 class TestGetRecord:
     def test_get_record_missing_document_id_errors(self, runner, pipeline_env):
