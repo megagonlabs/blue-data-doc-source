@@ -11,3 +11,10 @@ pip install -e lib/ -e platform/doc-cli/
 doc ingest mydoc.txt
 doc search "termination clause"
 ```
+
+## Testing
+
+```bash
+pip install -e lib/ -e platform/doc-cli/ pytest
+pytest platform/doc-cli/tests/ -v
+```
