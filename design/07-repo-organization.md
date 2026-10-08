@@ -86,7 +86,7 @@ blue-data-doc-source/
 │   │               ├── document_source.py   # DocumentDataSource — public entry point; op dispatch
 │   │               ├── pipeline.py          # DocumentPipeline — orchestrates the full ingest chain
 │   │               ├── chunk_record.py      # ChunkRecord dataclass — canonical chunk schema with to_dict()
-│   │               ├── nl_parser.py         # NLQueryParser — Claude tool use → DOCUMENT.* op dict
+│   │               ├── nl_parser.py         # NLQueryParser — OpenAI JSON mode → DOCUMENT.* op dict
 │   │               ├── parsers/
 │   │               │   ├── base.py              # Parser ABC — parse(path) → list[page_dict]; parse_blocks() for typed content
 │   │               │   ├── text_parser.py       # TextParser — plain .txt files

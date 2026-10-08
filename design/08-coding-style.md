@@ -130,4 +130,4 @@ Each module follows this order:
 - Test function names: `test_{what}_{condition}` (e.g. `test_chunk_id_is_deterministic`, `test_to_dict_omits_none_page_start`).
 - One `assert` per logical claim (multiple asserts in a test are fine when they verify the same invariant).
 - No `print` in tests; use `assert` with descriptive messages if the failure reason is not obvious.
-- Never mock internal collaborators — use real in-process test doubles (`MemoryVectorSource`, `MemoryRecordStore`, `DummyEmbeddingModel`). Mock only external APIs (`openai.OpenAI`, `anthropic.Anthropic`) via `unittest.mock.patch`.
+- Never mock internal collaborators — use real in-process test doubles (`MemoryVectorSource`, `MemoryRecordStore`, `DummyEmbeddingModel`). Mock only external APIs (`openai.OpenAI`) via `unittest.mock.patch`.

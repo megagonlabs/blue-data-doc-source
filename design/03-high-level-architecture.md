@@ -48,7 +48,7 @@
 │                                                                     │
 │  ┌──────────────────────────────┐  ┌────────────────────────────┐  │
 │  │       GraphIndexer           │  │      NL Interface          │  │
-│  │  (optional; graph_source≠∅) │  │   NLQueryParser (Claude)   │  │
+│  │  (optional; graph_source≠∅) │  │   NLQueryParser (OpenAI)   │  │
 │  └──────────────────────────────┘  └────────────────────────────┘  │
 └─────────────────────────────────────────┬───────────────────────────┘
                                           │
@@ -168,7 +168,7 @@ Optional side-effect component. When `graph_source` is set, writes a typed graph
 
 ### NL Interface
 
-`NLQueryParser` converts free-text queries to `DOCUMENT.*` op dicts using Claude's tool-use API. Requires the `anthropic` package and `ANTHROPIC_API_KEY`.
+`NLQueryParser` converts free-text queries to `DOCUMENT.*` op dicts using the OpenAI chat completions API in JSON mode (default model `gpt-4o-mini`). Requires the `openai` package and `OPENAI_API_KEY`. A custom `parse_fn` can swap in any other backend.
 
 ---
 
