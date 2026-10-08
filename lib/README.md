@@ -13,3 +13,18 @@ pip install -e lib/
 ```
 
 Requires Python 3.10+.
+
+## Testing
+
+```bash
+pip install -e lib/ pytest
+
+# Unit tests — no external services required
+pytest lib/tests/unit/ -v
+
+# Integration tests — require Redis Stack on localhost:6379
+docker run -p 6379:6379 redis/redis-stack-server:latest
+pytest lib/tests/integration/ -v
+```
+
+Retrieval and pipeline benchmarks live under `lib/tests/benchmarks/`.

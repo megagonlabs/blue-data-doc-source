@@ -10,3 +10,12 @@ Full documentation — configuration, tool list, and Claude Desktop integration 
 pip install -e lib/ -e platform/doc-mcp/
 python platform/doc-mcp/src/server.py
 ```
+
+## Testing
+
+```bash
+pip install -e lib/ -e platform/doc-mcp/ pytest
+pytest platform/doc-mcp/tests/ -v
+```
+
+Tests stub the MCP SDK and patch the pipeline — no Redis or OpenAI connection needed.

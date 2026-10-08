@@ -1,5 +1,16 @@
 # Features
 
+## Why it matters
+
+Vector-only retrieval fails in predictable ways on a real document corpus. `blue-data-doc-source` packages the fixes as native blue-data source operations:
+
+- **Semantic search returns the wrong document.** A query for Acme Corp's termination clause can surface unrelated contracts first (especially when one says "cancellation"). Fix: extract `parties`/`governing_law`/`effective_date` once at ingest, then [`DOCUMENT.FIND`](#structured-corpus-query-documentfind) the right document before searching within it — see [two-stage find-then-retrieve](#two-stage-find-then-retrieve-documentfind_then_search).
+- **Structured questions can't be answered by embedding distance.** "Invoices from Blue Solutions over $30,000" needs a numeric predicate, not similarity. Fix: typed field extraction at ingest + deterministic `DOCUMENT.FIND` filters (currency/commas stripped before comparison).
+- **A mixed corpus makes every search ambiguous.** Contracts, invoices, and policies in one index rank equally for the same query. Fix: zero-cost `KeywordClassifier` tags every chunk with `document_type`, so a pre-filter pins search to the right category before KNN scoring.
+- **Exact entity lookup misses mentions.** Vector search returns the *k* nearest chunks, not *every* mention of "Acme Corp". Fix: optional [graph indexing](#graph-backend) resolves an entity by deterministic node ID and walks its `MENTIONS` edges — no corpus scan, no embeddings.
+
+Documents also don't exist in isolation: `DocumentDataSource` registers in the same blue-data `DataRegistry` as your SQL, graph, and web sources, so an agent can cross-reference document evidence with other enterprise data through one registration model. And ingestion is reproducible — the `document_id` is a SHA-256 of file bytes, so re-ingesting is a safe upsert and extracted fields survive restarts via `FileRecordStore`.
+
 ## Multi-format document parsing
 
 Ingest PDF, plain text, and DOCX files through a single unified interface. The parser is selected automatically by file extension.
