@@ -35,7 +35,7 @@ lib/tests/
 │   ├── test_graph_indexer.py          # GraphIndexer: node/edge creation, dedup, delete
 │   ├── test_hybrid_search.py          # Hybrid BM25 + vector search; pre-filter integration
 │   ├── test_llm_enricher.py           # LLMEnricher: mocked openai client; entity + hints output
-│   ├── test_nl_parser.py              # NLQueryParser: mocked Anthropic; op dict construction
+│   ├── test_nl_parser.py              # NLQueryParser: parse_fn stub; op dict construction
 │   ├── test_openai_embedding.py       # OpenAIEmbeddingModel: mocked openai; dim validation
 │   ├── test_pdf_parser.py             # PDFParser: digital PDF; OCR fallback mocked
 │   ├── test_plumber_pdf_parser.py     # PlumberPDFParser: text + table block output
@@ -84,7 +84,7 @@ These are real implementations of the same ABCs, not mocks. The same code paths 
 
 ### Mocked LLM / embedding clients
 
-`openai.OpenAI` and `anthropic.Anthropic` are mocked via `unittest.mock.patch` in unit tests. Tests assert on:
+`openai.OpenAI` is mocked via `unittest.mock.patch` in unit tests (and `NLQueryParser` is driven with a `parse_fn` stub). Tests assert on:
 - The text sent to the API (prompt content, schema shape)
 - How the response is parsed into entities, semantic hints, or extracted fields
 

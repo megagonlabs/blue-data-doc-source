@@ -185,15 +185,17 @@ Each entry records a significant design decision: what was decided, why, and wha
 
 ---
 
-## ADR-013 — `NLQueryParser` uses Claude tool-use, not free-form parsing
+## ADR-013 — `NLQueryParser` uses OpenAI JSON mode, not free-form parsing
 
 **Date:** 2025-Q1  
 **Status:** Accepted
 
-**Decision:** `NLQueryParser` converts natural-language queries to `DocumentDataSource` op dicts using Claude's tool-use API rather than free-form completion parsing.
+**Decision:** `NLQueryParser` converts natural-language queries to `DocumentDataSource` op dicts using the OpenAI chat completions API in JSON mode (`response_format={"type": "json_object"}`, default model `gpt-4o-mini`) rather than free-form completion parsing. A pluggable `parse_fn` lets callers swap in any other backend (e.g. Anthropic, a local model, or a test stub).
 
-**Rationale:** Tool-use constrains the model's output to a well-typed schema. Free-form parsing requires a secondary parsing step that is fragile and hard to test. Tool-use eliminates the parsing step entirely and produces structured output directly.
+**Rationale:** JSON mode constrains the model's output to a parseable JSON object, eliminating the fragile secondary text-parsing step that free-form completion would require. The op-selection rules (SEARCH vs FIND vs FIND_THEN_SEARCH, etc.) are encoded in the system prompt.
 
 **Consequences:**
-- Requires Anthropic API access. `NLQueryParser` is not usable without an API key.
-- Tool definitions must be kept in sync with the op code schema in `DocumentDataSource`. A new op requires both a code change and a tool definition update.
+- Requires OpenAI API access (`OPENAI_API_KEY`) when no `parse_fn` is supplied; `NLQueryParser` is otherwise unusable without a backend.
+- The system prompt encoding the op schema must be kept in sync with the op codes in `DocumentDataSource`. A new op requires both a code change and a prompt update.
+
+> **Note (issue #67):** an earlier revision of this ADR described a Claude/Anthropic tool-use implementation. The shipped implementation uses OpenAI JSON mode; a provider-neutral abstraction is deferred (no milestone).

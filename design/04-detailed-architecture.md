@@ -222,7 +222,7 @@ Node IDs are deterministic: `doc:{document_id}`, `section:{document_id}:{title.l
 ```
 blue-data-doc-source (core library)
     ├── blue-data              DataSource / VectorSource / GraphSource ABCs + backends
-    ├── openai ≥1.0.0          OpenAIEmbeddingModel; LLMFieldExtractor; LLMEnricher; StructuredFieldExtractor
+    ├── openai ≥1.0.0          OpenAIEmbeddingModel; LLMFieldExtractor; LLMEnricher; StructuredFieldExtractor; NLQueryParser
     ├── pypdf ≥4.0.0           PDFParser (text extraction from digital PDFs)
     ├── python-docx ≥1.0.0     DocxParser (heading-preserving DOCX extraction)
     └── redis[hiredis] ≥4.5.0  RedisVectorSource + RedisJSONSource backends
@@ -231,7 +231,6 @@ Optional extras:
     pytesseract + pdf2image  [ocr]   — OCR fallback for scanned PDFs
     nltk                     [nlp]   — SentenceChunker
     mcp                      [mcp]   — fastmcp runtime for MCP server
-    anthropic                        — NLQueryParser (Claude tool use)
 
 Platform services:
     platform/doc-api/            FastAPI + Uvicorn (REST API, port 8001)
