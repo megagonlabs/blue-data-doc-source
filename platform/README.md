@@ -128,30 +128,30 @@ All configuration is via environment variables:
 
 ```bash
 # Create the vector index before first ingest (idempotent)
-doc ensure-index
+blue-docdb doc ensure-index
 
 # Ingest a document
-doc ingest reports/policy.pdf
+blue-docdb doc ingest reports/policy.pdf
 
 # Search
-doc search "termination clause" -k 5
+blue-docdb doc search "termination clause" -k 5
 
 # Delete by file path (same session)
-doc delete --path reports/policy.pdf
+blue-docdb doc delete --path reports/policy.pdf
 
 # Delete by document_id + chunk_count (cross-session)
-doc delete --id doc_3a7f1c2e --chunks 12
+blue-docdb doc delete --id doc_3a7f1c2e --chunks 12
 
 # Output raw JSON for any command
-doc --json search "termination clause"
+blue-docdb --format json doc search "termination clause"
 ```
 
 ### Quick start (no API key, no Redis)
 
 ```bash
 pip install -e lib/ -e platform/doc-cli/
-doc ingest mydoc.txt          # chunks printed to stdout, no vector store
-doc search "my query"         # requires BLUE_DOC_REDIS_HOST
+blue-docdb doc ingest mydoc.txt          # chunks printed to stdout, no vector store
+blue-docdb doc search "my query"         # requires BLUE_DOC_REDIS_HOST
 ```
 
 ### Quick start (OpenAI + Redis)
@@ -163,9 +163,9 @@ export BLUE_DOC_EMBEDDING=openai
 export OPENAI_API_KEY=sk-...
 export BLUE_DOC_REDIS_HOST=localhost
 
-doc ensure-index
-doc ingest contract.pdf
-doc search "governing law"
+blue-docdb doc ensure-index
+blue-docdb doc ingest contract.pdf
+blue-docdb doc search "governing law"
 ```
 
 ---

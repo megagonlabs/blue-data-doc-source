@@ -100,9 +100,8 @@ OPENAI_API_KEY=sk-... python3 examples/feature-demos/structured_extractor_demo.p
 # Generic extraction from unknown-type corpora:
 python3 examples/feature-demos/generic_extraction_demo.py
 
-# Parser raw output — all four parsers, no API key needed:
-python3 examples/feature-demos/parsers_demo.py
-# With OCR step (requires: pip install blue-data-doc-source[ocr] && brew install tesseract poppler):
+# Parser raw output — all four parsers, no API key needed
+# (the scanned-PDF step runs OCR automatically when the [ocr] extra + tesseract/poppler are installed — see docs/installation.md):
 python3 examples/feature-demos/parsers_demo.py
 
 # Document classification and field extraction — keyword classification only (no API key needed):
@@ -111,9 +110,8 @@ python3 examples/feature-demos/field_extraction_demo.py
 # With LLM field extraction:
 OPENAI_API_KEY=sk-... python3 examples/feature-demos/field_extraction_demo.py
 
-# PDF formats — tables, images, multi-page, real-world, OCR (no API key needed):
-python3 examples/feature-demos/pdf_formats_demo.py
-# With OCR (requires: pip install blue-data-doc-source[ocr] && brew install tesseract poppler):
+# PDF formats — tables, images, multi-page, real-world, OCR, no API key needed
+# (the scanned-PDF step runs OCR automatically when the [ocr] extra + tesseract/poppler are installed — see docs/installation.md):
 python3 examples/feature-demos/pdf_formats_demo.py
 
 # Rich search — provenance, context, by_document grouping (no API key needed):

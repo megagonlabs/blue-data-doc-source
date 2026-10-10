@@ -1057,16 +1057,16 @@ BLUE_DOC_EMBEDDING=openai OPENAI_API_KEY=sk-... uvicorn doc_api.main:app --port 
 pip install -e platform/doc-cli
 
 # Ingest a document
-blue-data-doc ingest path/to/policy.pdf --collection contracts
+blue-docdb doc ingest path/to/policy.pdf --collection contracts
 
 # Search
-blue-data-doc search "termination clause" --collection contracts -k 5
+blue-docdb doc search "termination clause" --collection contracts -k 5
 
 # Delete
-blue-data-doc delete --path path/to/policy.pdf --collection contracts
+blue-docdb doc delete --path path/to/policy.pdf --collection contracts
 
 # Output raw JSON for scripting
-blue-data-doc search "deductible" --json
+blue-docdb --format json doc search "deductible"
 ```
 
 Configure via the same environment variables used by the MCP server and REST API (`BLUE_DOC_EMBEDDING`, `BLUE_DOC_REDIS_HOST`, `BLUE_DOC_COLLECTION`, etc.).

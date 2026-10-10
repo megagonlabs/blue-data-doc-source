@@ -29,25 +29,25 @@ All configuration is via environment variables:
 
 ```bash
 # Create the vector index before first ingest (idempotent)
-blue-docdb ensure-index
+blue-docdb doc ensure-index
 
 # Ingest a document
-blue-docdb ingest reports/policy.pdf
+blue-docdb doc ingest reports/policy.pdf
 
 # Search
-blue-docdb search "termination clause" -k 5
+blue-docdb doc search "termination clause" -k 5
 
 # Delete by file path (same session)
-blue-docdb delete --path reports/policy.pdf
+blue-docdb doc delete --path reports/policy.pdf
 
 # Delete by document_id + chunk_count (cross-session)
-blue-docdb delete --id <document_id> --chunks <chunk_count>
+blue-docdb doc delete --id <document_id> --chunks <chunk_count>
 
 # Output as JSON
-blue-docdb --format json search "termination clause"
+blue-docdb --format json doc search "termination clause"
 
 # Output as newline-delimited JSON (for piping)
-blue-docdb --format nl search "termination clause" | jq .chunk_id
+blue-docdb --format nl doc search "termination clause" | jq .chunk_id
 ```
 
 ## Output formats
@@ -78,7 +78,7 @@ Errors are written to stderr. In `--format json` mode, errors are structured:
 ## Quick start (no API key, no Redis)
 
 ```bash
-blue-docdb ingest data/sample_policy.txt
+blue-docdb doc ingest data/sample_policy.txt
 # chunks printed to stdout; no vector store required
 ```
 
@@ -91,7 +91,7 @@ export BLUE_DOC_EMBEDDING=openai
 export OPENAI_API_KEY=sk-...
 export BLUE_DOC_REDIS_HOST=localhost
 
-blue-docdb ensure-index
-blue-docdb ingest contract.pdf
-blue-docdb search "governing law"
+blue-docdb doc ensure-index
+blue-docdb doc ingest contract.pdf
+blue-docdb doc search "governing law"
 ```
