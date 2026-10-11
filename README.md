@@ -14,7 +14,7 @@ Documents are data — not merely search-index content. `blue-data-doc-source` h
 - **Classify** every document by type at zero API cost and propagate it to every chunk for pre-filtered search.
 - **Extract** typed fields at ingest (parties, totals, dates) via an LLM or a caller-supplied schema, then filter on them deterministically with `DOCUMENT.FIND` — no embedding, no query-time LLM.
 - **Search** by semantic similarity with metadata pre-filtering, or combine BM25 + vector in one op.
-- **Navigate** an optional knowledge graph of documents, sections, chunks, and entities for exact entity lookup.
+- **Navigate** an optional entity/structure graph of documents, sections, chunks, and entities for exact entity lookup (structural + mention/co-occurrence edges; not a semantic relationship graph — see [docs/features.md](docs/features.md)).
 - **Register** documents in blue-data's `DataRegistry` alongside SQL, web, and graph sources, with a consistent chunk schema.
 
 Full feature list: [docs/features.md](docs/features.md). Runnable demos: [examples/](examples/).

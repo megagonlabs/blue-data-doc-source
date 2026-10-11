@@ -840,7 +840,9 @@ See `examples/feature-demos/rich_search_demo.py` for a runnable side-by-side com
 
 ## Graph backend — entity-centric retrieval and structural navigation
 
-Pass any blue-data `GraphSource` as `graph_source=` to populate a knowledge graph automatically during every ingest. The graph layer is optional — omit `graph_source` and the pipeline is unchanged.
+Pass any blue-data `GraphSource` as `graph_source=` to populate a graph automatically during every ingest. The graph layer is optional — omit `graph_source` and the pipeline is unchanged.
+
+> **What the graph is — and isn't.** This is an **entity / structure / provenance graph**, not a semantic knowledge graph. It captures document structure (`HAS_SECTION`, `HAS_CHUNK`, `NEXT`/`PREV` reading order), entity mentions (`MENTIONS`, `APPEARS_IN`), and entity co-occurrence (`CO_OCCURS_WITH`) — using the entities extracted by the enricher. It does **not** index the subject/predicate/object relationships that `LLMEnricher` extracts: those are stored on each chunk's `semantic_hints["relationships"]`, but are not written as graph edges. Indexing them as typed edges (with provenance and confidence) is future work (#65).
 
 ### Full graph schema
 
