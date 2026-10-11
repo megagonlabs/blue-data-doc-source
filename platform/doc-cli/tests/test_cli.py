@@ -517,3 +517,16 @@ class TestGetRecord:
         assert result.exit_code == 0
         record = json.loads(result.output)
         assert record["document_id"] == doc_id
+
+
+def test_build_pipeline_with_redis_constructs_vector_source(monkeypatch):
+    # Regression (#91): when BLUE_DOC_REDIS_HOST is set, the builder must construct
+    # a RedisVectorSource WITHOUT raising TypeError — connection details go in
+    # `properties={"connection": {...}}`, not as host/port kwargs. Construction is
+    # lazy (no socket opened), so this stays offline.
+    from blue_data_doc_cli.config import _build_pipeline
+
+    monkeypatch.setenv("BLUE_DOC_REDIS_HOST", "localhost")
+    monkeypatch.setenv("BLUE_DOC_REDIS_PORT", "6379")
+    pipeline = _build_pipeline()
+    assert type(pipeline.vector_source).__name__ == "RedisVectorSource"

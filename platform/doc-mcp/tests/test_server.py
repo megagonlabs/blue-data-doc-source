@@ -265,3 +265,14 @@ def test_build_pipeline_chunk_size_env(monkeypatch):
     pipeline = _server._build_pipeline()
     assert pipeline.chunk_size == 500
     assert pipeline.overlap == 75
+
+
+def test_build_pipeline_with_redis_constructs_vector_source(monkeypatch):
+    # Regression (#91): when BLUE_DOC_REDIS_HOST is set, the builder must construct
+    # a RedisVectorSource WITHOUT raising TypeError — connection details go in
+    # `properties={"connection": {...}}`, not as host/port kwargs. Construction is
+    # lazy (no socket opened), so this stays offline.
+    monkeypatch.setenv("BLUE_DOC_REDIS_HOST", "localhost")
+    monkeypatch.setenv("BLUE_DOC_REDIS_PORT", "6379")
+    pipeline = _server._build_pipeline()
+    assert type(pipeline.vector_source).__name__ == "RedisVectorSource"
