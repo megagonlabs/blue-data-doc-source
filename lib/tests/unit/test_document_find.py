@@ -711,3 +711,81 @@ class TestFindRecordsCoverage:
             "filter": {"document_type": "contract"},
         })
         assert isinstance(result, list)
+
+
+# ---------------------------------------------------------------------------
+# RecordStore cleanup on delete / re-ingest (regression for #62)
+# ---------------------------------------------------------------------------
+
+_CONTRACT_TEXT = (
+    "MASTER SERVICES AGREEMENT between Acme Corp and Beta LLC (the parties). "
+    "Termination with sixty days notice. Governing law: California. "
+    "Indemnification, warranties, confidentiality, entire agreement."
+)
+_INVOICE_TEXT = (
+    "INVOICE number INV-1001. Bill to: Gamma Inc. Vendor: Blue Solutions. "
+    "Total amount due $5,400. Due date 2026-01-31. Payment terms net 30."
+)
+
+
+class TestRecordStoreCleanup:
+    def _pipeline(self, record_store):
+        from blue_data.source.vector.memory_vector_source import MemoryVectorSource
+
+        p = DocumentPipeline(
+            embedding_model=DummyEmbeddingModel(dim=8),
+            vector_source=MemoryVectorSource(name="mem"),
+            classifier=KeywordClassifier(),
+            record_store=record_store,
+        )
+        p.ensure_index()
+        return p
+
+    def test_delete_removes_record(self, tmp_path):
+        p = self._pipeline(MemoryRecordStore())
+        f = tmp_path / "contract.txt"
+        f.write_text(_CONTRACT_TEXT)
+        recs = p.ingest(str(f))
+        doc_id = recs[0]["document_id"]
+        assert p.get_record(doc_id) is not None
+
+        p.delete(path=str(f))
+
+        assert p.get_record(doc_id) is None
+        assert all(r["document_id"] != doc_id for r in p.find_records(None))
+
+    def test_reingest_changed_content_drops_old_record(self, tmp_path):
+        p = self._pipeline(MemoryRecordStore())
+        f = tmp_path / "doc.txt"
+        f.write_text(_CONTRACT_TEXT)
+        old_id = p.ingest(str(f))[0]["document_id"]
+        assert p.get_record(old_id) is not None
+
+        # Change the content → new content-hash document_id.
+        f.write_text(_INVOICE_TEXT)
+        new_id = p.ingest(str(f))[0]["document_id"]
+        assert new_id != old_id
+
+        assert p.get_record(old_id) is None       # stale record cleaned up
+        assert p.get_record(new_id) is not None     # new record present
+
+    def test_delete_removes_record_across_restart(self, tmp_path, monkeypatch):
+        # Run inside tmp_path so nothing leaks into the repo root.
+        monkeypatch.chdir(tmp_path)
+        store_path = str(tmp_path / "records.json")
+        f = tmp_path / "contract.txt"
+        f.write_text(_CONTRACT_TEXT)
+
+        # Process 1 — ingest, persisting the record to disk.
+        p1 = self._pipeline(FileRecordStore(store_path))
+        recs = p1.ingest(str(f))
+        doc_id, chunk_count = recs[0]["document_id"], len(recs)
+
+        # Process 2 (restart) — fresh pipeline reading the same file-backed store.
+        p2 = self._pipeline(FileRecordStore(store_path))
+        assert p2.get_record(doc_id) is not None   # persisted across the "restart"
+        p2.delete(document_id=doc_id, chunk_count=chunk_count)
+
+        # Process 3 — another restart must not see the deleted record.
+        p3 = self._pipeline(FileRecordStore(store_path))
+        assert p3.get_record(doc_id) is None
