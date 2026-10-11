@@ -24,17 +24,59 @@ if TYPE_CHECKING:
 _TAG_SPECIAL_RE = re.compile(r'([,.<>{}\[\]"\'`:;!@#$%^&*\-+=~|/ ])')
 
 # Fields indexed as TAG in the vector index — used for pre-filtering.
-_FILTER_TAG_FIELDS = ("document_id", "file_name", "section_title", "mime_type", "content_type")
+_FILTER_TAG_FIELDS = ("document_id", "document_type", "file_name", "section_title", "mime_type", "content_type")
+
+# All filter keys accepted by search(): the TAG fields plus the numeric page range.
+_ALLOWED_FILTER_KEYS = set(_FILTER_TAG_FIELDS) | {"page_start"}
 
 # Extra fields passed to create_index so Redis Search can filter on them.
 _INDEX_EXTRA_FIELDS = [
     {"path": "$.document_id",   "name": "document_id",   "field_type": "TAG"},
+    {"path": "$.document_type", "name": "document_type", "field_type": "TAG"},
     {"path": "$.file_name",     "name": "file_name",     "field_type": "TAG"},
     {"path": "$.section_title", "name": "section_title", "field_type": "TAG"},
     {"path": "$.mime_type",     "name": "mime_type",     "field_type": "TAG"},
     {"path": "$.page_start",    "name": "page_start",    "field_type": "NUMERIC"},
     {"path": "$.content_type",  "name": "content_type",  "field_type": "TAG"},
 ]
+
+
+def _validate_filters(filters: Optional[Dict[str, Any]]) -> None:
+    """Reject unknown filter keys and ill-typed values instead of silently dropping them.
+
+    Raises:
+        ValueError: on an unknown key, a non-string TAG value, or a ``page_start``
+            that is neither an int nor a ``{"gte": int, "lte": int}`` range.
+    """
+    if not filters:
+        return
+    unknown = set(filters) - _ALLOWED_FILTER_KEYS
+    if unknown:
+        raise ValueError(
+            f"Unknown search filter key(s): {sorted(unknown)}. "
+            f"Allowed keys: {sorted(_ALLOWED_FILTER_KEYS)}"
+        )
+    for field in _FILTER_TAG_FIELDS:
+        if field in filters and not isinstance(filters[field], str):
+            raise ValueError(
+                f"Filter {field!r} must be a string, got {type(filters[field]).__name__}"
+            )
+    page = filters.get("page_start")
+    if page is not None:
+        if isinstance(page, bool) or not isinstance(page, (int, dict)):
+            raise ValueError(
+                "Filter 'page_start' must be an int or a {'gte': int, 'lte': int} range, "
+                f"got {type(page).__name__}"
+            )
+        if isinstance(page, dict):
+            bad = set(page) - {"gte", "lte"}
+            if bad:
+                raise ValueError(
+                    f"'page_start' range supports only 'gte'/'lte', got {sorted(bad)}"
+                )
+            for bound in ("gte", "lte"):
+                if bound in page and (isinstance(page[bound], bool) or not isinstance(page[bound], int)):
+                    raise ValueError(f"'page_start.{bound}' must be an int")
 
 
 def _escape_redis_tag(value: str) -> str:
@@ -46,7 +88,8 @@ def _build_filter_expr(filters: Optional[Dict[str, Any]]) -> str:
     """Translate a filters dict into a Redis Search filter expression.
 
     Supported keys:
-        document_id, file_name, section_title, mime_type  — exact TAG match
+        document_id, document_type, file_name, section_title, mime_type,
+        content_type  — exact TAG match
         page_start  — int for exact page, or {"gte": N, "lte": M} for range
 
     Returns ``"*"`` when filters is None or empty.
@@ -972,8 +1015,10 @@ class DocumentPipeline:
             k: Number of results to return.
             collection: Override the instance-level collection for this call only.
             filters: Optional pre-filter. Supported keys: ``document_id``,
-                ``file_name``, ``section_title``, ``mime_type``, ``content_type``
-                (exact match) and ``page_start`` (int or ``{"gte": N, "lte": M}``).
+                ``document_type``, ``file_name``, ``section_title``, ``mime_type``,
+                ``content_type`` (exact match) and ``page_start`` (int or
+                ``{"gte": N, "lte": M}``). Unknown keys or ill-typed values raise
+                ``ValueError`` rather than being silently ignored.
             mode: Search strategy — ``"vector"`` (default), ``"hybrid"`` (RRF
                 fusion of BM25 + KNN), ``"bm25"`` (keyword-only, no vector store
                 required), or ``"rerank"`` (BM25 shortlist re-ranked by cosine).
@@ -999,6 +1044,7 @@ class DocumentPipeline:
             ValueError: If ``embedding_model`` or ``vector_source`` is not set
                 and ``mode`` is ``"vector"`` or ``"hybrid"``.
         """
+        _validate_filters(filters)
         target = collection or self.collection
 
         # ------------------------------------------------------------------
