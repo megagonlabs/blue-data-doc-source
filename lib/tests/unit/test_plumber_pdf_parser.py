@@ -8,6 +8,13 @@ from blue_data.source.vector.memory_vector_source import MemoryVectorSource
 
 from blue_data_doc_source import DocumentPipeline, DummyEmbeddingModel, PlumberPDFParser
 
+# These tests build PDFs with fpdf2 and parse them with pdfplumber — both are
+# dev-only dependencies. Skip (don't error) the whole module when either is
+# missing, so a bare `pytest lib/tests/unit/` stays green. Install them with:
+#   pip install -e "lib/.[dev]"
+pytest.importorskip("fpdf", reason="fpdf2 required to build test PDFs; pip install -e 'lib/.[dev]'")
+pytest.importorskip("pdfplumber", reason="pdfplumber required by PlumberPDFParser; pip install -e 'lib/.[dev]'")
+
 
 # ---------------------------------------------------------------------------
 # Helpers — build minimal PDFs in-memory using fpdf
