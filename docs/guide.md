@@ -333,7 +333,7 @@ vs = MemoryVectorSource()
 
 # Redis Stack — production (requires redis-stack-server)
 from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
-vs = RedisVectorSource(name="docs", host="localhost", port=6379)
+vs = RedisVectorSource(name="docs", properties={"connection": {"host": "localhost", "port": 6379}})
 ```
 
 Always call `ensure_index` (or `DOCUMENT.ENSURE_INDEX`) before the first ingest. The pipeline does not auto-create the index.

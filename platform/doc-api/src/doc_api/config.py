@@ -33,8 +33,10 @@ def _build_pipeline():
         from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
         vector_source = RedisVectorSource(
             name="redis",
-            host=redis_host,
-            port=int(os.getenv("BLUE_DOC_REDIS_PORT", "6379")),
+            properties={"connection": {
+                "host": redis_host,
+                "port": int(os.getenv("BLUE_DOC_REDIS_PORT", "6379")),
+            }},
         )
 
     ocr_fallback = os.getenv("BLUE_DOC_OCR_FALLBACK", "").lower() in ("1", "true", "yes")
