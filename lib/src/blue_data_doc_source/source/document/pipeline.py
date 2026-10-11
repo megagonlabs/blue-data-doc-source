@@ -347,6 +347,9 @@ class DocumentPipeline:
         old_doc_id, old_count, old_collection = self._doc_registry[key]
         if old_doc_id == new_doc_id:
             return  # same content — upsert will overwrite in place
+        # Drop the stale structured record for the previous content-hash ID (#62),
+        # before the vector_source guard so it happens even with no vector store.
+        self.record_store.delete(old_doc_id)
         if self._graph_indexer is not None:
             self._graph_indexer.delete_document(old_doc_id)
         if self.vector_source is None:
@@ -879,6 +882,10 @@ class DocumentPipeline:
                 deleted += 1
             except Exception:
                 pass
+
+        # Remove the structured record too, so DOCUMENT.FIND can't return a
+        # document that has been deleted (#62).
+        self.record_store.delete(doc_id)
 
         if path is not None:
             self._doc_registry.pop(str(Path(path)), None)
