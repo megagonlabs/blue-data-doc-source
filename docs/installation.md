@@ -18,16 +18,16 @@
 `blue-data-doc-source` depends on `blue-data` (a sibling package in the same monorepo). Install it first, then install this package:
 
 ```bash
-pip install -e ../blue-data
+pip install -e ../blue-data/lib
 pip install -e lib/
 ```
 
 To install with optional extras:
 
 ```bash
-pip install -e ".[ocr]"   # Tesseract OCR support for scanned PDFs
-pip install -e ".[mcp]"   # MCP server support (platform/doc-mcp)
-pip install -e ".[nlp]"   # NLTK-based processing
+pip install -e "lib/.[ocr]"   # Tesseract OCR support for scanned PDFs
+pip install -e "lib/.[mcp]"   # MCP server support (platform/doc-mcp)
+pip install -e "lib/.[nlp]"   # NLTK-based processing
 ```
 
 ## Installing the REST API
@@ -45,14 +45,14 @@ blue-data-doc-api          # starts on http://localhost:8001
 pip install -e lib/
 pip install -e platform/doc-cli/
 
-doc --help
+blue-docdb --help
 ```
 
 ## Installing the MCP server
 
 ```bash
 pip install -e lib/
-pip install -e ".[mcp]"
+pip install -e "lib/.[mcp]"
 
 python platform/doc-mcp/src/server.py
 ```
@@ -111,6 +111,15 @@ export OPENAI_API_KEY=sk-...
 ---
 
 ## Running tests
+
+Install the library and dev dependencies first:
+
+```bash
+pip install -e lib/
+pip install pytest pytest-httpx
+```
+
+Then run the tests:
 
 ```bash
 # Unit tests — no external services required

@@ -8,8 +8,8 @@ Full documentation — configuration, commands, and examples — is in [platform
 
 ```bash
 pip install -e lib/ -e platform/doc-cli/
-doc ingest mydoc.txt
-doc search "termination clause"
+blue-docdb doc ingest mydoc.txt
+blue-docdb doc search "termination clause"
 ```
 
 ## Testing
