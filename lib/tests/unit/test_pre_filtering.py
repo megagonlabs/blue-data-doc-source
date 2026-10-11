@@ -26,6 +26,11 @@ class TestBuildFilterExpr:
         expr = _build_filter_expr({"document_id": "doc_abc123"})
         assert expr == "@document_id:{doc_abc123}"
 
+    def test_document_type(self):
+        # Regression (#73): document_type must build a TAG clause, not "*".
+        expr = _build_filter_expr({"document_type": "contract"})
+        assert expr == "@document_type:{contract}"
+
     def test_file_name_with_dot_escaped(self):
         expr = _build_filter_expr({"file_name": "policy.pdf"})
         assert r"\." in expr
@@ -293,3 +298,55 @@ class TestDocumentSourcePreFiltering:
             "collection": "docs",
         })
         assert isinstance(results, list)
+
+
+# ---------------------------------------------------------------------------
+# document_type pre-filter (regression for #73)
+# ---------------------------------------------------------------------------
+
+class TestDocumentTypePreFilter:
+    def _pipeline(self):
+        from blue_data_doc_source import KeywordClassifier
+
+        return DocumentPipeline(
+            embedding_model=DummyEmbeddingModel(dim=8),
+            vector_source=MemoryVectorSource(name="mem"),
+            classifier=KeywordClassifier(),
+        )
+
+    def _ingest_contract_and_invoice(self, pipeline, tmp_path):
+        contract = tmp_path / "contract.txt"
+        contract.write_text(
+            "MASTER SERVICES AGREEMENT between Acme Corp and Beta LLC (the parties). "
+            "Termination with sixty days notice. Governing law: California. "
+            "Indemnification, warranties, confidentiality, force majeure, entire agreement."
+        )
+        invoice = tmp_path / "invoice.txt"
+        invoice.write_text(
+            "INVOICE number INV-1001. Bill to: Gamma Inc. Vendor: Blue Solutions. "
+            "Subtotal $5,000. Total amount due $5,400. Due date 2026-01-31. "
+            "Payment terms net 30. Termination of services for non-payment."
+        )
+        pipeline.ensure_index()
+        assert pipeline.ingest(str(contract))[0]["document_type"] == "contract"
+        assert pipeline.ingest(str(invoice))[0]["document_type"] == "invoice"
+
+    @pytest.mark.parametrize("mode", ["vector", "hybrid", "bm25"])
+    def test_document_type_prefilter_returns_only_that_type(self, tmp_path, mode):
+        pipeline = self._pipeline()
+        self._ingest_contract_and_invoice(pipeline, tmp_path)
+        hits = pipeline.search("termination", k=10, mode=mode, filters={"document_type": "contract"})
+        assert hits, "expected at least one contract chunk"
+        assert {h["document_type"] for h in hits} == {"contract"}
+
+    def test_unknown_filter_key_raises(self, tmp_path):
+        pipeline = self._pipeline()
+        pipeline.ensure_index()
+        with pytest.raises(ValueError, match="Unknown search filter key"):
+            pipeline.search("q", filters={"section": "Intro"})  # typo for section_title
+
+    def test_illtyped_page_start_raises(self, tmp_path):
+        pipeline = self._pipeline()
+        pipeline.ensure_index()
+        with pytest.raises(ValueError, match="page_start"):
+            pipeline.search("q", filters={"page_start": "2"})
