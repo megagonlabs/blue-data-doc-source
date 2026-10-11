@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from typing import Any, get_type_hints
 
 from .base import FieldExtractor
@@ -121,6 +122,14 @@ class StructuredFieldExtractor(FieldExtractor):
             return data
 
     def extract(self, text: str, document_type: str) -> dict:
+        if len(text) > self._sample_chars:
+            warnings.warn(
+                f"StructuredFieldExtractor truncated the document to the first "
+                f"{self._sample_chars} of {len(text)} characters; fields that appear "
+                f"only after that point will be missed (see issue #63). Increase "
+                f"sample_chars to cover more of the document.",
+                stacklevel=2,
+            )
         prompt = _EXTRACTION_PROMPT.format(
             field_spec=self._field_spec,
             text=text[: self._sample_chars],

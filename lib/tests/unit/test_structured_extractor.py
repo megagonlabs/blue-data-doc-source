@@ -234,6 +234,22 @@ class TestExtract:
         prompt = call_args.kwargs["messages"][0]["content"]
         assert "A" * 11 not in prompt
 
+    def test_truncation_emits_warning(self):
+        # Regression (#63): truncation must not be silent.
+        extractor = StructuredFieldExtractor(schema=_INVOICE_SCHEMA, sample_chars=10)
+        extractor._client = _make_mock_client('{}')
+        with pytest.warns(UserWarning, match="truncated"):
+            extractor.extract("A" * 1000, "unknown")
+
+    def test_no_warning_when_within_limit(self):
+        import warnings as _w
+
+        extractor = StructuredFieldExtractor(schema=_INVOICE_SCHEMA, sample_chars=4000)
+        extractor._client = _make_mock_client('{}')
+        with _w.catch_warnings():
+            _w.simplefilter("error")  # any warning becomes an error
+            extractor.extract("short document", "unknown")  # must not raise
+
     def test_malformed_llm_response_returns_raw_response_key(self):
         extractor = self._extractor_with_mock(_LeaseInfo, "Sorry, I cannot extract that.")
         result = extractor.extract("text", "unknown")
@@ -280,3 +296,16 @@ class TestStructuredExtractorInPipeline:
         chunks = pipeline.ingest_text("Lease content here.", file_name="lease.txt")
 
         assert all(c.get("document_type") == "unknown" for c in chunks)
+
+
+# ---------------------------------------------------------------------------
+# LLMFieldExtractor truncation warning (regression for #63)
+# ---------------------------------------------------------------------------
+
+def test_llm_field_extractor_warns_on_truncation():
+    from blue_data_doc_source import LLMFieldExtractor
+
+    extractor = LLMFieldExtractor(sample_chars=10)
+    extractor._client = _make_mock_client('{}')
+    with pytest.warns(UserWarning, match="truncated"):
+        extractor.extract("A" * 1000, "contract")
