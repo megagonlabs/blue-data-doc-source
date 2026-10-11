@@ -188,4 +188,4 @@ class FileRecordStore(JsonSourceRecordStore):
         # FileJSONSource's first positional arg is ``name``; the file path lives in
         # properties["connection"]["path"] (default "registry.json"). Passing ``path``
         # positionally bound it to ``name`` and silently wrote ./registry.json instead.
-        super().__init__(FileJSONSource(properties={"connection": {"path": path}}))
+        super().__init__(FileJSONSource(name="doc_records", properties={"connection": {"path": path}}))
