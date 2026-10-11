@@ -805,14 +805,14 @@ Via `DocumentDataSource`:
 ```python
 docs = source.execute_query({
     "op": "DOCUMENT.FIND",
-    "filter": {"fields.parties": {"contains": "Acme Corp"}},
+    "filter": {"fields.governing_law": {"contains": "California"}},
 })
 ```
 
 **Two-step pattern** — combine with `DOCUMENT.SEARCH` for precise, noise-free retrieval:
 
 ```python
-docs   = pipeline.find_records({"fields.parties": {"contains": "Acme Corp"}})
+docs   = pipeline.find_records({"fields.governing_law": {"contains": "California"}})
 chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["document_id"]})
 ```
 
@@ -842,18 +842,20 @@ Filters are plain dicts. All conditions are ANDed. A missing field causes the co
 | Operator | Behaviour |
 |---|---|
 | _(no operator)_ | Exact match — case-insensitive for strings |
-| `contains` | Case-insensitive substring match |
+| `contains` | Case-insensitive substring match — **string fields only** (see note) |
 | `gt`, `lt`, `gte`, `lte` | Numeric if both sides parse as numbers; lexicographic otherwise |
+
+> **`contains` and list-valued fields (#58):** `contains` matches a substring of a **string** field. It does **not** match an element of a **list-valued** field such as `fields.parties` (`["Acme Corp", …]`) — that filter returns no matches today. Filter on a string field (e.g. `governing_law`, `vendor`) meanwhile; list-element matching (`contains` / `contains_any`) is planned.
 
 **Numeric coercion:** strips `$`, `€`, `£`, `¥`, and `,` before parsing. So `"$35,154"` → `35154.0`. Formats that don't parse (percentages, locale separators like `.` as thousands separator, parenthesized negatives like `(500)`) fall back to lexicographic string comparison — the filter will not error, but the result may be wrong.
 
 **`DOCUMENT.FIND_THEN_SEARCH`** — combines a document filter with text retrieval in one call. The pipeline runs FIND internally, searches within each matched document, and returns ranked chunks. Use this when you want content from a known subset of documents:
 
 ```python
-# "find the termination clause in Acme Corp contracts"
+# "find the termination clause in California-governed contracts"
 chunks = source.execute_query({
     "op": "DOCUMENT.FIND_THEN_SEARCH",
-    "find_filter": {"document_type": "contract", "fields.parties": {"contains": "Acme Corp"}},
+    "find_filter": {"document_type": "contract", "fields.governing_law": {"contains": "California"}},
     "query": "termination clause",
     "k": 5,
 })

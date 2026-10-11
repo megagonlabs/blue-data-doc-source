@@ -470,17 +470,17 @@ def run() -> None:
         print("  Agent task: 'Summarize the termination terms in Acme Corp's contract.'")
         print()
         print("  Step 1 — pin the document (no embedding, deterministic):")
-        print("    contracts = pipeline.find_records({'fields.parties': {'contains': 'Acme Corp'}})")
-        acme_matches = pipeline.find_records({"fields.parties": {"contains": "Acme Corp"}})
-        if not acme_matches:
-            acme_matches = pipeline.find_records({"document_type": "contract"})
-            acme_matches = [r for r in acme_matches if "acme" in str(r.get("fields", {})).lower()]
-        if acme_matches:
-            print(f"    -> matched: {acme_matches[0].get('document_type')} — {list(acme_matches[0]['fields'].get('parties', []))}")
-            target_id = acme_matches[0]["document_id"]
+        print("    contracts = pipeline.find_records({'fields.governing_law': {'contains': 'Delaware'}})")
+        # NOTE: `contains` matches string fields only; list-valued fields like
+        # fields.parties are not matched yet (issue #58). The Acme contract is
+        # the Delaware-governed one, so filter on governing_law meanwhile.
+        matches = pipeline.find_records({"fields.governing_law": {"contains": "Delaware"}})
+        if matches:
+            target_id = matches[0]["document_id"]
+            print(f"    -> matched: {matches[0].get('document_type')} (governing_law contains Delaware)")
         else:
             target_id = acme_id
-            print(f"    -> matched: acme_contract.txt")
+            print("    -> matched: acme_contract.txt")
         print()
         print("  Step 2 — retrieve the specific clause:")
         print("    chunks = pipeline.search('termination', filters={'document_id': target_id})")
@@ -708,13 +708,13 @@ def run() -> None:
     print("    DOCUMENT.FIND_THEN_SEARCH → compound: filter + search + merge in one call")
     print()
     print("  The two-step pattern:")
-    print("    docs   = pipeline.find_records({'fields.parties': {'contains': 'Acme Corp'}})")
+    print("    docs   = pipeline.find_records({'fields.governing_law': {'contains': 'Delaware'}})")
     print("    chunks = pipeline.search('termination', filters={'document_id': docs[0]['document_id']})")
     print()
     print("  Or in one call via DocumentDataSource:")
     print("    chunks = source.execute_query({")
     print("        'op': 'DOCUMENT.FIND_THEN_SEARCH',")
-    print("        'find_filter': {'fields.parties': {'contains': 'Acme Corp'}},")
+    print("        'find_filter': {'fields.governing_law': {'contains': 'Delaware'}},")
     print("        'query': 'termination',")
     print("    })")
     print()

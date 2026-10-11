@@ -237,11 +237,13 @@ DocumentRecords persist across restarts when `FileRecordStore` is used — inges
 
 ```python
 # Step 1: find by structured field — deterministic
-docs = pipeline.find_records({"fields.parties": {"contains": "Acme Corp"}})
+docs = pipeline.find_records({"fields.governing_law": {"contains": "California"}})
 
 # Step 2: retrieve text scoped to matched document only
 chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["document_id"]})
 ```
+
+> **`contains` matches string fields only.** It does a case-insensitive substring match on string-valued fields (e.g. `governing_law`, `vendor`). Matching an element of a **list-valued** field such as `fields.parties` (`["Acme Corp", …]`) is not supported yet — that filter returns no matches today (tracked in #58). Filter on a string field meanwhile.
 
 ---
 
@@ -252,7 +254,7 @@ chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["
 ```python
 chunks = source.execute_query({
     "op":         "DOCUMENT.FIND_THEN_SEARCH",
-    "find_filter": {"document_type": "contract", "fields.parties": {"contains": "Acme Corp"}},
+    "find_filter": {"document_type": "contract", "fields.governing_law": {"contains": "California"}},
     "query":      "termination clause",
     "k":          5,
 })
