@@ -127,7 +127,7 @@ Provided by `blue-data`. `DocumentPipeline` interacts only with the `VectorSourc
 
 The pipeline uses six extra index fields for pre-filtering: `document_id`, `file_name`, `section_title`, `mime_type`, `page_start`, `content_type`. These are declared in `pipeline._INDEX_EXTRA_FIELDS` and passed to `create_index` on `DOCUMENT.ENSURE_INDEX`.
 
-### GraphSource (knowledge graph)
+### GraphSource (entity / structure / provenance graph)
 
 Also provided by `blue-data`. `graph_source=None` (the default) disables graph indexing with zero overhead.
 

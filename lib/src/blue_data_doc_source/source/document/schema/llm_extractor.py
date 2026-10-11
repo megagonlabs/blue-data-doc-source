@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from typing import Any
 
 from .base import FieldExtractor
@@ -130,6 +131,14 @@ class LLMFieldExtractor(FieldExtractor):
         return self._client
 
     def extract(self, text: str, document_type: str) -> dict:
+        if len(text) > self._sample_chars:
+            warnings.warn(
+                f"LLMFieldExtractor truncated the document to the first "
+                f"{self._sample_chars} of {len(text)} characters; fields that appear "
+                f"only after that point will be missed (see issue #63). Increase "
+                f"sample_chars to cover more of the document.",
+                stacklevel=2,
+            )
         field_spec = self._field_specs.get(document_type, self._generic_spec)
         prompt = _DEFAULT_PROMPT.format(
             field_spec=field_spec,

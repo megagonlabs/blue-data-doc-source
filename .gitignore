@@ -23,6 +23,9 @@ coverage.xml
 htmlcov/
 *,cover
 
+# Stray FileJSONSource default dump (FileRecordStore / demos)
+registry.json
+
 # Benchmark reports (ephemeral; cassettes under tests/benchmarks/**/cassettes/ are committed)
 **/tests/benchmarks/**/.reports/
 

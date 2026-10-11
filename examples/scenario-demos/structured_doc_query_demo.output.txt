@@ -244,13 +244,13 @@ Summary — What vector search alone cannot do
     DOCUMENT.FIND_THEN_SEARCH → compound: filter + search + merge in one call
 
   The two-step pattern:
-    docs   = pipeline.find_records({'fields.parties': {'contains': 'Acme Corp'}})
+    docs   = pipeline.find_records({'fields.governing_law': {'contains': 'Delaware'}})
     chunks = pipeline.search('termination', filters={'document_id': docs[0]['document_id']})
 
   Or in one call via DocumentDataSource:
     chunks = source.execute_query({
         'op': 'DOCUMENT.FIND_THEN_SEARCH',
-        'find_filter': {'fields.parties': {'contains': 'Acme Corp'}},
+        'find_filter': {'fields.governing_law': {'contains': 'Delaware'}},
         'query': 'termination',
     })
 

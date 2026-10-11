@@ -132,3 +132,9 @@ pytest lib/tests/integration/ -v -m integration
 # All tests
 pytest lib/tests/ -v
 ```
+
+Install the test dependencies first (includes `pytest`, `fpdf2`, and `pdfplumber`, which the PDF/table tests require):
+
+```bash
+pip install -e "lib/.[dev]"
+```

@@ -237,11 +237,13 @@ DocumentRecords persist across restarts when `FileRecordStore` is used — inges
 
 ```python
 # Step 1: find by structured field — deterministic
-docs = pipeline.find_records({"fields.parties": {"contains": "Acme Corp"}})
+docs = pipeline.find_records({"fields.governing_law": {"contains": "California"}})
 
 # Step 2: retrieve text scoped to matched document only
 chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["document_id"]})
 ```
+
+> **`contains` matches string fields only.** It does a case-insensitive substring match on string-valued fields (e.g. `governing_law`, `vendor`). Matching an element of a **list-valued** field such as `fields.parties` (`["Acme Corp", …]`) is not supported yet — that filter returns no matches today (tracked in #58). Filter on a string field meanwhile.
 
 ---
 
@@ -252,7 +254,7 @@ chunks = pipeline.search("termination clause", filters={"document_id": docs[0]["
 ```python
 chunks = source.execute_query({
     "op":         "DOCUMENT.FIND_THEN_SEARCH",
-    "find_filter": {"document_type": "contract", "fields.parties": {"contains": "Acme Corp"}},
+    "find_filter": {"document_type": "contract", "fields.governing_law": {"contains": "California"}},
     "query":      "termination clause",
     "k":          5,
 })
@@ -840,7 +842,9 @@ See `examples/feature-demos/rich_search_demo.py` for a runnable side-by-side com
 
 ## Graph backend — entity-centric retrieval and structural navigation
 
-Pass any blue-data `GraphSource` as `graph_source=` to populate a knowledge graph automatically during every ingest. The graph layer is optional — omit `graph_source` and the pipeline is unchanged.
+Pass any blue-data `GraphSource` as `graph_source=` to populate a graph automatically during every ingest. The graph layer is optional — omit `graph_source` and the pipeline is unchanged.
+
+> **What the graph is — and isn't.** This is an **entity / structure / provenance graph**, not a semantic knowledge graph. It captures document structure (`HAS_SECTION`, `HAS_CHUNK`, `NEXT`/`PREV` reading order), entity mentions (`MENTIONS`, `APPEARS_IN`), and entity co-occurrence (`CO_OCCURS_WITH`) — using the entities extracted by the enricher. It does **not** index the subject/predicate/object relationships that `LLMEnricher` extracts: those are stored on each chunk's `semantic_hints["relationships"]`, but are not written as graph edges. Indexing them as typed edges (with provenance and confidence) is future work (#65).
 
 ### Full graph schema
 

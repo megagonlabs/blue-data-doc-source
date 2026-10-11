@@ -79,3 +79,68 @@ def test_reingest_same_file_no_duplicates(source, tmp_path):
 
     assert first[0]["document_id"] == second[0]["document_id"]
     assert first[0]["chunk_id"] == second[0]["chunk_id"]
+
+
+@requires_redis
+def test_document_type_prefilter_against_redis(redis_source, tmp_path):
+    """Regression (#73): the document_type TAG must filter against a real Redis index.
+
+    Exercises the Redis-specific half (`$.document_type` in `_INDEX_EXTRA_FIELDS`)
+    that the in-memory unit tests cannot cover. Drops the index first so the fresh
+    schema (with document_type) is applied — existing indexes lack the new field.
+    """
+    import redis as _redis
+    from blue_data_doc_source import KeywordClassifier
+
+    coll = "test_doctype_filter"
+    client = _redis.Redis(host="localhost", port=6379)
+    try:
+        client.execute_command("FT.DROPINDEX", coll, "DD")  # best-effort: fresh schema
+    except _redis.exceptions.ResponseError:
+        pass  # index didn't exist
+
+    source = DocumentDataSource(
+        name="test_doctype_source",
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=redis_source,
+        classifier=KeywordClassifier(),
+        default_collection=coll,
+    )
+    source.execute_query({"op": "DOCUMENT.ENSURE_INDEX", "collection": coll})
+
+    contract = tmp_path / "contract.txt"
+    contract.write_text(
+        "MASTER SERVICES AGREEMENT between Acme Corp and Beta LLC (the parties). "
+        "Termination with sixty days notice. Governing law: California. "
+        "Indemnification, warranties, confidentiality, force majeure, entire agreement.",
+        encoding="utf-8",
+    )
+    invoice = tmp_path / "invoice.txt"
+    invoice.write_text(
+        "INVOICE number INV-1001. Bill to: Gamma Inc. Vendor: Blue Solutions. "
+        "Total amount due $5,400. Due date 2026-01-31. Payment terms net 30. "
+        "Termination of services for non-payment.",
+        encoding="utf-8",
+    )
+    contract_id = source.ingest_text(contract.read_text(), file_name="contract.txt")[0]["document_id"]
+    invoice_id = source.ingest_text(invoice.read_text(), file_name="invoice.txt")[0]["document_id"]
+    assert contract_id != invoice_id
+
+    def ids(filt):
+        query = {"op": "DOCUMENT.SEARCH", "query": "termination", "collection": coll, "k": 10}
+        if filt is not None:
+            query["filter"] = filt
+        # Redis search hits carry {id, score}; the id embeds the chunk's document_id.
+        return [h["id"] for h in source.execute_query(query)]
+
+    # No filter → both documents mention "termination", so both should appear.
+    unfiltered = ids(None)
+    assert any(contract_id in i for i in unfiltered)
+    assert any(invoice_id in i for i in unfiltered)
+
+    # document_type pre-filter must restrict results to the matching type only.
+    contract_hits = ids({"document_type": "contract"})
+    assert contract_hits and all(contract_id in i and invoice_id not in i for i in contract_hits)
+
+    invoice_hits = ids({"document_type": "invoice"})
+    assert invoice_hits and all(invoice_id in i and contract_id not in i for i in invoice_hits)
