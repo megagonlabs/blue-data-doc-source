@@ -174,6 +174,28 @@ class TestFileRecordStore:
         store = FileRecordStore(path)
         assert store.find() == []
 
+    def test_uses_given_path_not_shared_default(self):
+        # Regression: FileRecordStore(path) must persist to `path`, not to a shared
+        # ./registry.json in the CWD (FileJSONSource's first positional arg is `name`,
+        # not the path). Two stores at different paths must be independent.
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as fa:
+            path_a = fa.name
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as fb:
+            path_b = fb.name
+        os.unlink(path_a)
+        os.unlink(path_b)
+        try:
+            store_a = FileRecordStore(path_a)
+            store_a.upsert(CONTRACT_A)
+            assert os.path.exists(path_a)          # wrote to the given path
+            store_b = FileRecordStore(path_b)       # different path → independent
+            assert store_b.find() == []
+            assert store_b.get("doc_contract_a") is None
+        finally:
+            for p in (path_a, path_b):
+                if os.path.exists(p):
+                    os.unlink(p)
+
     def test_find_works_after_reload(self):
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             path = f.name
@@ -498,7 +520,7 @@ class TestJsonSourceRecordStoreMemory:
 
 class TestJsonSourceRecordStoreFile:
     def _store(self, path):
-        return JsonSourceRecordStore(FileJSONSource(path))
+        return JsonSourceRecordStore(FileJSONSource(properties={"connection": {"path": path}}))
 
     def test_persists_across_instances(self):
         with tempfile.TemporaryDirectory() as d:
