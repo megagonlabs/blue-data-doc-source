@@ -916,7 +916,8 @@ source = DocumentDataSource(
 results = source.execute_query_nl("find the termination clause in the contracts collection")
 # NLQueryParser maps this to: {"op": "DOCUMENT.SEARCH", "query": "termination clause", "collection": "contracts"}
 
-records = source.execute_query_nl("ingest /docs/policy.pdf into contracts")
+# State-changing ops require explicit opt-in; read-only by default (#79)
+records = source.execute_query_nl("ingest /docs/policy.pdf into contracts", allow_write_ops=True)
 # Maps to: {"op": "DOCUMENT.INGEST", "path": "/docs/policy.pdf", "collection": "contracts"}
 ```
 
@@ -927,6 +928,8 @@ parser = NLQueryParser(parse_fn=lambda text: my_llm_call(text))
 ```
 
 **NLQueryParser supported ops:** `DOCUMENT.SEARCH`, `DOCUMENT.INGEST`, `DOCUMENT.DELETE`, `DOCUMENT.ENSURE_INDEX`, `DOCUMENT.FIND`, and `DOCUMENT.FIND_THEN_SEARCH`. `DOCUMENT.GET_RECORD` requires `execute_query` with a structured op dict — it needs an exact `document_id` which natural language cannot reliably supply.
+
+**Read-only by default (security).** Because natural-language input is untrusted (a user question, or text an agent forwards from a retrieved document), `execute_query_nl` dispatches only read-only ops (`SEARCH`, `FIND`, `FIND_THEN_SEARCH`, `GET_RECORD`, `GRAPH_*`) by default and raises `ValueError` on a state-changing op. Pass `allow_write_ops=True` to permit `INGEST`, `DELETE`, and `ENSURE_INDEX` — only for trusted callers (#79).
 
 ---
 

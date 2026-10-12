@@ -44,12 +44,34 @@ def test_execute_query_nl_dispatches_search():
     assert results == []
 
 
-def test_execute_query_nl_dispatches_ingest(tmp_path):
+def test_execute_query_nl_dispatches_ingest_with_opt_in(tmp_path):
+    # Write ops require explicit allow_write_ops=True (#79).
     path = make_txt(tmp_path)
     parser = NLQueryParser(parse_fn=lambda text: {"op": "DOCUMENT.INGEST", "path": path})
     source = DocumentDataSource(chunk_size=5, overlap=1, nl_parser=parser)
-    records = source.execute_query_nl(f"ingest {path}")
+    records = source.execute_query_nl(f"ingest {path}", allow_write_ops=True)
     assert len(records) > 0
+
+
+def test_execute_query_nl_rejects_write_ops_by_default(tmp_path):
+    # Regression (#79): untrusted NL input must not trigger state-changing ops.
+    path = make_txt(tmp_path)
+    for op_dict in (
+        {"op": "DOCUMENT.INGEST", "path": path},
+        {"op": "DOCUMENT.DELETE", "path": path},
+        {"op": "DOCUMENT.ENSURE_INDEX"},
+    ):
+        parser = NLQueryParser(parse_fn=lambda text, d=op_dict: d)
+        source = DocumentDataSource(chunk_size=5, overlap=1, nl_parser=parser)
+        with pytest.raises(ValueError, match="read-only"):
+            source.execute_query_nl("please do it")
+
+
+def test_execute_query_nl_rejects_invalid_op_dict():
+    parser = NLQueryParser(parse_fn=lambda text: {"not_an_op": True})
+    source = DocumentDataSource(nl_parser=parser)
+    with pytest.raises(ValueError, match="invalid op dict"):
+        source.execute_query_nl("whatever")
 
 
 def test_execute_query_nl_without_parser_raises():
