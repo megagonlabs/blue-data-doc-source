@@ -25,6 +25,13 @@ def redis_source():
 
 @pytest.fixture
 def source(redis_source):
+    # Drop any pre-existing index so each run recreates it with the current
+    # schema — index-field changes (e.g. #71's text/chunk_id) require recreation.
+    import redis as _redis
+    try:
+        _redis.Redis(host="localhost", port=6379).execute_command("FT.DROPINDEX", COLLECTION, "DD")
+    except _redis.exceptions.ResponseError:
+        pass
     return DocumentDataSource(
         name="test_source",
         embedding_model=DummyEmbeddingModel(dim=8),
@@ -64,7 +71,12 @@ def test_ingest_and_search(source, tmp_path):
         "collection": COLLECTION,
         "k": 5,
     })
-    assert isinstance(results, list)
+    # Regression (#71): Redis search must return chunk content, not just {id, score}.
+    assert isinstance(results, list) and results, "Redis search returned no hits"
+    top = results[0]
+    assert top.get("text"), "hit is missing chunk text"
+    assert top.get("chunk_id"), "hit is missing chunk_id"
+    assert isinstance(top.get("score"), (int, float)), "score should be numeric"
 
 
 @requires_redis

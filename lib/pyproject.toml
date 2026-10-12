@@ -18,7 +18,10 @@ dependencies = [
     "openai>=1.0.0",
     "pypdf>=4.0.0",
     "python-docx>=1.0.0",
-    "redis[hiredis]>=4.5.0",
+    # Upper-bounded: redis-py 8+ defaults to RESP3, which blue-data's
+    # RedisVectorSource does not yet parse (FT.SEARCH returns a dict → empty
+    # results). Keep RESP2 until blue-data handles RESP3. See issue #71.
+    "redis[hiredis]>=4.5.0,<8",
 ]
 
 [project.optional-dependencies]
