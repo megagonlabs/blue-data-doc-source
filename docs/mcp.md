@@ -1,6 +1,6 @@
 # MCP Server
 
-The MCP server exposes blue-data-doc-source as four AI-callable tools over the Model Context Protocol. Any MCP-compatible agent — Claude Desktop, Claude Code, or a custom agent using the MCP SDK — can ingest documents, search them, and manage the vector index without any custom integration code.
+The MCP server exposes blue-data-doc-source as AI-callable tools over the Model Context Protocol. Any MCP-compatible agent — Claude Desktop, Claude Code, or a custom agent using the MCP SDK — can ingest documents, search them, filter by extracted fields, retrieve records, traverse the entity graph, and manage the vector index without any custom integration code.
 
 ## Tools
 
@@ -9,7 +9,14 @@ The MCP server exposes blue-data-doc-source as four AI-callable tools over the M
 | `ensure_index` | `DOCUMENT.ENSURE_INDEX` | Create the vector index before first ingest |
 | `ingest_document` | `DOCUMENT.INGEST` | Parse, chunk, enrich, embed, and upsert a document |
 | `search_documents` | `DOCUMENT.SEARCH` | Semantic search over ingested documents |
+| `find_documents` | `DOCUMENT.FIND` | Filter documents by extracted fields — deterministic, no embedding/LLM |
+| `find_then_search` | `DOCUMENT.FIND_THEN_SEARCH` | Filter documents by fields, then search text within the matches |
+| `get_document_record` | `DOCUMENT.GET_RECORD` | Retrieve a document's structured record (type, confidence, extracted fields) |
+| `graph_neighbors` | `DOCUMENT.GRAPH_NEIGHBORS` | Find chunks mentioning an entity via the graph (requires `BLUE_DOC_GRAPH=1`) |
+| `graph_query` | `DOCUMENT.GRAPH_QUERY` | Traverse the entity/structure graph from any node (requires `BLUE_DOC_GRAPH=1`) |
 | `delete_document` | `DOCUMENT.DELETE` | Remove all chunks for a document from the vector store |
+
+`find_documents` / `get_document_record` work without a vector store (they read the per-document record store); `find_then_search` and `search_documents` require one. The graph tools require `BLUE_DOC_GRAPH=1`.
 
 ## Installation
 
@@ -39,6 +46,7 @@ All configuration is via environment variables:
 | `BLUE_DOC_CHUNK_SIZE` | `1000` | Max words per chunk |
 | `BLUE_DOC_OVERLAP` | `150` | Word overlap between chunks |
 | `BLUE_DOC_OCR_FALLBACK` | — | Set to `1` or `true` to enable Tesseract OCR on scanned PDFs |
+| `BLUE_DOC_GRAPH` | — | Set to `1` or `true` to enable the entity graph (`graph_neighbors` / `graph_query` tools) |
 
 ## Running with Claude Desktop
 
@@ -62,7 +70,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-Restart Claude Desktop after saving. The four tools will appear in the tool picker.
+Restart Claude Desktop after saving. The tools will appear in the tool picker.
 
 ## Running with Claude Code
 

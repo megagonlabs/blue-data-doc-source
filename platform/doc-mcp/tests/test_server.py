@@ -333,3 +333,79 @@ def test_server_imports_against_installed_mcp_sdk(monkeypatch):
     assert {"ingest_document", "search_documents", "ensure_index", "delete_document"} <= tools
     # a tool is callable against the real SDK (no vector store → structured error)
     assert "error" in json.loads(mod.search_documents("q"))
+
+
+# ── structured + graph tools (regression for #66) ─────────────────────────────
+
+def test_find_documents_returns_records():
+    recs = [{"document_id": "doc_a", "document_type": "contract", "fields": {}}]
+    pipeline = _mock_pipeline(find_records=MagicMock(return_value=recs))
+    with patch.object(_server, "_pipeline", pipeline):
+        result = json.loads(_server.find_documents({"document_type": "contract"}))
+    assert result["count"] == 1
+    assert result["records"][0]["document_type"] == "contract"
+    pipeline.find_records.assert_called_once_with({"document_type": "contract"})
+
+
+def test_find_documents_respects_limit():
+    recs = [{"document_id": f"doc_{i}"} for i in range(10)]
+    pipeline = _mock_pipeline(find_records=MagicMock(return_value=recs))
+    with patch.object(_server, "_pipeline", pipeline):
+        result = json.loads(_server.find_documents(limit=3))
+    assert result["count"] == 3
+    assert len(result["records"]) == 3
+
+
+def test_find_then_search_merges_scoped_results():
+    matched = [{"document_id": "doc_a"}]
+    chunk = _make_chunk(doc_id="doc_a", idx=0)
+    chunk["score"] = 0.9
+    pipeline = _mock_pipeline(
+        find_records=MagicMock(return_value=matched),
+        search=MagicMock(return_value=[chunk]),
+    )
+    with patch.object(_server, "_pipeline", pipeline):
+        result = json.loads(_server.find_then_search("termination", {"document_type": "contract"}, k=3))
+    assert result["count"] == 1
+    assert result["results"][0]["chunk_id"] == "doc_a_chunk_000000"
+
+
+def test_find_then_search_no_matches_returns_empty():
+    pipeline = _mock_pipeline(find_records=MagicMock(return_value=[]))
+    with patch.object(_server, "_pipeline", pipeline):
+        result = json.loads(_server.find_then_search("x", {"document_type": "nope"}))
+    assert result == {"results": [], "count": 0}
+
+
+def test_get_document_record_returns_record():
+    pipeline = _mock_pipeline(
+        get_record=MagicMock(return_value={"document_id": "doc_a", "document_type": "contract"})
+    )
+    with patch.object(_server, "_pipeline", pipeline):
+        result = json.loads(_server.get_document_record("doc_a"))
+    assert result["document_type"] == "contract"
+
+
+def test_get_document_record_missing_returns_error():
+    pipeline = _mock_pipeline(get_record=MagicMock(return_value=None))
+    with patch.object(_server, "_pipeline", pipeline):
+        result = json.loads(_server.get_document_record("nope"))
+    assert "error" in result
+
+
+def test_graph_neighbors_returns_neighbors():
+    pipeline = _mock_pipeline(
+        graph_neighbors=MagicMock(return_value=[{"chunk_id": "c1", "entity": "Acme"}])
+    )
+    with patch.object(_server, "_pipeline", pipeline):
+        result = json.loads(_server.graph_neighbors("Acme"))
+    assert result["count"] == 1
+
+
+def test_graph_neighbors_without_graph_returns_error():
+    pipeline = _mock_pipeline(
+        graph_neighbors=MagicMock(side_effect=ValueError("graph_neighbors requires a graph_source"))
+    )
+    with patch.object(_server, "_pipeline", pipeline):
+        result = json.loads(_server.graph_neighbors("Acme"))
+    assert "error" in result
