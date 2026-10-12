@@ -306,3 +306,30 @@ def test_build_pipeline_with_redis_can_ensure_index(monkeypatch):
     pipeline = _server._build_pipeline()
     assert type(pipeline.vector_source).__name__ == "RedisVectorSource"
     pipeline.ensure_index(collection=coll)  # must not raise — scan_prefix now present
+
+
+# ── real-SDK import smoke test (regression for #76) ───────────────────────────
+
+def _load_server_real():
+    """Load server.py against the *installed* MCP SDK (no stub)."""
+    spec = importlib.util.spec_from_file_location("_blue_doc_mcp_server_real", _SERVER_PATH)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_server_imports_against_installed_mcp_sdk(monkeypatch):
+    # Regression (#76): a fresh install must import the server against the real MCP
+    # SDK. mcp 2.x removed mcp.server.fastmcp, so an unpinned mcp>=1.0.0 resolves to
+    # 2.x and `from mcp.server.fastmcp import FastMCP` fails at import. The other
+    # tests stub the SDK and never catch this. Skip only when no MCP SDK is present.
+    import asyncio
+
+    pytest.importorskip("mcp")
+    monkeypatch.delenv("BLUE_DOC_REDIS_HOST", raising=False)
+    mod = _load_server_real()  # raises on mcp 2.x (fastmcp removed) → surfaces #76
+    tools = {t.name for t in asyncio.run(mod.mcp.list_tools())}
+    # the core tools must be registered against the real SDK (more may exist)
+    assert {"ingest_document", "search_documents", "ensure_index", "delete_document"} <= tools
+    # a tool is callable against the real SDK (no vector store → structured error)
+    assert "error" in json.loads(mod.search_documents("q"))
