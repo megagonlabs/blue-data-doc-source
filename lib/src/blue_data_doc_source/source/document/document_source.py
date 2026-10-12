@@ -16,6 +16,21 @@ if TYPE_CHECKING:
     from blue_data.source.graph.graph_source import GraphSource
 
 
+# Ops a natural-language query may trigger by default. State-changing ops
+# (INGEST, DELETE, ENSURE_INDEX) are excluded so that untrusted text routed
+# through execute_query_nl — an end-user question, or text an agent forwards
+# from a retrieved document — cannot mutate state. Opt in with
+# ``allow_write_ops=True``. See issue #79.
+_READ_ONLY_NL_OPS = frozenset({
+    "DOCUMENT.SEARCH",
+    "DOCUMENT.FIND",
+    "DOCUMENT.FIND_THEN_SEARCH",
+    "DOCUMENT.GET_RECORD",
+    "DOCUMENT.GRAPH_NEIGHBORS",
+    "DOCUMENT.GRAPH_QUERY",
+})
+
+
 class DocumentDataSource(DataSource):
     """Top-level entry point for document ingestion and retrieval.
 
@@ -234,7 +249,7 @@ class DocumentDataSource(DataSource):
         collection = collection_override or request.get("collection")
         self._pipeline.ensure_index(collection=collection)
 
-    def execute_query_nl(self, query: str, database=None, collection=None, schema=None, llm_fn=None, optional_properties=None):
+    def execute_query_nl(self, query: str, database=None, collection=None, schema=None, llm_fn=None, optional_properties=None, allow_write_ops: bool = False):
         """Parse a natural language instruction and execute the corresponding op.
 
         Requires an ``NLQueryParser`` passed as ``nl_parser`` at construction time.
@@ -242,15 +257,27 @@ class DocumentDataSource(DataSource):
         ``DataSource`` ABC contract but are not used — doc-source uses its own
         ``NLQueryParser`` for intent extraction.
 
+        **Security:** natural-language input is untrusted — it may be an end-user
+        question or text an agent forwards from a retrieved document. By default
+        only read-only ops (``SEARCH``, ``FIND``, ``FIND_THEN_SEARCH``,
+        ``GET_RECORD``, ``GRAPH_*``) are permitted, so a prompt-injected
+        instruction cannot ingest an arbitrary path or delete documents. Set
+        ``allow_write_ops=True`` to permit state-changing ops (``INGEST``,
+        ``DELETE``, ``ENSURE_INDEX``) — only for trusted callers.
+
         Args:
             query: Natural language instruction, e.g.
                 ``"find the termination clause in the contracts collection"``.
+            allow_write_ops: When ``True``, permit state-changing ops. Defaults
+                to ``False`` (read-only).
 
         Returns:
             The result of the dispatched ``execute_query`` call.
 
         Raises:
-            ValueError: If no ``nl_parser`` was provided at construction.
+            ValueError: If no ``nl_parser`` was provided, if the parser returns an
+                invalid op dict, or if the parsed op is state-changing and
+                ``allow_write_ops`` is ``False``.
         """
         if self._nl_parser is None:
             raise ValueError(
@@ -258,6 +285,15 @@ class DocumentDataSource(DataSource):
                 "Pass NLQueryParser() as nl_parser= when constructing DocumentDataSource."
             )
         op_dict = self._nl_parser.parse(query)
+        if not isinstance(op_dict, dict) or not isinstance(op_dict.get("op"), str):
+            raise ValueError(f"NLQueryParser returned an invalid op dict: {op_dict!r}")
+        op = op_dict["op"]
+        if not allow_write_ops and op not in _READ_ONLY_NL_OPS:
+            raise ValueError(
+                f"Natural-language queries are restricted to read-only ops by default; "
+                f"{op!r} is not permitted. Pass allow_write_ops=True to allow "
+                f"state-changing ops (DOCUMENT.INGEST, DOCUMENT.DELETE, DOCUMENT.ENSURE_INDEX)."
+            )
         return self.execute_query(
             op_dict,
             database=database,

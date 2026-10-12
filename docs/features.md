@@ -430,11 +430,15 @@ source = DocumentDataSource(
     nl_parser=NLQueryParser(),          # uses GPT-4o-mini by default
 )
 
-# NLQueryParser maps these to DOCUMENT.SEARCH, DOCUMENT.INGEST, DOCUMENT.DELETE
+# Read-only by default: SEARCH, FIND, FIND_THEN_SEARCH, GET_RECORD, GRAPH_*
 results = source.execute_query_nl("find the termination clause")
-records = source.execute_query_nl("ingest /docs/policy.pdf into contracts")
-source.execute_query_nl("delete report.txt from reports")
+
+# State-changing ops (INGEST, DELETE, ENSURE_INDEX) require explicit opt-in
+records = source.execute_query_nl("ingest /docs/policy.pdf into contracts", allow_write_ops=True)
+source.execute_query_nl("delete report.txt from reports", allow_write_ops=True)
 ```
+
+> **Security — natural-language input is untrusted.** A query passed to `execute_query_nl` may be an end-user question or text an agent forwards from a retrieved document, so a prompt-injected instruction could otherwise ingest an arbitrary path or delete documents. By default only **read-only** ops are permitted; `execute_query_nl` raises `ValueError` if the parsed op is state-changing. Pass `allow_write_ops=True` only for trusted callers (#79).
 
 Inject any `(str) -> dict` callable to use a different LLM or run without an API key:
 
