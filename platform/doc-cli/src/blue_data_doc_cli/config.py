@@ -52,6 +52,9 @@ def _build_pipeline() -> DocumentPipeline:
             properties={"connection": {
                 "host": redis_host,
                 "port": int(os.getenv("BLUE_DOC_REDIS_PORT", "6379")),
+                # Required by blue-data's create_index; also namespaces keys
+                # (without it, keys are prefixed with the literal "None"). See #70.
+                "scan_prefix": os.getenv("BLUE_DOC_REDIS_PREFIX", "bluedoc"),
             }},
         )
 

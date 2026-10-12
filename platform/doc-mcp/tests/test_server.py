@@ -276,3 +276,33 @@ def test_build_pipeline_with_redis_constructs_vector_source(monkeypatch):
     monkeypatch.setenv("BLUE_DOC_REDIS_PORT", "6379")
     pipeline = _server._build_pipeline()
     assert type(pipeline.vector_source).__name__ == "RedisVectorSource"
+
+
+def _redis_available() -> bool:
+    import socket
+    s = socket.socket()
+    s.settimeout(0.2)
+    try:
+        return s.connect_ex(("localhost", 6379)) == 0
+    finally:
+        s.close()
+
+
+@pytest.mark.skipif(not _redis_available(), reason="Redis not available on localhost:6379")
+def test_build_pipeline_with_redis_can_ensure_index(monkeypatch):
+    # Regression (#70): the real Redis-backed pipeline must not only build but also
+    # create an index — blue-data's create_index requires scan_prefix in the
+    # connection properties. Earlier tests patch or skip this path, so the missing
+    # scan_prefix went unnoticed (ensure_index raised "requires ... scan_prefix").
+    import redis
+
+    monkeypatch.setenv("BLUE_DOC_REDIS_HOST", "localhost")
+    monkeypatch.setenv("BLUE_DOC_REDIS_PORT", "6379")
+    coll = "test_platform_smoke_70"
+    try:
+        redis.Redis(host="localhost", port=6379).execute_command("FT.DROPINDEX", coll, "DD")
+    except Exception:
+        pass
+    pipeline = _server._build_pipeline()
+    assert type(pipeline.vector_source).__name__ == "RedisVectorSource"
+    pipeline.ensure_index(collection=coll)  # must not raise — scan_prefix now present
