@@ -29,15 +29,28 @@ _FILTER_TAG_FIELDS = ("document_id", "document_type", "file_name", "section_titl
 # All filter keys accepted by search(): the TAG fields plus the numeric page range.
 _ALLOWED_FILTER_KEYS = set(_FILTER_TAG_FIELDS) | {"page_start"}
 
-# Extra fields passed to create_index so Redis Search can filter on them.
+# Extra fields passed to create_index so Redis Search can (a) filter on them and
+# (b) project chunk content back on search — a Redis FT.SEARCH RETURN can only
+# return *indexed* fields, so chunk_id/text must be indexed for search() to carry
+# content rather than just {id, score} (#71).
 _INDEX_EXTRA_FIELDS = [
+    {"path": "$.chunk_id",      "name": "chunk_id",      "field_type": "TAG"},
     {"path": "$.document_id",   "name": "document_id",   "field_type": "TAG"},
     {"path": "$.document_type", "name": "document_type", "field_type": "TAG"},
     {"path": "$.file_name",     "name": "file_name",     "field_type": "TAG"},
     {"path": "$.section_title", "name": "section_title", "field_type": "TAG"},
     {"path": "$.mime_type",     "name": "mime_type",     "field_type": "TAG"},
     {"path": "$.page_start",    "name": "page_start",    "field_type": "NUMERIC"},
+    {"path": "$.page_end",      "name": "page_end",      "field_type": "NUMERIC"},
     {"path": "$.content_type",  "name": "content_type",  "field_type": "TAG"},
+    {"path": "$.text",          "name": "text",          "field_type": "TEXT"},
+]
+
+# Fields projected back from the vector store on every search so hits carry chunk
+# content + provenance, not just {id, score} (#71). Each must be indexed above.
+_SEARCH_RETURN_FIELDS = [
+    "chunk_id", "text", "document_id", "document_type", "file_name",
+    "section_title", "page_start", "page_end", "mime_type", "content_type",
 ]
 
 
@@ -118,6 +131,29 @@ def _build_filter_expr(filters: Optional[Dict[str, Any]]) -> str:
     if len(parts) == 1:
         return parts[0]
     return " ".join(f"({p})" for p in parts)
+
+
+def _normalize_knn_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Normalise raw vector-store hits so each carries a ``chunk_id`` and float ``score``.
+
+    blue-data's RedisVectorSource returns the Redis key as ``id`` and the score as a
+    string; projected fields (incl. ``chunk_id``) are present only when requested via
+    ``return_fields``. Derive ``chunk_id`` from the key when absent and coerce ``score``
+    to float so downstream dedup (FIND_THEN_SEARCH) and ranking work (#71). In-memory
+    backends already return full dicts with a numeric score, so this is a no-op there.
+    """
+    for hit in hits:
+        if not hit.get("chunk_id"):
+            key = hit.get("id")
+            if isinstance(key, str) and key:
+                hit["chunk_id"] = key.rsplit(":", 1)[-1]
+        score = hit.get("score")
+        if isinstance(score, str):
+            try:
+                hit["score"] = float(score)
+            except ValueError:
+                pass
+    return hits
 
 
 class DocumentPipeline:
@@ -1108,30 +1144,33 @@ class DocumentPipeline:
             query_vector = self.embedding_model.embed_text(query)
 
             if mode == "vector":
-                raw = self.vector_source.knn(
+                raw = _normalize_knn_hits(self.vector_source.knn(
                     index_name=target,
                     query_vector=query_vector,
                     k=k,
                     filter_expr=_build_filter_expr(filters),
-                )
+                    return_fields=_SEARCH_RETURN_FIELDS,
+                ))
             else:
                 # hybrid: RRF fusion of vector KNN + BM25
                 bm25_scores = self._bm25_candidates(query, target, filters)
                 if not bm25_scores:
-                    raw = self.vector_source.knn(
+                    raw = _normalize_knn_hits(self.vector_source.knn(
                         index_name=target,
                         query_vector=query_vector,
                         k=k,
                         filter_expr=_build_filter_expr(filters),
-                    )
+                        return_fields=_SEARCH_RETURN_FIELDS,
+                    ))
                 else:
                     k_vec = max(k * 3, 20)
-                    vec_results = self.vector_source.knn(
+                    vec_results = _normalize_knn_hits(self.vector_source.knn(
                         index_name=target,
                         query_vector=query_vector,
                         k=k_vec,
                         filter_expr=_build_filter_expr(filters),
-                    )
+                        return_fields=_SEARCH_RETURN_FIELDS,
+                    ))
                     vec_rank: Dict[str, int] = {
                         r.get("chunk_id", ""): i + 1
                         for i, r in enumerate(vec_results)
