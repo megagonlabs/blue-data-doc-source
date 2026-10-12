@@ -9,7 +9,8 @@ description = "MCP server for blue-data-doc-source"
 requires-python = ">=3.10"
 dependencies = [
     "blue-data-doc-source>=0.1.0",
-    "mcp>=1.0.0",
+    # mcp 2.x removed mcp.server.fastmcp; server.py targets the v1 FastMCP API. See #76.
+    "mcp>=1.2,<2",
 ]
 
 [project.optional-dependencies]
