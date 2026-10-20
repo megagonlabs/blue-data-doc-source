@@ -35,7 +35,7 @@ nlp = [
 mcp = [
     # Upper-bounded: mcp 2.x removed mcp.server.fastmcp (FastMCP → MCPServer), and
     # the MCP server targets the v1 FastMCP API. Keep v1 until it's ported. See #76.
-    "mcp>=1.2,<2",
+    "mcp>=1.28.1,<2",
 ]
 dev = [
     "pytest>=7.0",
