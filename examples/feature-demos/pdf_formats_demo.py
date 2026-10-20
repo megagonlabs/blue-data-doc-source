@@ -40,22 +40,36 @@ def _section(title: str):
 
 
 def _check_data_files():
-    needed = [
+    # Synthetic sample PDFs are produced by the data/ generator scripts.
+    generated = [
         "sample_table_invoice.pdf",
         "sample_mixed_content.pdf",
         "sample_multipage_tables.pdf",
-        "real_research_paper.pdf",
-        "real_annual_report.pdf",
         "sample_scanned_minutes.pdf",
     ]
-    missing = [f for f in needed if not (DATA / f).exists()]
+    missing = [f for f in generated if not (DATA / f).exists()]
     if missing:
-        print("Missing data files. Generate them first:")
+        print("Missing generated data files. Generate them first:")
         print("  python3 data/_generate_realistic_pdfs.py")
         print("  python3 data/_generate_scanned_pdf.py")
         for f in missing:
             print(f"  missing: {f}")
         sys.exit(1)
+
+
+def _require_real_doc(name: str) -> bool:
+    """Check for a real, third-party example document.
+
+    These documents (an arXiv paper, a public annual report) are not committed to
+    the repo — they are downloaded on demand (see the README "Disclosures" section).
+    Returns True when present; otherwise prints a skip note and returns False so the
+    demo step can be skipped rather than crashing.
+    """
+    if (DATA / name).exists():
+        return True
+    print(f"Skipped — third-party document '{name}' is not present.")
+    print("  Fetch the example documents with: python scripts/fetch_fixtures.py")
+    return False
 
 
 def step1_table_invoice(pipeline):
@@ -111,6 +125,8 @@ def step3_multipage(pipeline):
 
 def step4_real_research(pipeline):
     _section("Step 4 — Real arXiv paper: Attention Is All You Need (real_research_paper.pdf)")
+    if not _require_real_doc("real_research_paper.pdf"):
+        return
     print("15-page research paper. Multi-column layout, equations, figure captions,")
     print("references. pypdf merges columns into a single text stream per page.\n")
 
@@ -131,6 +147,8 @@ def step4_real_research(pipeline):
 
 def step5_real_annual_report(pipeline):
     _section("Step 5 — Real annual report: Berkshire Hathaway 2023 (real_annual_report.pdf)")
+    if not _require_real_doc("real_annual_report.pdf"):
+        return
     print("150-page financial report. Dense tables, footnotes, letter from Warren Buffett.")
     print("Tests pipeline stability on a large real-world document.\n")
 
