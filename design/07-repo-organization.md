@@ -29,11 +29,10 @@ blue-data-doc-source/
 │   ├── sample_contract.pdf
 │   ├── sample_invoice.pdf
 │   ├── sample_research.pdf
-│   ├── real_annual_report.pdf           # real documents for integration benchmarks
-│   ├── real_financial_report.pdf
-│   ├── real_research_paper.pdf
-│   ├── real_scanned_doc.pdf
-│   └── _generate_*.py                   # scripts that generated the fixture PDFs
+│   ├── real_annual_report.pdf           # real third-party docs — NOT committed; fetched
+│   ├── real_research_paper.pdf          #   on demand via scripts/fetch_fixtures.py
+│   │                                    #   (git-ignored; see README "Disclosures")
+│   └── _generate_*.py                   # scripts that generated the sample_* fixture PDFs
 │
 ├── examples/                            # runnable demos (most need no API key)
 │   ├── README.md
