@@ -74,10 +74,21 @@ def test_execute_query_nl_rejects_invalid_op_dict():
         source.execute_query_nl("whatever")
 
 
-def test_execute_query_nl_without_parser_raises():
-    source = DocumentDataSource()
-    with pytest.raises(ValueError, match="nl_parser"):
-        source.execute_query_nl("find something")
+def test_execute_query_nl_lazily_builds_parser(monkeypatch):
+    # With no nl_parser injected, execute_query_nl must lazily build a default one
+    # (not raise), so a registry-hosted source rebuilt from properties can still be
+    # driven by natural language (DataSource contract, #132).
+    source = DocumentDataSource(
+        "t", properties={"embedding": "dummy", "vector": "memory", "collection": "t"}
+    )
+    source.execute_query({"op": "DOCUMENT.ENSURE_INDEX", "collection": "t"})
+    monkeypatch.setattr(
+        NLQueryParser, "parse",
+        lambda self, text: {"op": "DOCUMENT.SEARCH", "query": text},
+    )
+    out = source.execute_query_nl("find something")
+    assert isinstance(out, list)
+    assert source._nl_parser is not None
 
 
 def test_execute_query_nl_passes_collection():

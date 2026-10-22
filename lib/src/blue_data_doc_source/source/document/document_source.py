@@ -116,6 +116,33 @@ class DocumentDataSource(DataSource):
         """
         super().__init__(name, properties)
         self.properties.setdefault("connection", {})["protocol"] = "document"
+        props = self.properties
+
+        # DataSource contract §4 (blue-data design/14): a source must be
+        # reconstructible from (name, properties) alone — the registry's
+        # connect_source rebuilds it from the stored record, with no Python-object
+        # collaborators to hand in. So the search-critical collaborators (embedding
+        # model, vector store, enricher) are built from ``properties`` here. A
+        # collaborator passed explicitly still wins (direct, in-process use);
+        # otherwise it is built from the matching properties key when present;
+        # otherwise it stays unset (the historical no-properties default, so existing
+        # callers are unaffected). Scalars take the properties value when set, else
+        # the keyword default — so a rebuilt source reproduces the same config.
+        # classifier / field_extractor / record_store / graph_source remain
+        # object-injected advanced features (not needed for registry-hosted search).
+        default_collection = props.get("collection", default_collection)
+        chunk_size = props.get("chunk_size", chunk_size)
+        overlap = props.get("overlap", overlap)
+        graph_database = props.get("graph_database", graph_database)
+        ocr_fallback = props.get("ocr_fallback", ocr_fallback)
+
+        if embedding_model is None:
+            embedding_model = self._build_embedding(props)
+        if vector_source is None:
+            vector_source = self._build_vector_source(props)
+        if enricher is None:
+            enricher = self._build_enricher(props)
+
         self._default_collection = default_collection
         self._nl_parser = nl_parser
         self._pipeline = DocumentPipeline(
@@ -132,6 +159,72 @@ class DocumentDataSource(DataSource):
             graph_source=graph_source,
             graph_database=graph_database,
         )
+
+    # ---------------------------------------------------------------- builders
+    # Build collaborators from a ``properties`` dict so the source is
+    # reconstructible from its stored record (DataSource contract §4). Each returns
+    # ``None`` when its backend key is absent, preserving the historical
+    # "no properties → no collaborator" constructor default.
+
+    @staticmethod
+    def _build_embedding(props: Dict[str, Any]) -> Optional[EmbeddingModel]:
+        backend = props.get("embedding")
+        if not backend:
+            return None
+        backend = str(backend).lower()
+        if backend == "openai":
+            from .embeddings.openai_embedding import OpenAIEmbeddingModel
+            return OpenAIEmbeddingModel(
+                model=props.get("openai_embedding_model", "text-embedding-3-small")
+            )
+        if backend == "dummy":
+            from .embeddings.dummy_embedding import DummyEmbeddingModel
+            return DummyEmbeddingModel()
+        raise ValueError(f"Unknown embedding backend {backend!r} (expected 'openai' or 'dummy')")
+
+    @staticmethod
+    def _build_vector_source(props: Dict[str, Any]) -> Optional[VectorSource]:
+        backend = props.get("vector")
+        if not backend:
+            return None
+        backend = str(backend).lower()
+        if backend == "memory":
+            from blue_data.source.vector.memory_vector_source import MemoryVectorSource
+            return MemoryVectorSource(name="memory")
+        if backend == "redis":
+            from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
+            conn = {k: v for k, v in props.get("connection", {}).items() if k != "protocol"}
+            return RedisVectorSource(name="redis", properties={"connection": {
+                "host": conn.get("host", "localhost"),
+                "port": int(conn.get("port", 6379)),
+                "scan_prefix": conn.get("scan_prefix", "documents:"),
+            }})
+        raise ValueError(f"Unknown vector backend {backend!r} (expected 'memory' or 'redis')")
+
+    @staticmethod
+    def _build_enricher(props: Dict[str, Any]) -> Optional[Enricher]:
+        backend = props.get("enricher")
+        if not backend:
+            return None
+        backend = str(backend).lower()
+        if backend == "none":
+            return None
+        if backend == "basic":
+            from .enrichment import BasicEnricher
+            return BasicEnricher()
+        if backend == "llm":
+            from .enrichment import BasicEnricher, LLMEnricher
+            llm_model = props.get("llm_model", "gpt-4o-mini")
+
+            def _llm_fn(prompt: str) -> str:
+                from openai import OpenAI
+                return OpenAI().chat.completions.create(
+                    model=llm_model,
+                    messages=[{"role": "user", "content": prompt}],
+                ).choices[0].message.content or ""
+
+            return LLMEnricher(llm_fn=_llm_fn, fallback=BasicEnricher())
+        raise ValueError(f"Unknown enricher backend {backend!r} (expected 'none', 'basic' or 'llm')")
 
     def execute_query(self, query, database=None, collection=None, optional_properties=None):
         """Dispatch a structured op request to the appropriate pipeline method.
@@ -252,10 +345,12 @@ class DocumentDataSource(DataSource):
     def execute_query_nl(self, query: str, database=None, collection=None, schema=None, llm_fn=None, optional_properties=None, allow_write_ops: bool = False):
         """Parse a natural language instruction and execute the corresponding op.
 
-        Requires an ``NLQueryParser`` passed as ``nl_parser`` at construction time.
-        The ``schema`` and ``llm_fn`` parameters are accepted to satisfy the
-        ``DataSource`` ABC contract but are not used — doc-source uses its own
-        ``NLQueryParser`` for intent extraction.
+        Uses the ``NLQueryParser`` passed as ``nl_parser`` at construction, or
+        lazily builds a default one when none was provided — so a registry-hosted
+        source rebuilt from properties can still be driven by NL. The ``schema`` and
+        ``llm_fn`` parameters are accepted to satisfy the ``DataSource`` ABC contract
+        but are not used — doc-source uses its own ``NLQueryParser`` for intent
+        extraction.
 
         **Security:** natural-language input is untrusted — it may be an end-user
         question or text an agent forwards from a retrieved document. By default
@@ -280,10 +375,12 @@ class DocumentDataSource(DataSource):
                 ``allow_write_ops`` is ``False``.
         """
         if self._nl_parser is None:
-            raise ValueError(
-                "execute_query_nl requires an nl_parser. "
-                "Pass NLQueryParser() as nl_parser= when constructing DocumentDataSource."
-            )
+            # Lazily build the default parser so a registry-hosted source — rebuilt
+            # from (name, properties) with no nl_parser injected — can still answer
+            # NL queries rather than raising (DataSource contract, #132). schema and
+            # llm_fn are accepted for the ABC signature but not used: doc-source uses
+            # its own NLQueryParser for intent extraction.
+            self._nl_parser = NLQueryParser()
         op_dict = self._nl_parser.parse(query)
         if not isinstance(op_dict, dict) or not isinstance(op_dict.get("op"), str):
             raise ValueError(f"NLQueryParser returned an invalid op dict: {op_dict!r}")
