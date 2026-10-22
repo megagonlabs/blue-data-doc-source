@@ -68,10 +68,22 @@ class NLQueryParser:
         parse_fn: Optional[Callable[[str], Dict[str, Any]]] = None,
     ):
         self._parse_fn = parse_fn
-        if parse_fn is None:  # pragma: no cover
+        self._model = model
+        self._api_key = api_key
+        self._client = None
+
+    def _get_client(self):  # pragma: no cover
+        """Lazily create the OpenAI client.
+
+        Deferred so that constructing an ``NLQueryParser`` needs no API key — only
+        an actual OpenAI-backed ``parse()`` does. This lets a registry-hosted
+        ``DocumentDataSource`` build a default parser on demand without a key being
+        present at construction time (#132).
+        """
+        if self._client is None:
             from openai import OpenAI
-            self._client = OpenAI(api_key=api_key)
-            self._model = model
+            self._client = OpenAI(api_key=self._api_key)
+        return self._client
 
     def parse(self, text: str) -> Dict[str, Any]:
         """Parse a natural language instruction into a DOCUMENT op dict.
@@ -88,7 +100,7 @@ class NLQueryParser:
         return self._parse_openai(text)  # pragma: no cover
 
     def _parse_openai(self, text: str) -> Dict[str, Any]:  # pragma: no cover
-        response = self._client.chat.completions.create(
+        response = self._get_client().chat.completions.create(
             model=self._model,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
