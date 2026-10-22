@@ -9,6 +9,9 @@ description = "REST API for blue-data-doc-source"
 requires-python = ">=3.10"
 dependencies = [
     "blue-data-doc-source>=0.1.0",
+    # Shared server policy: loopback bind, API-key auth, CSRF guard, and the
+    # path-containment helper (blue_data.server / blue_data.core.utils). #75 / XR-08.
+    "blue-data[server]>=0.1.0",
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
 ]
