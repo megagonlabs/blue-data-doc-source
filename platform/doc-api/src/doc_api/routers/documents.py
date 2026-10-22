@@ -1,11 +1,39 @@
+import os
 from typing import Any, Dict, List, Optional
 
+from blue_data.core.utils.path_utils import contain
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from doc_api.config import get_pipeline
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+
+
+def _confine_path(path: str) -> str:
+    """Confine a caller-supplied ingest/delete path to ``BLUE_DOC_ROOT``.
+
+    The REST API is network-facing: without confinement a caller can name any
+    server file the process can read, have it ingested, and read the text back via
+    search (issue #75 / DOCSRC-07). When ``BLUE_DOC_ROOT`` is set, ``path`` must be
+    a single filename that resolves strictly inside that directory — built with
+    blue-data's ``contain()`` (no separators, no absolute paths, no ``..``, symlinks
+    resolved), so an arbitrary server path is rejected with 400 (#126 / XR-08).
+
+    When ``BLUE_DOC_ROOT`` is unset the path is returned unchanged — the endpoint
+    still requires an API key (blue_data.server), so it is not reachable
+    unauthenticated. Operators set ``BLUE_DOC_ROOT`` to lock ingestion to a root.
+    """
+    root = os.getenv("BLUE_DOC_ROOT")
+    if not root:
+        return path
+    try:
+        return contain(root, path)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"path must be a filename within BLUE_DOC_ROOT: {exc}",
+        )
 
 
 # ── Request models ────────────────────────────────────────────────────────────
@@ -74,8 +102,9 @@ def ingest(request: IngestRequest) -> Dict[str, Any]:
     document later from a different process.
     """
     pipeline = get_pipeline()
+    safe_path = _confine_path(request.path)
     try:
-        records = pipeline.ingest(request.path, collection=request.collection)
+        records = pipeline.ingest(safe_path, collection=request.collection)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"File not found: {request.path}")
     except ValueError as exc:
@@ -180,9 +209,10 @@ def delete(request: DeleteRequest) -> Dict[str, Any]:
       are returned by ``POST /documents/ingest``.
     """
     pipeline = get_pipeline()
+    safe_path = _confine_path(request.path) if request.path else None
     try:
         deleted = pipeline.delete(
-            path=request.path,
+            path=safe_path,
             document_id=request.document_id,
             chunk_count=request.chunk_count,
             collection=request.collection,
