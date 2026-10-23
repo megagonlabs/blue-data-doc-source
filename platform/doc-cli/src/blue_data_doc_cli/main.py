@@ -487,24 +487,11 @@ def find_then_search(
     try:
         pipeline = get_pipeline()
         _require_vector_source(pipeline, fmt, mode)
-        matched_docs = pipeline.find_records(filters)
-        if not matched_docs:
-            results = []
-        else:
-            doc_ids = [r["document_id"] for r in matched_docs]
-            all_results: list = []
-            seen: set = set()
-            for doc_id in doc_ids:
-                doc_results = pipeline.search(
-                    query, k=k, collection=collection,
-                    filters={"document_id": doc_id}, mode=mode,
-                )
-                for r in doc_results:
-                    cid = r.get("chunk_id")
-                    if cid not in seen:
-                        seen.add(cid)
-                        all_results.append(r)
-            results = sorted(all_results, key=lambda r: r.get("score", 0))[:k]
+        # Delegate to the library's single, mode-correct merge rather than a CLI copy
+        # (ADR-012; previously the three copies sorted differently, #74).
+        results = pipeline.find_then_search(
+            query, find_filter=filters, k=k, collection=collection, mode=mode,
+        )
     except ValueError as exc:
         _err("INVALID_ARGS", str(exc), fmt)
     except Exception as exc:

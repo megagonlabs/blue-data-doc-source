@@ -1041,6 +1041,57 @@ class DocumentPipeline:
         norm = normalize_bm25_scores(raw)
         return {cid: score for cid, score in zip(ids, norm) if score > 0}
 
+    def find_then_search(
+        self,
+        query: str,
+        find_filter: Optional[Dict[str, Any]] = None,
+        k: int = 5,
+        collection: Optional[str] = None,
+        mode: str = "vector",
+    ) -> List[Dict[str, Any]]:
+        """Filter DocumentRecords by *find_filter*, then search within the matches.
+
+        Finds the documents matching *find_filter*, runs :meth:`search` scoped to each
+        matched ``document_id``, merges and de-duplicates chunks by ``chunk_id``, ranks
+        them, and returns the top *k*.
+
+        Ranking follows the score semantics of *mode*: in ``"vector"`` mode ``score``
+        is a cosine **distance** (lower is better), so results are sorted ascending; in
+        ``"bm25"``, ``"hybrid"`` and ``"rerank"`` modes ``score`` is a **similarity**
+        (higher is better), so they are sorted descending. This is the single,
+        mode-correct merge shared by every surface (library op dispatch, REST, CLI);
+        previously each sorted differently and vector mode returned the worst match
+        first (#74).
+        """
+        matched = self.find_records(find_filter)
+        if not matched:
+            return []
+
+        seen: set = set()
+        all_results: List[Dict[str, Any]] = []
+        for doc in matched:
+            doc_id = doc.get("document_id")
+            if not doc_id:
+                continue
+            for chunk in self.search(
+                query, k=k, collection=collection,
+                filters={"document_id": doc_id}, mode=mode,
+            ):
+                chunk_id = chunk.get("chunk_id", "")
+                if chunk_id not in seen:
+                    seen.add(chunk_id)
+                    all_results.append(chunk)
+
+        # vector mode: score is cosine distance (lower is better) → ascending.
+        # bm25 / hybrid / rerank: score is a similarity (higher is better) → descending.
+        lower_is_better = mode == "vector"
+        sentinel = float("inf") if lower_is_better else float("-inf")
+        all_results.sort(
+            key=lambda c: c.get("score") if c.get("score") is not None else sentinel,
+            reverse=not lower_is_better,
+        )
+        return all_results[:k]
+
     def search(
         self,
         query: str,

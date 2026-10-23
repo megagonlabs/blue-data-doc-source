@@ -169,22 +169,15 @@ def find_then_search(request: FindThenSearchRequest):
     """
     pipeline = get_pipeline()
     try:
-        matched = pipeline.find_records(filter=request.find_filter)
-        if not matched:
-            return []
-        doc_ids = [r["document_id"] for r in matched]
-        all_results = []
-        for doc_id in doc_ids:
-            hits = pipeline.search(
-                request.query,
-                k=request.k,
-                collection=request.collection,
-                filters={"document_id": doc_id},
-                mode=request.mode,
-            )
-            all_results.extend(hits)
-        all_results.sort(key=lambda r: r.get("score", 0), reverse=True)
-        return all_results[:request.k]
+        # Thin adapter (ADR-012): the merge + mode-correct ranking lives in the
+        # library, so REST never re-implements (and mis-sorts) it (#74).
+        return pipeline.find_then_search(
+            request.query,
+            find_filter=request.find_filter,
+            k=request.k,
+            collection=request.collection,
+            mode=request.mode,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
