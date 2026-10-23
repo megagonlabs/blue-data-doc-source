@@ -484,31 +484,16 @@ class DocumentDataSource(DataSource):
         k = request.get("k", 5)
         mode = request.get("mode", "vector")
 
-        matched = self._pipeline.find_records(find_filter)
-        if not matched:
-            return []
-
-        seen: set = set()
-        all_results: List[Dict[str, Any]] = []
-        for doc in matched:
-            doc_id = doc.get("document_id")
-            if not doc_id:
-                continue
-            chunks = self._pipeline.search(
-                query_text,
-                k=k,
-                collection=collection,
-                filters={"document_id": doc_id},
-                mode=mode,
-            )
-            for chunk in chunks:
-                chunk_id = chunk.get("chunk_id", "")
-                if chunk_id not in seen:
-                    seen.add(chunk_id)
-                    all_results.append(chunk)
-
-        all_results.sort(key=lambda c: c.get("score") or 0, reverse=True)
-        return all_results[:k]
+        # Delegate the merge + mode-correct ranking to the pipeline so the library,
+        # REST and CLI share one implementation. Previously three copies diverged and
+        # this one sorted vector-mode distances descending → worst match first (#74).
+        return self._pipeline.find_then_search(
+            query_text,
+            find_filter=find_filter,
+            k=k,
+            collection=collection,
+            mode=mode,
+        )
 
     def _get_record(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         document_id = request.get("document_id")

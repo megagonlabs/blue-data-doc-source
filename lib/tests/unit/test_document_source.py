@@ -305,3 +305,53 @@ def test_find_then_search_results_sorted_by_score(tmp_path):
     })
     scores = [r.get("score") or 0 for r in results]
     assert scores == sorted(scores, reverse=True)
+
+
+class _KeywordEmbedding(DummyEmbeddingModel):
+    """Deterministic 2-d embedding: 'alpha' and 'gamma' texts are orthogonal."""
+
+    def __init__(self):
+        super().__init__(dim=2)
+
+    def embed_text(self, text):
+        t = text.lower()
+        return [1.0 if "alpha" in t else 0.0, 1.0 if "gamma" in t else 0.0001]
+
+
+def test_find_then_search_vector_mode_returns_best_match_first(tmp_path):
+    # #74: in vector mode `score` is a cosine distance (lower is better). The merge
+    # must sort ascending, so FIND_THEN_SEARCH k=1 returns the same best chunk as a
+    # plain SEARCH — previously it sorted descending and returned the worst match.
+    from blue_data.source.vector.memory_vector_source import MemoryVectorSource
+    from blue_data_doc_source import KeywordClassifier
+
+    source = DocumentDataSource(
+        embedding_model=_KeywordEmbedding(),
+        vector_source=MemoryVectorSource(name="mem"),
+        classifier=KeywordClassifier(),
+    )
+    source.execute_query({"op": "DOCUMENT.ENSURE_INDEX"})
+    for name, word in (("a.txt", "alpha"), ("b.txt", "gamma")):
+        path = make_doc(
+            tmp_path, name,
+            f"AGREEMENT between the parties. {word} termination clause, governing law, indemnification.",
+        )
+        source.execute_query({"op": "DOCUMENT.INGEST", "path": path})
+
+    best = source.execute_query({"op": "DOCUMENT.SEARCH", "query": "alpha", "k": 1})[0]
+    top = source.execute_query({
+        "op": "DOCUMENT.FIND_THEN_SEARCH",
+        "query": "alpha",
+        "find_filter": {"document_type": "contract"},
+        "k": 1,
+    })[0]
+    assert top["file_name"] == best["file_name"] == "a.txt"
+    # scores across the full result set must be ascending (closest first)
+    full = source.execute_query({
+        "op": "DOCUMENT.FIND_THEN_SEARCH",
+        "query": "alpha",
+        "find_filter": {"document_type": "contract"},
+        "k": 10,
+    })
+    scores = [r["score"] for r in full]
+    assert scores == sorted(scores)
