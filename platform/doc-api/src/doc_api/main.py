@@ -61,7 +61,7 @@ _OPEN_PATHS = DEFAULT_OPEN_PATHS | {"/documents/health"}
 app = FastAPI(
     title="blue-data-doc-source API",
     description="REST API for ingesting, searching, and managing documents.",
-    version="0.1.0",
+    version="1.0.0",
     lifespan=lifespan,
     dependencies=security_dependencies("BLUE_DOC_API", open_paths=_OPEN_PATHS),
 )
