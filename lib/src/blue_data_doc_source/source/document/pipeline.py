@@ -1,5 +1,6 @@
 import re
 import threading
+import warnings
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
@@ -20,6 +21,28 @@ from .schema.schema_store import MemoryRecordStore, RecordStore, _get_nested
 
 if TYPE_CHECKING:
     from blue_data.source.graph.graph_source import GraphSource
+
+
+class ColdChunkIndexWarning(UserWarning):
+    """Warned when ``bm25``/``rerank`` search or ``rich`` neighbor context is
+    requested but the in-process chunk index has no entries for the target
+    collection.
+
+    ``_chunk_index`` / ``_chunk_embeddings`` / ``_chunk_collection`` are built
+    during :meth:`DocumentPipeline.ingest` and live only in the ingesting
+    process; they are **not** rebuilt from the vector store after a restart or
+    in a separate process. BM25 and rerank score against this index and
+    ``rich`` neighbor context reads from it, so when it is empty those features
+    silently degrade (empty / wrong results, omitted context). This warning
+    makes that failure loud rather than silent (#50). ``vector`` search is
+    unaffected — it queries the persistent vector store directly; ``hybrid``
+    falls back to vector-only KNN and warns about the fallback.
+
+    Filter or escalate it like any warning category, e.g.::
+
+        warnings.simplefilter("error", ColdChunkIndexWarning)
+    """
+
 
 # Chars that need escaping inside Redis Search TAG filter values.
 _TAG_SPECIAL_RE = re.compile(r'([,.<>{}\[\]"\'`:;!@#$%^&*\-+=~|/ ])')
@@ -1019,6 +1042,38 @@ class DocumentPipeline:
                     return False
         return True
 
+    def _has_indexed_chunks(self, collection: str) -> bool:
+        """Whether the in-process chunk index holds any chunk for *collection*.
+
+        ``False`` after a restart / in a separate process (the index is built
+        during ingest and never rebuilt from the vector store) — the signal used
+        to warn that bm25/rerank/neighbor-context will degrade (#50).
+        """
+        with self._index_lock:
+            return any(c == collection for c in self._chunk_collection.values())
+
+    def _warn_cold_index(self, mode: str, collection: str) -> None:
+        """Emit a :class:`ColdChunkIndexWarning` describing the degraded feature."""
+        if mode == "hybrid":
+            detail = (
+                "falling back to vector-only KNN (BM25 ranks cannot be fused)"
+            )
+        elif mode == "context":
+            detail = "neighbor context (context.before/after) will be omitted"
+        else:  # bm25 / rerank
+            detail = "returning no results" if mode == "bm25" else (
+                "returning the BM25 shortlist order without re-ranking"
+            )
+        warnings.warn(
+            f"{mode!r} search on collection {collection!r}: the in-process chunk "
+            f"index has no entries for this collection, so {detail}. This index is "
+            f"built during ingest() and is not rebuilt from the vector store after "
+            f"a restart or in a separate process; re-ingest in this process, or use "
+            f"mode='vector' which queries the persistent store directly (#50).",
+            ColdChunkIndexWarning,
+            stacklevel=3,
+        )
+
     def _bm25_candidates(
         self,
         query: str,
@@ -1166,6 +1221,8 @@ class DocumentPipeline:
         # ------------------------------------------------------------------
 
         if mode == "bm25":
+            if not self._has_indexed_chunks(target):
+                self._warn_cold_index("bm25", target)
             bm25_scores = self._bm25_candidates(query, target, filters)
             if not bm25_scores:
                 raw: List[Dict[str, Any]] = []
@@ -1178,6 +1235,8 @@ class DocumentPipeline:
                     raw.append(chunk)
 
         elif mode == "rerank":
+            if not self._has_indexed_chunks(target):
+                self._warn_cold_index("rerank", target)
             bm25_scores = self._bm25_candidates(query, target, filters)
             if not bm25_scores:
                 raw = []
@@ -1224,6 +1283,11 @@ class DocumentPipeline:
                 ))
             else:
                 # hybrid: RRF fusion of vector KNN + BM25
+                if not self._has_indexed_chunks(target):
+                    # Cold index → no BM25 ranks to fuse; this is still a useful
+                    # vector-only result, but warn so the degradation isn't silent
+                    # (distinct from bm25/rerank which return nothing — #50).
+                    self._warn_cold_index("hybrid", target)
                 bm25_scores = self._bm25_candidates(query, target, filters)
                 if not bm25_scores:
                     raw = _normalize_knn_hits(self.vector_source.knn(
@@ -1280,6 +1344,12 @@ class DocumentPipeline:
         # ------------------------------------------------------------------
         # Rich wrapping — provenance, neighbor context, by_document grouping
         # ------------------------------------------------------------------
+
+        # Neighbor context reads adjacent chunks from the in-process index; when
+        # it is cold (restart / separate process) context is silently omitted.
+        # Warn once — but only when there are results to annotate (#50).
+        if raw and context_chunks > 0 and not self._has_indexed_chunks(target):
+            self._warn_cold_index("context", target)
 
         rich_results: List[Dict[str, Any]] = []
         for rank, chunk in enumerate(raw, 1):

@@ -1,11 +1,18 @@
 """Tests for hybrid BM25 + vector search and BM25-only mode."""
 from __future__ import annotations
 
+import warnings
+
 import pytest
 
 from blue_data.source.vector.memory_vector_source import MemoryVectorSource
 
-from blue_data_doc_source import DocumentPipeline, DummyEmbeddingModel, DocumentDataSource
+from blue_data_doc_source import (
+    ColdChunkIndexWarning,
+    DocumentDataSource,
+    DocumentPipeline,
+    DummyEmbeddingModel,
+)
 
 CONTRACT_TEXT = """\
 This contract is entered into between Acme Corp and Beta Ltd.
@@ -368,3 +375,82 @@ class TestDocumentSourceMode:
             "mode": "hybrid",
         })
         assert isinstance(results_hybrid, list)
+
+
+# ---------------------------------------------------------------------------
+# Cold in-process chunk index — bm25/rerank/hybrid/rich context degrade LOUDLY
+# (#50). The chunk index is built during ingest() and is not rebuilt from the
+# vector store after a restart / in a separate process.
+# ---------------------------------------------------------------------------
+
+class TestColdChunkIndexWarning:
+    """Simulate a restart: ``warm`` ingests (populating both the store and its
+    in-process index); ``cold`` is a fresh pipeline sharing the *same* vector
+    store but with an empty in-process index."""
+
+    def _warm_and_cold(self):
+        vs = MemoryVectorSource()
+        warm = DocumentPipeline(
+            embedding_model=DummyEmbeddingModel(dim=8),
+            vector_source=vs, chunk_size=60, overlap=10, collection="docs",
+        )
+        warm.ensure_index(collection="docs")
+        warm.ingest_text(
+            CONTRACT_TEXT, file_name="contract.txt",
+            mime_type="text/plain", collection="docs",
+        )
+        cold = DocumentPipeline(
+            embedding_model=DummyEmbeddingModel(dim=8),
+            vector_source=vs, chunk_size=60, overlap=10, collection="docs",
+        )
+        return warm, cold
+
+    def test_bm25_warns_and_returns_empty_when_cold(self):
+        _, cold = self._warm_and_cold()
+        with pytest.warns(ColdChunkIndexWarning, match="bm25"):
+            results = cold.search("terminate agreement", k=3, mode="bm25")
+        assert results == []
+
+    def test_rerank_warns_when_cold(self):
+        _, cold = self._warm_and_cold()
+        with pytest.warns(ColdChunkIndexWarning, match="rerank"):
+            cold.search("terminate agreement", k=3, mode="rerank")
+
+    def test_hybrid_warns_but_still_returns_vector_hits_when_cold(self):
+        _, cold = self._warm_and_cold()
+        with pytest.warns(ColdChunkIndexWarning, match="vector-only"):
+            results = cold.search("terminate agreement", k=3, mode="hybrid")
+        # hybrid degrades to vector-only KNN — it must still return results.
+        assert len(results) > 0
+
+    def test_rich_context_warns_when_cold(self):
+        _, cold = self._warm_and_cold()
+        with pytest.warns(ColdChunkIndexWarning, match="context"):
+            rich = cold.search(
+                "terminate agreement", k=3, mode="vector",
+                rich=True, context_chunks=1,
+            )
+        # Neighbor context comes from the (empty) in-process index → omitted.
+        assert all("context" not in r for r in rich["results"])
+
+    def test_vector_mode_does_not_warn_when_cold(self):
+        _, cold = self._warm_and_cold()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", ColdChunkIndexWarning)
+            # vector mode queries the persistent store → no degradation, no warning.
+            results = cold.search("terminate agreement", k=3, mode="vector")
+        assert len(results) > 0
+
+    def test_warm_pipeline_does_not_warn(self):
+        warm, _ = self._warm_and_cold()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", ColdChunkIndexWarning)
+            results = warm.search("terminate agreement", k=3, mode="bm25")
+        assert len(results) > 0
+
+    def test_warning_is_escalatable_to_error(self):
+        _, cold = self._warm_and_cold()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", ColdChunkIndexWarning)
+            with pytest.raises(ColdChunkIndexWarning):
+                cold.search("terminate agreement", k=3, mode="bm25")
