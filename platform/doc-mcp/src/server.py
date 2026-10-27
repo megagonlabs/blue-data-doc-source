@@ -186,16 +186,20 @@ def delete_document(
     path: Optional[str] = None,
     document_id: Optional[str] = None,
     chunk_count: Optional[int] = None,
-    collection: str = "documents",
+    collection: Optional[str] = None,
 ) -> str:
     """Delete all chunks for a document from the vector store.
 
     Two ways to identify the document:
-    - Pass path: works when the document was ingested in this server session.
+    - Pass path: works when the document was ingested in this server session. The
+      document's own ingested collection is used — ``collection`` is ignored.
     - Pass document_id and chunk_count: works across sessions. Both values are
       returned by ingest_document and can be persisted for later deletion.
 
-    Returns the number of chunks successfully deleted.
+    ``collection`` defaults to None (the server's default collection) rather than a
+    hard-coded "documents", so a cross-session delete isn't misdirected (#78).
+
+    Returns the number of chunks actually removed (0 if the document was not found).
     """
     try:
         pipeline = _get_pipeline()

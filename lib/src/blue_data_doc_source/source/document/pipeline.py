@@ -914,11 +914,14 @@ class DocumentPipeline:
             path: File path used during ingestion.
             document_id: Content-hash document ID from ``ChunkRecord.document_id``.
             chunk_count: Total number of chunks (``len(ingest(...))``).
-            collection: Collection to delete from. Defaults to the registered
-                collection for the path, or the instance-level default.
+            collection: Collection to delete from, for a ``document_id`` + ``chunk_count``
+                delete (defaults to the instance-level collection). Ignored for a
+                ``path`` delete, which always uses the collection recorded at ingest.
 
         Returns:
-            Number of successful delete calls issued.
+            Number of chunks actually removed from the vector store — counted from
+            each backend's delete return value, so deleting a document that was never
+            ingested reports 0 rather than ``chunk_count`` (#78).
 
         Raises:
             ValueError: If neither ``path`` nor ``document_id + chunk_count`` is
@@ -939,8 +942,11 @@ class DocumentPipeline:
                     f"No registry entry for {path!r}. "
                     "Pass document_id and chunk_count to delete cross-process."
                 )
+            # A path delete uses the collection the document was ingested into (from
+            # the registry) — a caller-supplied ``collection`` must not redirect it to
+            # a collection the document was never stored in (#78).
             doc_id, count, reg_collection = self._doc_registry[key]
-            target = collection or reg_collection
+            target = reg_collection
         elif document_id is not None and chunk_count is not None:
             doc_id = document_id
             count = chunk_count
@@ -957,8 +963,8 @@ class DocumentPipeline:
             self._chunk_collection.pop(chunk_id, None)
             self._chunk_embeddings.pop(chunk_id, None)
             try:
-                self.vector_source.delete(collection=target, doc_id=chunk_id)
-                deleted += 1
+                # Count what the backend actually removed (0 or 1), not the call.
+                deleted += self.vector_source.delete(collection=target, doc_id=chunk_id)
             except Exception:
                 pass
 

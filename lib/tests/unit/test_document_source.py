@@ -107,6 +107,7 @@ def test_unsupported_op_raises():
 
 def test_delete_op_removes_chunks(tmp_path):
     vector_source = MagicMock()
+    vector_source.delete.return_value = 1  # backend reports one chunk removed per call
     source = DocumentDataSource(
         chunk_size=5,
         overlap=1,
@@ -122,6 +123,7 @@ def test_delete_op_removes_chunks(tmp_path):
 
 def test_delete_op_cross_process(tmp_path):
     vector_source = MagicMock()
+    vector_source.delete.return_value = 1
     source = DocumentDataSource(
         chunk_size=5,
         overlap=1,

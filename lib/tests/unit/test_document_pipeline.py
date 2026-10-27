@@ -420,6 +420,7 @@ def test_chunk_id_uses_six_digit_index(tmp_path):
 def test_delete_by_path(tmp_path):
     path = make_txt(tmp_path)
     vector_source = MagicMock()
+    vector_source.delete.return_value = 1  # backend reports one chunk removed per call
     pipeline = DocumentPipeline(
         chunk_size=5, overlap=1,
         embedding_model=DummyEmbeddingModel(dim=8),
@@ -434,6 +435,7 @@ def test_delete_by_path(tmp_path):
 def test_delete_by_document_id_and_chunk_count(tmp_path):
     path = make_txt(tmp_path)
     vector_source = MagicMock()
+    vector_source.delete.return_value = 1
     pipeline = DocumentPipeline(
         chunk_size=5, overlap=1,
         embedding_model=DummyEmbeddingModel(dim=8),
@@ -448,6 +450,7 @@ def test_delete_by_document_id_and_chunk_count(tmp_path):
 def test_delete_clears_registry(tmp_path):
     path = make_txt(tmp_path)
     vector_source = MagicMock()
+    vector_source.delete.return_value = 1
     pipeline = DocumentPipeline(
         chunk_size=5, overlap=1,
         embedding_model=DummyEmbeddingModel(dim=8),
@@ -478,6 +481,40 @@ def test_delete_missing_args_raises():
     pipeline = DocumentPipeline(vector_source=vector_source)
     with pytest.raises(ValueError, match="document_id"):
         pipeline.delete()
+
+
+# --- #78: DELETE must report real removals, not phantom ones ---
+
+def _memory_pipeline(**kwargs):
+    from blue_data.source.vector.memory_vector_source import MemoryVectorSource
+    pipeline = DocumentPipeline(
+        chunk_size=5, overlap=1,
+        embedding_model=DummyEmbeddingModel(dim=8),
+        vector_source=MemoryVectorSource(name="mem"),
+        **kwargs,
+    )
+    pipeline.ensure_index()
+    return pipeline
+
+
+def test_delete_never_ingested_document_reports_zero(tmp_path):
+    # A document that was never ingested must report 0 removals, not chunk_count (#78).
+    pipeline = _memory_pipeline()
+    assert pipeline.delete(document_id="doc_doesnotexist", chunk_count=500) == 0
+
+
+def test_delete_by_path_uses_ingested_collection_not_caller(tmp_path):
+    # A caller-supplied collection must not redirect a path delete away from the
+    # collection the document was ingested into (#78).
+    pipeline = _memory_pipeline()
+    pipeline.ensure_index("contracts")
+    path = make_txt(tmp_path, "Agreement between Acme and Beta. Termination clause.")
+    records = pipeline.ingest(str(path), collection="contracts")
+
+    deleted = pipeline.delete(path=str(path), collection="documents")  # wrong collection
+
+    assert deleted == len(records)
+    assert pipeline.vector_source._store.get("contracts", {}) == {}  # actually removed
 
 
 # --- OCR wiring ---
