@@ -1,5 +1,5 @@
 from .source.document.document_source import DocumentDataSource
-from .source.document.pipeline import DocumentPipeline
+from .source.document.pipeline import DocumentPipeline, ColdChunkIndexWarning
 from .source.document.chunk_record import ChunkRecord
 from .source.document.find_result import CoverageReport, FindResult
 from .source.document.nl_parser import NLQueryParser
@@ -23,6 +23,7 @@ from .source.document.schema import (
 __all__ = [
     "DocumentDataSource",
     "DocumentPipeline",
+    "ColdChunkIndexWarning",
     "ChunkRecord",
     "Chunker",
     "SectionChunker",

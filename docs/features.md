@@ -413,7 +413,7 @@ results = source.execute_query({
 
 `"bm25"` is useful for testing without an embedding model, for keyword-heavy corpora where semantic similarity adds noise, and for the `NLQueryParser` demo path where dummy embeddings would produce meaningless scores.
 
-> **In-process only.** `"bm25"`, `"hybrid"`, and `"rerank"` all score against an in-memory chunk index built during `ingest()`. This index is lost when the process exits. After a restart, these modes silently return empty results even if the vector store is intact. `"vector"` mode is unaffected — it queries the persistent vector store. If you need BM25 or hybrid across restarts, re-ingest documents in the current process before searching, or use `"vector"` mode only.
+> **In-process only.** `"bm25"`, `"hybrid"`, and `"rerank"` all score against an in-memory chunk index built during `ingest()`. This index is lost when the process exits and is **not** rebuilt from the vector store on restart. When it is empty for the collection being searched, the pipeline emits a `ColdChunkIndexWarning` (exported from `blue_data_doc_source`) rather than failing silently: `"bm25"` warns and returns no results, `"rerank"` warns and returns the BM25 shortlist order, and `"hybrid"` warns that it is falling back to vector-only KNN. `rich=True` neighbor context (`context.before`/`context.after`) is likewise read from this index and warns when it is cold. `"vector"` mode is unaffected — it queries the persistent vector store. If you need BM25/rerank or full hybrid/neighbor-context across restarts, re-ingest documents in the current process before searching, or use `"vector"` mode only. To turn the degradation into a hard error, escalate the warning: `warnings.simplefilter("error", ColdChunkIndexWarning)`.
 
 ---
 
