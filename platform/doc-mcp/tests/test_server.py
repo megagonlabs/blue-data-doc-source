@@ -203,7 +203,7 @@ def test_delete_by_path_returns_deleted_count():
         path="/docs/report.pdf",
         document_id=None,
         chunk_count=None,
-        collection="documents",
+        collection=None,  # #78: no hard-coded "documents"; a path delete uses the ingested collection
     )
 
 
