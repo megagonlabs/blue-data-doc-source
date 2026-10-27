@@ -839,3 +839,59 @@ class TestExtractorWithoutClassifier:
         )
         assert len(extractor.calls) == 1
         assert extractor.calls[0] == "unknown"
+
+
+class TestConcurrency:
+    """Regression tests for #87 — the shared in-process indexes must survive
+    concurrent ingest + search without a 'dictionary changed size during
+    iteration' RuntimeError."""
+
+    def test_concurrent_ingest_and_bm25_search_no_race(self):
+        import sys
+        import threading
+
+        pipeline = DocumentPipeline(chunk_size=20, overlap=3)
+        errors: List[BaseException] = []
+        done = threading.Event()
+
+        # Force frequent thread switches so a search is very likely to be
+        # mid-iteration of _chunk_index when ingest mutates it. Without the fix
+        # this reliably raises "dictionary changed size during iteration".
+        _old_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+
+        def ingester():
+            try:
+                for i in range(300):
+                    # Unique content per doc so each gets a distinct document_id and
+                    # the index keeps *growing* — a large _chunk_index widens the
+                    # window in which a concurrent search iterates it.
+                    text = " ".join(
+                        f"termination eligibility payment clause doc{i} token{j}"
+                        for j in range(40)
+                    )
+                    pipeline.ingest_text(text, file_name=f"doc_{i}.txt")
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+            finally:
+                done.set()
+
+        def searcher():
+            try:
+                while not done.is_set():
+                    pipeline.search("termination eligibility", mode="bm25", k=5)
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [threading.Thread(target=ingester)]
+        threads += [threading.Thread(target=searcher) for _ in range(3)]
+        try:
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=30)
+        finally:
+            sys.setswitchinterval(_old_interval)
+
+        assert not any(t.is_alive() for t in threads), "threads did not finish"
+        assert errors == [], f"concurrent ingest/search raised: {errors!r}"

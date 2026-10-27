@@ -1,4 +1,5 @@
 import re
+import threading
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
@@ -234,6 +235,10 @@ class DocumentPipeline:
         self._doc_registry: Dict[str, Tuple[str, int, str]] = {}
         # collections for which create_index has already succeeded this session
         self._index_created: Set[str] = set()
+        # Guards the in-process chunk indexes below so a concurrent BM25/hybrid/rerank
+        # search iterating them cannot race an ingest/delete mutation (#87:
+        # "dictionary changed size during iteration").
+        self._index_lock = threading.Lock()
         # chunk_id → chunk dict — populated during ingest; used for neighbor context and BM25
         self._chunk_index: Dict[str, Dict[str, Any]] = {}
         # chunk_id → collection name — needed to scope BM25 to the correct collection
@@ -435,8 +440,9 @@ class DocumentPipeline:
             return
         for idx in range(old_count):
             chunk_id = f"{old_doc_id}_chunk_{idx:06d}"
-            self._chunk_index.pop(chunk_id, None)
-            self._chunk_embeddings.pop(chunk_id, None)
+            with self._index_lock:
+                self._chunk_index.pop(chunk_id, None)
+                self._chunk_embeddings.pop(chunk_id, None)
             try:
                 self.vector_source.delete(collection=old_collection, doc_id=chunk_id)
             except Exception:
@@ -590,10 +596,11 @@ class DocumentPipeline:
                 )
                 record_dict = record.to_dict()
                 records.append(record_dict)
-                self._chunk_index[chunk_id] = record_dict
-                self._chunk_collection[chunk_id] = collection
-                if record.embedding is not None:
-                    self._chunk_embeddings[chunk_id] = record.embedding
+                with self._index_lock:
+                    self._chunk_index[chunk_id] = record_dict
+                    self._chunk_collection[chunk_id] = collection
+                    if record.embedding is not None:
+                        self._chunk_embeddings[chunk_id] = record.embedding
                 self._upsert(chunk_id, record_dict, collection)
                 chunk_index += 1
 
@@ -664,10 +671,11 @@ class DocumentPipeline:
                 )
                 record_dict = record.to_dict()
                 records.append(record_dict)
-                self._chunk_index[chunk_id] = record_dict
-                self._chunk_collection[chunk_id] = collection
-                if record.embedding is not None:
-                    self._chunk_embeddings[chunk_id] = record.embedding
+                with self._index_lock:
+                    self._chunk_index[chunk_id] = record_dict
+                    self._chunk_collection[chunk_id] = collection
+                    if record.embedding is not None:
+                        self._chunk_embeddings[chunk_id] = record.embedding
                 self._upsert(chunk_id, record_dict, collection)
                 chunk_index += 1
             else:
@@ -691,10 +699,11 @@ class DocumentPipeline:
                     )
                     record_dict = record.to_dict()
                     records.append(record_dict)
-                    self._chunk_index[chunk_id] = record_dict
-                    self._chunk_collection[chunk_id] = collection
-                    if record.embedding is not None:
-                        self._chunk_embeddings[chunk_id] = record.embedding
+                    with self._index_lock:
+                        self._chunk_index[chunk_id] = record_dict
+                        self._chunk_collection[chunk_id] = collection
+                        if record.embedding is not None:
+                            self._chunk_embeddings[chunk_id] = record.embedding
                     self._upsert(chunk_id, record_dict, collection)
                     chunk_index += 1
 
@@ -953,9 +962,10 @@ class DocumentPipeline:
         deleted = 0
         for idx in range(count):
             chunk_id = f"{doc_id}_chunk_{idx:06d}"
-            self._chunk_index.pop(chunk_id, None)
-            self._chunk_collection.pop(chunk_id, None)
-            self._chunk_embeddings.pop(chunk_id, None)
+            with self._index_lock:
+                self._chunk_index.pop(chunk_id, None)
+                self._chunk_collection.pop(chunk_id, None)
+                self._chunk_embeddings.pop(chunk_id, None)
             try:
                 self.vector_source.delete(collection=target, doc_id=chunk_id)
                 deleted += 1
@@ -1017,9 +1027,13 @@ class DocumentPipeline:
         the in-process index has no entries for the collection (e.g. process
         restart with a persistent vector store).
         """
+        # Snapshot under the lock so a concurrent ingest/delete can't mutate the
+        # index mid-iteration (#87). The filter runs on the snapshot, not the live dict.
+        with self._index_lock:
+            index_items = list(self._chunk_index.items())
         candidates = {
             cid: rec
-            for cid, rec in self._chunk_index.items()
+            for cid, rec in index_items
             if self._chunk_collection.get(cid) == collection
             and self._chunk_matches_filters(rec, filters)
         }
