@@ -932,3 +932,65 @@ class TestConcurrency:
 
         assert not any(t.is_alive() for t in threads), "threads did not finish"
         assert errors == [], f"concurrent ingest/search raised: {errors!r}"
+
+
+# ---------------------------------------------------------------------------
+# #80 — caller-supplied k / context_chunks / chunk_count must be bounded so one
+# request can't drive unbounded CPU (rich-context loop) or backend calls
+# (delete loop).
+# ---------------------------------------------------------------------------
+
+class TestCallerBoundsValidation:
+    def _bm25_pipeline(self):
+        # bm25 needs no vector store, and k/context_chunks are validated at the
+        # top of search() before any mode dispatch.
+        p = DocumentPipeline(chunk_size=5, overlap=1, collection="docs")
+        p.ingest_text("terminate agreement notice clause " * 10,
+                      file_name="c.txt", collection="docs")
+        return p
+
+    @pytest.mark.parametrize("k", [0, -1, 101, 10**9])
+    def test_k_out_of_range_raises(self, k):
+        p = self._bm25_pipeline()
+        with pytest.raises(ValueError, match="k must be"):
+            p.search("terminate", k=k, mode="bm25")
+
+    def test_k_bool_rejected(self):
+        p = self._bm25_pipeline()
+        with pytest.raises(ValueError, match="k must be an int"):
+            p.search("terminate", k=True, mode="bm25")
+
+    @pytest.mark.parametrize("k", [1, 50, 100])
+    def test_k_in_range_ok(self, k):
+        p = self._bm25_pipeline()
+        p.search("terminate", k=k, mode="bm25")  # must not raise
+
+    @pytest.mark.parametrize("n", [-1, 6, 10**6])
+    def test_context_chunks_out_of_range_raises(self, n):
+        p = self._bm25_pipeline()
+        with pytest.raises(ValueError, match="context_chunks must be"):
+            p.search("terminate", k=2, rich=True, context_chunks=n, mode="bm25")
+
+    @pytest.mark.parametrize("n", [0, 1, 5])
+    def test_context_chunks_in_range_ok(self, n):
+        p = self._bm25_pipeline()
+        p.search("terminate", k=2, rich=True, context_chunks=n, mode="bm25")  # must not raise
+
+    @pytest.mark.parametrize("chunk_count", [0, -1, 100001, 10**9])
+    def test_delete_chunk_count_out_of_range_raises(self, chunk_count):
+        pipeline = _memory_pipeline()
+        with pytest.raises(ValueError, match="chunk_count must be"):
+            pipeline.delete(document_id="doc_whatever", chunk_count=chunk_count)
+
+    def test_delete_chunk_count_exceeding_stored_raises(self, tmp_path):
+        pipeline = _memory_pipeline()
+        records = pipeline.ingest(make_txt(tmp_path, " ".join(["word"] * 60)))
+        doc_id = records[0]["document_id"]
+        with pytest.raises(ValueError, match="exceeds"):
+            pipeline.delete(document_id=doc_id, chunk_count=len(records) + 100)
+
+    def test_delete_chunk_count_equal_to_stored_ok(self, tmp_path):
+        pipeline = _memory_pipeline()
+        records = pipeline.ingest(make_txt(tmp_path, " ".join(["word"] * 60)))
+        doc_id = records[0]["document_id"]
+        assert pipeline.delete(document_id=doc_id, chunk_count=len(records)) == len(records)

@@ -77,6 +77,26 @@ _SEARCH_RETURN_FIELDS = [
     "section_title", "page_start", "page_end", "mime_type", "content_type",
 ]
 
+# Bounds on caller-supplied values. Unbounded k / context_chunks / chunk_count let
+# one request drive linear CPU (the rich-context loop) or backend round-trips (the
+# delete loop) — e.g. chunk_count=10**9 is ~a billion delete calls. Reject
+# out-of-range values rather than silently degrading or pinning a worker (#80).
+_MAX_SEARCH_K = 100
+_MAX_CONTEXT_CHUNKS = 5
+_MAX_DELETE_CHUNK_COUNT = 100_000
+
+
+def _validate_bounded_int(name: str, value: Any, lo: int, hi: int) -> None:
+    """Require *value* to be an int in ``[lo, hi]``; raise ``ValueError`` otherwise.
+
+    ``bool`` is rejected explicitly (it is an ``int`` subclass) so ``True``/``False``
+    can't slip through as 1/0.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an int, got {type(value).__name__}")
+    if not (lo <= value <= hi):
+        raise ValueError(f"{name} must be between {lo} and {hi}, got {value}")
+
 
 def _validate_filters(filters: Optional[Dict[str, Any]]) -> None:
     """Reject unknown filter keys and ill-typed values instead of silently dropping them.
@@ -957,8 +977,10 @@ class DocumentPipeline:
 
         Raises:
             ValueError: If neither ``path`` nor ``document_id + chunk_count`` is
-                provided, if ``path`` is not in the registry, or if
-                ``vector_source`` is not set.
+                provided, if ``path`` is not in the registry, if
+                ``vector_source`` is not set, or if ``chunk_count`` is not an int
+                in ``[1, 100000]`` or exceeds the count stored for the document
+                (#80).
         """
         if self.vector_source is None:
             raise ValueError("A vector_source is required for delete")
@@ -980,9 +1002,22 @@ class DocumentPipeline:
             doc_id, count, reg_collection = self._doc_registry[key]
             target = reg_collection
         elif document_id is not None and chunk_count is not None:
+            _validate_bounded_int("chunk_count", chunk_count, 1, _MAX_DELETE_CHUNK_COUNT)
             doc_id = document_id
-            count = chunk_count
             target = collection or self.collection
+            # Derive the real chunk count from the in-process registry when this
+            # document was ingested here — a caller must not claim more chunks
+            # than were stored and drive extra backend delete calls (#80).
+            stored = next(
+                (c for (d, c, _) in self._doc_registry.values() if d == doc_id),
+                None,
+            )
+            if stored is not None and chunk_count > stored:
+                raise ValueError(
+                    f"chunk_count {chunk_count} exceeds the {stored} chunk(s) "
+                    f"stored for document {doc_id!r}"
+                )
+            count = chunk_count
         else:
             raise ValueError(
                 "Provide either 'path' or both 'document_id' and 'chunk_count'"
@@ -1211,9 +1246,13 @@ class DocumentPipeline:
 
         Raises:
             ValueError: If ``embedding_model`` or ``vector_source`` is not set
-                and ``mode`` is ``"vector"`` or ``"hybrid"``.
+                and ``mode`` is ``"vector"`` or ``"hybrid"``; if ``k`` is not an
+                int in ``[1, 100]`` or ``context_chunks`` is not an int in
+                ``[0, 5]`` (#80).
         """
         _validate_filters(filters)
+        _validate_bounded_int("k", k, 1, _MAX_SEARCH_K)
+        _validate_bounded_int("context_chunks", context_chunks, 0, _MAX_CONTEXT_CHUNKS)
         target = collection or self.collection
 
         # ------------------------------------------------------------------

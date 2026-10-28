@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from blue_data.core.utils.path_utils import contain
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from doc_api.config import get_pipeline
 
@@ -45,12 +45,14 @@ class IngestRequest(BaseModel):
 
 class SearchRequest(BaseModel):
     query: str
-    k: int = 5
+    # Bound caller input so one request can't drive unbounded CPU/backend work
+    # (#80); mirrors the library's validation in DocumentPipeline.search.
+    k: int = Field(default=5, ge=1, le=100)
     collection: Optional[str] = None
     filter: Optional[Dict[str, Any]] = None
     mode: str = "vector"
     rich: bool = False
-    context_chunks: int = 1
+    context_chunks: int = Field(default=1, ge=0, le=5)
 
 
 class EnsureIndexRequest(BaseModel):
@@ -60,7 +62,9 @@ class EnsureIndexRequest(BaseModel):
 class DeleteRequest(BaseModel):
     path: Optional[str] = None
     document_id: Optional[str] = None
-    chunk_count: Optional[int] = None
+    # A document_id delete reconstructs chunk IDs 0..chunk_count-1 and issues one
+    # backend delete each; bound it so a huge value can't pin a worker (#80).
+    chunk_count: Optional[int] = Field(default=None, ge=1, le=100_000)
     collection: Optional[str] = None
 
 
@@ -71,7 +75,7 @@ class FindRequest(BaseModel):
 class FindThenSearchRequest(BaseModel):
     query: str
     find_filter: Optional[Dict[str, Any]] = None
-    k: int = 5
+    k: int = Field(default=5, ge=1, le=100)  # bound caller input (#80)
     collection: Optional[str] = None
     mode: str = "vector"
 
