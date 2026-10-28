@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from blue_data.core.schema import DataSchema
+from blue_data.core.utils.path_utils import contain
 from blue_data.source.source import DataSource
 from blue_data.source.vector.vector_source import VectorSource
 
@@ -81,6 +82,7 @@ class DocumentDataSource(DataSource):
         record_store: Optional[RecordStore] = None,
         graph_source: Optional["GraphSource"] = None,
         graph_database: str = "documents",
+        documents_root: Optional[str] = None,
     ):
         """
         Args:
@@ -135,6 +137,10 @@ class DocumentDataSource(DataSource):
         overlap = props.get("overlap", overlap)
         graph_database = props.get("graph_database", graph_database)
         ocr_fallback = props.get("ocr_fallback", ocr_fallback)
+        # Optional documents root: when set, caller-supplied ingest paths are
+        # resolved under it and anything outside is refused (#126). None keeps the
+        # historical unconfined behaviour.
+        self._documents_root = props.get("documents_root", documents_root)
 
         if embedding_model is None:
             embedding_model = self._build_embedding(props)
@@ -301,11 +307,30 @@ class DocumentDataSource(DataSource):
         """
         return self._pipeline.ingest_text(text, file_name=file_name, mime_type=mime_type, collection=collection)
 
+    def _resolve_ingest_path(self, path: str) -> str:
+        """Confine a caller-supplied ingest *path* to ``documents_root`` (#126).
+
+        When no root is configured the path is returned unchanged (historical
+        behaviour). Otherwise the path is treated as relative to the root and each
+        component is walked through blue-data's ``contain()``, which rejects
+        absolute paths, ``..`` traversal, and symlinks that escape the root."""
+        root = self._documents_root
+        if not root:
+            return path
+        parts = Path(path).parts
+        if not parts:
+            raise ValueError(f"DOCUMENT.INGEST path is empty: {path!r}")
+        current = str(Path(root).resolve())
+        for part in parts:
+            current = contain(current, part)
+        return current
+
     def _ingest(self, request: Dict[str, Any], collection_override=None) -> List[Dict[str, Any]]:
         path = request.get("path")
         if not path:
             raise ValueError("DOCUMENT.INGEST requires a 'path' field")
 
+        path = self._resolve_ingest_path(path)
         suffix = Path(path).suffix.lower()
         self.properties["connection"]["protocol"] = self._PROTOCOL_BY_SUFFIX.get(suffix, "document")
 
