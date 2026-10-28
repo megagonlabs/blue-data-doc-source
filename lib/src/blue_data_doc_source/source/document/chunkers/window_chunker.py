@@ -58,6 +58,11 @@ class WindowChunker(Chunker):
             if chunk_text:
                 chunks.append(chunk_text)
 
+            # Stop once the window reaches the end; otherwise the overlap step-back
+            # emits a redundant tail chunk that is a substring of this one. #85
+            if end >= len(words):
+                break
+
             start = end - self.overlap
 
         return chunks
