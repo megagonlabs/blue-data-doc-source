@@ -96,3 +96,23 @@ def test_regex_fallback_used_when_nltk_unavailable():
         chunks = chunker.chunk(SENTENCES)
     assert len(chunks) >= 1
     assert all(isinstance(c, str) and c for c in chunks)
+
+
+def test_overlap_plus_sentence_does_not_exceed_chunk_size():
+    # #85: the carried overlap must be trimmed so overlap + next sentence stays
+    # within chunk_size. SentenceChunker(10, 8) previously produced an 18-word chunk.
+    with patch.dict("sys.modules", {"nltk": None}):
+        chunks = SentenceChunker(chunk_size=10, overlap=8).chunk(
+            "a b c d e f g h. i j k l m n o p q r. s t."
+        )
+    assert [len(c.split()) for c in chunks] == [8, 10, 2]
+    assert all(len(c.split()) <= 10 for c in chunks)
+
+
+def test_word_fallback_has_no_redundant_tail_chunk():
+    # The no-sentence-boundary word fallback must also stop at the end (#85).
+    with patch.dict("sys.modules", {"nltk": None}):
+        chunks = SentenceChunker(chunk_size=1000, overlap=150).chunk(
+            " ".join(f"w{i}" for i in range(900))
+        )
+    assert len(chunks) == 1

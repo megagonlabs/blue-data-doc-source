@@ -105,6 +105,11 @@ class SentenceChunker(Chunker):
                 current = overlap_sents
                 current_words = overlap_words
 
+                # Trim carried overlap so the incoming sentence doesn't push the
+                # new chunk past chunk_size. #85
+                while current and current_words + sent_word_count > self.chunk_size:
+                    current_words -= len(current.pop(0).split())
+
             current.append(sent)
             current_words += sent_word_count
 
@@ -122,6 +127,10 @@ class SentenceChunker(Chunker):
             chunk_text = " ".join(words[start:end]).strip()
             if chunk_text:
                 chunks.append(chunk_text)
+            # Stop once the window reaches the end, so the overlap step-back
+            # doesn't emit a redundant substring tail chunk. #85
+            if end >= len(words):
+                break
             start = end - self.overlap
         return chunks
 
