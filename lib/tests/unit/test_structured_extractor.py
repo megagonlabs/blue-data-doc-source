@@ -18,6 +18,9 @@ from blue_data_doc_source.source.document.schema.structured_extractor import (
 # ---------------------------------------------------------------------------
 
 try:
+    import datetime
+    from decimal import Decimal
+
     from pydantic import BaseModel
 
     class _EmploymentContract(BaseModel):
@@ -25,6 +28,13 @@ try:
         start_date: str
         base_salary: str
         non_compete: bool
+
+    class _TypedLease(BaseModel):
+        """Model with non-JSON-native field types — for the #89 regression."""
+        tenant: str
+        start_date: datetime.date
+        signed_at: datetime.datetime
+        monthly_rent: Decimal
 
     HAS_PYDANTIC = True
 except ImportError:
@@ -164,6 +174,28 @@ class TestValidate:
         result = extractor._validate({"irrelevant_key": "value"})
         assert isinstance(result, dict)
 
+    @pydantic_only
+    def test_pydantic_coerces_date_decimal_to_json_native(self):
+        # date/datetime/Decimal fields must come back as JSON-native primitives
+        # so a JSON record store can serialise them — model_dump() alone returns
+        # Python objects and a JSON store then dies mid-ingest (#89).
+        import json
+
+        extractor = StructuredFieldExtractor(schema=_TypedLease)
+        result = extractor._validate({
+            "tenant": "Alice",
+            "start_date": "2026-01-01",
+            "signed_at": "2026-01-01T09:30:00",
+            "monthly_rent": "1500.50",
+        })
+        assert result["start_date"] == "2026-01-01"
+        assert isinstance(result["start_date"], str)
+        assert isinstance(result["signed_at"], str)
+        # Decimal must be dumped as a JSON-native number/string, not a Decimal.
+        assert isinstance(result["monthly_rent"], (str, float, int))
+        # The whole dict must be JSON-serialisable — this is what ingest needs.
+        json.dumps(result)
+
     def test_non_pydantic_returns_data_unchanged(self):
         extractor = StructuredFieldExtractor(schema=_LeaseInfo)
         data = {"tenant": "Bob", "monthly_rent": 1500.0}
@@ -296,6 +328,34 @@ class TestStructuredExtractorInPipeline:
         chunks = pipeline.ingest_text("Lease content here.", file_name="lease.txt")
 
         assert all(c.get("document_type") == "unknown" for c in chunks)
+
+    @pydantic_only
+    def test_ingest_with_date_field_and_file_record_store(self, tmp_path):
+        # End-to-end repro for #89: a schema with a date field + a JSON-backed
+        # record store used to fail with "Object of type date is not JSON
+        # serializable" after classification. JSON-mode dump fixes it.
+        from blue_data_doc_source import DocumentPipeline, FileRecordStore
+
+        extractor = StructuredFieldExtractor(schema=_TypedLease)
+        extractor._client = _make_mock_client(
+            '{"tenant": "Alice", "start_date": "2026-01-01", '
+            '"signed_at": "2026-01-01T09:30:00", "monthly_rent": "1500.50"}'
+        )
+        store_path = str(tmp_path / "records.json")
+        pipeline = DocumentPipeline(
+            chunk_size=100, overlap=10,
+            field_extractor=extractor,
+            record_store=FileRecordStore(store_path),
+        )
+        # Must not raise — this is the exact failure the issue reports.
+        pipeline.ingest_text("Lease between Alice and Bob starting 2026-01-01.",
+                             file_name="lease.txt")
+
+        # Field persisted as an ISO string, and survives a reload from disk.
+        reloaded = DocumentPipeline(record_store=FileRecordStore(store_path))
+        records = reloaded.find_records()
+        assert len(records) == 1
+        assert records[0]["fields"]["start_date"] == "2026-01-01"
 
 
 # ---------------------------------------------------------------------------

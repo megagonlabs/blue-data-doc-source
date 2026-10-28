@@ -64,7 +64,9 @@ class StructuredFieldExtractor(FieldExtractor):
     no manual field spec string required.
 
     For Pydantic models, validates and coerces the LLM output via
-    ``model_validate`` before returning; falls back to the raw parsed dict if
+    ``model_validate``, then dumps it in JSON mode so date/datetime/Decimal
+    fields become JSON-native primitives (ISO strings, floats) that a JSON
+    record store can serialise (#89); falls back to the raw parsed dict if
     validation fails.
 
     Args:
@@ -117,7 +119,15 @@ class StructuredFieldExtractor(FieldExtractor):
         if not self._pydantic:
             return data
         try:
-            return self._schema.model_validate(data).model_dump(exclude_none=True)
+            # mode="json" coerces date/datetime/Decimal/etc. to JSON-native
+            # primitives (ISO strings, floats) so a JSON record store
+            # (FileRecordStore / JsonSourceRecordStore) can serialise the
+            # extracted fields — model_dump() alone returns Python objects and
+            # ingest then dies with "Object of type date is not JSON
+            # serializable" (#89).
+            return self._schema.model_validate(data).model_dump(
+                mode="json", exclude_none=True
+            )
         except Exception:
             return data
 
