@@ -261,29 +261,15 @@ def find_then_search(
     """
     try:
         pipeline = _get_pipeline()
-        matched = pipeline.find_records(find_filter)
-        if not matched:
-            return json.dumps({"results": [], "count": 0})
-        seen: set = set()
-        results = []
-        for doc in matched:
-            doc_id = doc.get("document_id")
-            if not doc_id:
-                continue
-            for chunk in pipeline.search(query, k=k, collection=collection, filters={"document_id": doc_id}):
-                cid = chunk.get("chunk_id", "")
-                if cid in seen:
-                    continue
-                seen.add(cid)
-                results.append({
-                    "chunk_id": chunk.get("chunk_id"),
-                    "text": chunk.get("text"),
-                    "file_name": chunk.get("file_name"),
-                    "document_type": chunk.get("document_type"),
-                    "score": chunk.get("score"),
-                })
-        results.sort(key=lambda r: r.get("score") or 0, reverse=True)
-        return json.dumps({"results": results[:k], "count": min(len(results), k)})
+        # Call the shared merge (correctly ranked — ascending cosine distance in
+        # vector mode) instead of re-implementing it here. The duplicated loop sorted
+        # distances descending, returning the worst match first (#147 / ADR-012).
+        hits = pipeline.find_then_search(query, find_filter=find_filter, k=k, collection=collection)
+        results = [
+            {key: h.get(key) for key in ("chunk_id", "text", "file_name", "document_type", "score")}
+            for h in hits
+        ]
+        return json.dumps({"results": results, "count": len(results)})
     except ValueError as exc:
         return json.dumps({"error": str(exc)})
     except Exception as exc:

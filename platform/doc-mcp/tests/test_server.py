@@ -356,25 +356,55 @@ def test_find_documents_respects_limit():
     assert len(result["records"]) == 3
 
 
-def test_find_then_search_merges_scoped_results():
-    matched = [{"document_id": "doc_a"}]
+def test_find_then_search_delegates_to_pipeline_merge():
+    # The tool must call the shared DocumentPipeline.find_then_search merge, not
+    # re-implement it (#147).
     chunk = _make_chunk(doc_id="doc_a", idx=0)
     chunk["score"] = 0.9
-    pipeline = _mock_pipeline(
-        find_records=MagicMock(return_value=matched),
-        search=MagicMock(return_value=[chunk]),
-    )
+    pipeline = _mock_pipeline(find_then_search=MagicMock(return_value=[chunk]))
     with patch.object(_server, "_pipeline", pipeline):
         result = json.loads(_server.find_then_search("termination", {"document_type": "contract"}, k=3))
+    pipeline.find_then_search.assert_called_once()
     assert result["count"] == 1
     assert result["results"][0]["chunk_id"] == "doc_a_chunk_000000"
 
 
 def test_find_then_search_no_matches_returns_empty():
-    pipeline = _mock_pipeline(find_records=MagicMock(return_value=[]))
+    pipeline = _mock_pipeline(find_then_search=MagicMock(return_value=[]))
     with patch.object(_server, "_pipeline", pipeline):
         result = json.loads(_server.find_then_search("x", {"document_type": "nope"}))
     assert result == {"results": [], "count": 0}
+
+
+def test_find_then_search_ranks_nearest_first_real_backend(tmp_path):
+    # #147: real MemoryVectorSource + deterministic embedding — the MCP tool must
+    # return the nearest chunk first and match DocumentPipeline.find_then_search.
+    from blue_data.source.vector.memory_vector_source import MemoryVectorSource
+    from blue_data_doc_source import DocumentPipeline, EmbeddingModel, KeywordClassifier
+
+    class _Toy(EmbeddingModel):
+        dim = 2
+
+        def embed_text(self, text):
+            return [float(text.lower().count("termination")), 1.0]
+
+    pipeline = DocumentPipeline(
+        embedding_model=_Toy(),
+        vector_source=MemoryVectorSource(name="m"),
+        classifier=KeywordClassifier(),
+    )
+    pipeline.ensure_index()
+    base = "SERVICES AGREEMENT between the parties. Governing law. Indemnification. "
+    pipeline.ingest_text(base + "termination " * 5, file_name="far.txt")
+    pipeline.ingest_text(base + "termination once", file_name="nearest.txt")
+
+    find_filter = {"document_type": "contract"}
+    with patch.object(_server, "_pipeline", pipeline):
+        mcp = json.loads(_server.find_then_search("termination", find_filter, k=1))["results"]
+    lib = pipeline.find_then_search("termination", find_filter=find_filter, k=1)
+
+    assert mcp[0]["file_name"] == "nearest.txt"
+    assert [h["file_name"] for h in mcp] == [h["file_name"] for h in lib]
 
 
 def test_get_document_record_returns_record():
