@@ -5,9 +5,6 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 if TYPE_CHECKING:
     from blue_data.source.graph.graph_source import GraphSource
 
-# Entity types BasicEnricher can produce — used for deterministic ID lookup.
-_KNOWN_ENTITY_TYPES = ("PROPER_NOUN", "DATE", "MONEY", "EMAIL", "PERCENT", "UNKNOWN")
-
 
 class GraphIndexer:
     """Writes document/chunk/section/entity nodes and edges into a GraphSource.
@@ -259,16 +256,16 @@ class GraphIndexer:
     ) -> List[Dict[str, Any]]:
         """Find chunks that mention *entity_name*, via graph traversal.
 
-        Constructs the entity node ID deterministically (one dict lookup per
-        entity type) rather than a full ``match_nodes`` scan. The subsequent
-        edge traversal to collect MENTIONS neighbours is proportional to the
-        number of entity mentions, not total corpus size.
+        With *entity_type*, the entity node ID is constructed deterministically
+        (a single lookup). Without it, entity nodes are matched by name across all
+        types (a ``match_nodes`` scan of Entity nodes) so entities typed by any
+        enricher — including LLMEnricher's ORG/PERSON/LOCATION — are found.
         Matching is case-insensitive on the stored name.
 
         Args:
             entity_name: Entity text to search for.
-            entity_type: Restrict to one entity type (PROPER_NOUN, DATE, …).
-                When ``None``, all known entity types are tried.
+            entity_type: Restrict to one entity type (PROPER_NOUN, ORG, PERSON, …).
+                When ``None``, entities of any type are matched by name.
             k: Maximum number of chunk results to return.
 
         Returns:
@@ -277,13 +274,23 @@ class GraphIndexer:
             ``entity_type``.
         """
         normalized = entity_name.lower()
-        types_to_try = [entity_type] if entity_type else list(_KNOWN_ENTITY_TYPES)
 
         entity_node_ids: List[str] = []
-        for etype in types_to_try:
-            eid = f"entity:{etype}:{normalized}"
+        if entity_type:
+            # Fast deterministic lookup when the type is known.
+            eid = f"entity:{entity_type}:{normalized}"
             if self._graph.get_node(self._db, eid) is not None:
                 entity_node_ids.append(eid)
+        else:
+            # No type given: match by name across ALL entity types. Probing only
+            # _KNOWN_ENTITY_TYPES missed entities typed by LLMEnricher (ORG, PERSON,
+            # LOCATION, …), so the lookup returned [] for them. #88
+            for node in (self._graph.match_nodes(self._db, label="Entity") or []):
+                props = node.get("properties", {}) or {}
+                if str(props.get("name", "")).lower() == normalized:
+                    node_id = node.get("id")
+                    if node_id:
+                        entity_node_ids.append(node_id)
 
         results: List[Dict[str, Any]] = []
         seen: set = set()
