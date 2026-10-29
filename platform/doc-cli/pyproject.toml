@@ -23,3 +23,9 @@ blue-docdb = "blue_data_doc_cli.main:cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# Ship profile_spec.json inside the wheel — profile.py loads it next to the
+# module (cli_spec/load_spec), so a non-editable install fails every command
+# without this. #124
+blue_data_doc_cli = ["*.json"]
