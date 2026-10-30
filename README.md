@@ -42,7 +42,7 @@ blue-data-doc-source/
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.12 or 3.13
 - Sibling repo cloned beside this one: [`blue-data`](../blue-data)
 - `OPENAI_API_KEY` — for OpenAI embeddings, LLM field extraction/enrichment, and natural-language queries (not needed for parsing, classification, or dummy embeddings):
 

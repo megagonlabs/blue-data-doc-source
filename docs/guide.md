@@ -179,12 +179,15 @@ doc_source = DocumentDataSource(
 )
 registry.register_source(doc_source)
 
-# Ingest via the registry
+# Ingest via the registry (a write op, so it needs commit)
 registry.execute_query(
     source="legal_corpus",
     query={"op": "DOCUMENT.INGEST", "path": "contract.pdf", "collection": "legal_corpus"},
+    optional_properties={"commit": True},
 )
 ```
+
+Registry queries are read-only by default. `DocumentDataSource` declares `INGEST`, `DELETE` and `ENSURE_INDEX` in `_WRITE_OPS`, so the registry refuses them unless `optional_properties={"commit": True}` is passed; the other `DOCUMENT.*` ops are declared in `_READ_OPS` and run without it (#170).
 
 ### sync_source — schema discovery
 

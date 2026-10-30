@@ -12,7 +12,7 @@ See the [root README](../README.md) for full documentation, installation instruc
 pip install -e lib/
 ```
 
-Requires Python 3.10+.
+Requires Python 3.12 or 3.13.
 
 ## Testing
 

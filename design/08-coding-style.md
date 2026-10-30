@@ -24,7 +24,7 @@ All three are declared as `dev` dependencies. CI fails on any lint, type, or tes
 ```toml
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

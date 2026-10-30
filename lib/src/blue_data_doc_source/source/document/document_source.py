@@ -17,21 +17,6 @@ if TYPE_CHECKING:
     from blue_data.source.graph.graph_source import GraphSource
 
 
-# Ops a natural-language query may trigger by default. State-changing ops
-# (INGEST, DELETE, ENSURE_INDEX) are excluded so that untrusted text routed
-# through execute_query_nl — an end-user question, or text an agent forwards
-# from a retrieved document — cannot mutate state. Opt in with
-# ``allow_write_ops=True``. See issue #79.
-_READ_ONLY_NL_OPS = frozenset({
-    "DOCUMENT.SEARCH",
-    "DOCUMENT.FIND",
-    "DOCUMENT.FIND_THEN_SEARCH",
-    "DOCUMENT.GET_RECORD",
-    "DOCUMENT.GRAPH_NEIGHBORS",
-    "DOCUMENT.GRAPH_QUERY",
-})
-
-
 class DocumentDataSource(DataSource):
     """Top-level entry point for document ingestion and retrieval.
 
@@ -64,6 +49,27 @@ class DocumentDataSource(DataSource):
         results = source.execute_query_nl("find the termination clause")
         records = source.execute_query_nl("ingest /docs/policy.pdf into contracts")
     """
+
+    # Every op execute_query serves is in exactly one of these sets. blue-data's
+    # DataRegistry runs an op without ``optional_properties["commit"]`` only when
+    # it is a read; writes (and undeclared ops) need commit. See issue #170.
+    _WRITE_OPS = frozenset({
+        "DOCUMENT.INGEST",
+        "DOCUMENT.DELETE",
+        "DOCUMENT.ENSURE_INDEX",
+    })
+    # Also the ops a natural-language query may trigger by default, so that
+    # untrusted text routed through execute_query_nl — an end-user question, or
+    # text an agent forwards from a retrieved document — cannot mutate state.
+    # Opt in with ``allow_write_ops=True``. See issue #79.
+    _READ_OPS = frozenset({
+        "DOCUMENT.SEARCH",
+        "DOCUMENT.FIND",
+        "DOCUMENT.FIND_THEN_SEARCH",
+        "DOCUMENT.GET_RECORD",
+        "DOCUMENT.GRAPH_NEIGHBORS",
+        "DOCUMENT.GRAPH_QUERY",
+    })
 
     def __init__(
         self,
@@ -410,7 +416,7 @@ class DocumentDataSource(DataSource):
         if not isinstance(op_dict, dict) or not isinstance(op_dict.get("op"), str):
             raise ValueError(f"NLQueryParser returned an invalid op dict: {op_dict!r}")
         op = op_dict["op"]
-        if not allow_write_ops and op not in _READ_ONLY_NL_OPS:
+        if not allow_write_ops and op not in self._READ_OPS:
             raise ValueError(
                 f"Natural-language queries are restricted to read-only ops by default; "
                 f"{op!r} is not permitted. Pass allow_write_ops=True to allow "
