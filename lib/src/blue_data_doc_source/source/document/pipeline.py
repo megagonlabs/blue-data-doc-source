@@ -588,8 +588,12 @@ class DocumentPipeline:
         records = []
         chunk_index = 0
 
-        # Run document classification / schema extraction once per document.
+        # Run document classification / schema extraction once per document. The
+        # DocumentRecord is built here but written only after every chunk upsert
+        # succeeds (below) — so a crash / vector-store error mid-loop leaves no
+        # DocumentRecord to find, and re-ingesting from the source is a clean upsert (#49).
         document_type: Optional[str] = None
+        schema_record: Optional[Dict[str, Any]] = None
         if self.classifier is not None or self.field_extractor is not None:
             full_text = " ".join(p.get("text", "") for p in pages)
             if self.classifier is not None:
@@ -602,14 +606,14 @@ class DocumentPipeline:
             classifier_name = (
                 "llm" if self.field_extractor is not None else "keyword"
             )
-            self.record_store.upsert({
+            schema_record = {
                 "document_id": document_id,
                 "chunk_id": f"{document_id}_schema",
                 "document_type": document_type,
                 "fields": extracted_fields,
                 "classifier": classifier_name,
                 "confidence": confidence,
-            })
+            }
 
         for page in pages:
             page_num = page.get("page_num")
@@ -647,6 +651,12 @@ class DocumentPipeline:
                 self._upsert(chunk_id, record_dict, collection)
                 chunk_index += 1
 
+        # Every chunk upserted — now persist the DocumentRecord, stamped with the final
+        # chunk_count so a reader can validate the record against the vector store (#49).
+        if schema_record is not None:
+            schema_record["chunk_count"] = chunk_index
+            self.record_store.upsert(schema_record)
+
         if self._graph_indexer is not None:
             self._graph_indexer.index_document(document_id, file_name, document_type, records)
 
@@ -671,7 +681,9 @@ class DocumentPipeline:
         records = []
         chunk_index = 0
 
+        # DocumentRecord built here, written only after every chunk upsert succeeds (#49).
         document_type: Optional[str] = None
+        schema_record: Optional[Dict[str, Any]] = None
         if self.classifier is not None or self.field_extractor is not None:
             full_text = " ".join(b.get("text", "") for b in blocks)
             if self.classifier is not None:
@@ -682,14 +694,14 @@ class DocumentPipeline:
             if self.field_extractor is not None:
                 extracted_fields = self.field_extractor.extract(full_text, document_type)
             classifier_name = "llm" if self.field_extractor is not None else "keyword"
-            self.record_store.upsert({
+            schema_record = {
                 "document_id": document_id,
                 "chunk_id": f"{document_id}_schema",
                 "document_type": document_type,
                 "fields": extracted_fields,
                 "classifier": classifier_name,
                 "confidence": confidence,
-            })
+            }
 
         for block in blocks:
             block_type = block.get("type", "text")
@@ -749,6 +761,11 @@ class DocumentPipeline:
                             self._chunk_embeddings[chunk_id] = record.embedding
                     self._upsert(chunk_id, record_dict, collection)
                     chunk_index += 1
+
+        # Every chunk upserted — now persist the DocumentRecord with the final chunk_count (#49).
+        if schema_record is not None:
+            schema_record["chunk_count"] = chunk_index
+            self.record_store.upsert(schema_record)
 
         if self._graph_indexer is not None:
             self._graph_indexer.index_document(document_id, file_name, document_type, records)
