@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from blue_data_doc_source import StructuredFieldExtractor
+from blue_data_doc_source import ExtractionValidationError, StructuredFieldExtractor
 from blue_data_doc_source.source.document.schema.structured_extractor import (
     _field_spec_from_schema,
     _is_pydantic,
@@ -168,11 +168,20 @@ class TestValidate:
         assert result["non_compete"] is True
 
     @pydantic_only
-    def test_pydantic_validation_failure_falls_back_to_raw(self):
+    def test_pydantic_validation_failure_raises_in_strict_mode(self):
+        # #64: strict (the default) no longer silently returns the raw dict.
         extractor = StructuredFieldExtractor(schema=_EmploymentContract)
-        # Missing required fields — Pydantic will raise; should fall back
-        result = extractor._validate({"irrelevant_key": "value"})
-        assert isinstance(result, dict)
+        with pytest.raises(ExtractionValidationError) as exc:
+            extractor._validate({"irrelevant_key": "value"})
+        assert exc.value.errors  # carries the Pydantic errors
+
+    @pydantic_only
+    def test_pydantic_validation_failure_annotates_in_non_strict_mode(self):
+        extractor = StructuredFieldExtractor(schema=_EmploymentContract, strict=False)
+        with pytest.warns(UserWarning, match="failed schema validation"):
+            result = extractor._validate({"irrelevant_key": "value"})
+        assert result["_validation"]["status"] == "invalid"
+        assert result["_validation"]["errors"]
 
     @pydantic_only
     def test_pydantic_coerces_date_decimal_to_json_native(self):
@@ -196,15 +205,32 @@ class TestValidate:
         # The whole dict must be JSON-serialisable — this is what ingest needs.
         json.dumps(result)
 
-    def test_non_pydantic_returns_data_unchanged(self):
+    def test_non_pydantic_valid_returns_data_unchanged(self):
         extractor = StructuredFieldExtractor(schema=_LeaseInfo)
-        data = {"tenant": "Bob", "monthly_rent": 1500.0}
+        data = {"tenant": "Bob", "monthly_rent": 1500.0, "lease_term_months": 12}
         assert extractor._validate(data) is data
 
-    def test_json_schema_returns_data_unchanged(self):
+    def test_typeddict_missing_required_field_raises(self):
+        # #64: TypedDict paths now validate, not silently accept.
+        extractor = StructuredFieldExtractor(schema=_LeaseInfo)
+        with pytest.raises(ExtractionValidationError, match="lease_term_months"):
+            extractor._validate({"tenant": "Bob", "monthly_rent": 1500.0})
+
+    def test_typeddict_wrong_type_raises(self):
+        extractor = StructuredFieldExtractor(schema=_LeaseInfo)
+        with pytest.raises(ExtractionValidationError, match="monthly_rent"):
+            extractor._validate({"tenant": "Bob", "monthly_rent": "lots", "lease_term_months": 12})
+
+    def test_json_schema_valid_returns_data_unchanged(self):
         extractor = StructuredFieldExtractor(schema=_INVOICE_SCHEMA)
         data = {"vendor": "Acme", "total_due": 5000}
         assert extractor._validate(data) is data
+
+    def test_json_schema_wrong_type_raises(self):
+        # #64: JSON Schema is now validated explicitly, not silently accepted.
+        extractor = StructuredFieldExtractor(schema=_INVOICE_SCHEMA)
+        with pytest.raises(ExtractionValidationError):
+            extractor._validate({"vendor": "Acme", "total_due": "not a number"})
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +278,9 @@ class TestExtract:
         assert "total_due" in prompt
 
     def test_document_type_ignored(self):
-        extractor = self._extractor_with_mock(_LeaseInfo, '{"tenant": "Bob"}')
+        extractor = self._extractor_with_mock(
+            _LeaseInfo, '{"tenant": "Bob", "monthly_rent": 1500.0, "lease_term_months": 12}'
+        )
         # document_type is irrelevant for StructuredFieldExtractor
         result1 = extractor.extract("text", "contract")
         result2 = extractor.extract("text", "unknown")
@@ -282,10 +310,20 @@ class TestExtract:
             _w.simplefilter("error")  # any warning becomes an error
             extractor.extract("short document", "unknown")  # must not raise
 
-    def test_malformed_llm_response_returns_raw_response_key(self):
+    def test_malformed_llm_response_raises_in_strict_mode(self):
+        # #64: a non-JSON response is a hard failure in strict mode, not a silent
+        # {"raw_response": ...} dict masquerading as extracted fields.
         extractor = self._extractor_with_mock(_LeaseInfo, "Sorry, I cannot extract that.")
-        result = extractor.extract("text", "unknown")
+        with pytest.raises(ExtractionValidationError, match="not valid JSON"):
+            extractor.extract("text", "unknown")
+
+    def test_malformed_llm_response_annotated_in_non_strict_mode(self):
+        extractor = StructuredFieldExtractor(schema=_LeaseInfo, strict=False)
+        extractor._client = _make_mock_client("Sorry, I cannot extract that.")
+        with pytest.warns(UserWarning):
+            result = extractor.extract("text", "unknown")
         assert "raw_response" in result
+        assert result["_validation"]["status"] == "invalid"
 
     @pydantic_only
     def test_extract_pydantic_validates_output(self):
@@ -323,7 +361,9 @@ class TestStructuredExtractorInPipeline:
         from blue_data_doc_source import DocumentPipeline
 
         extractor = StructuredFieldExtractor(schema=_LeaseInfo)
-        extractor._client = _make_mock_client('{"tenant": "Dave"}')
+        extractor._client = _make_mock_client(
+            '{"tenant": "Dave", "monthly_rent": 1400.0, "lease_term_months": 24}'
+        )
         pipeline = DocumentPipeline(chunk_size=100, overlap=10, field_extractor=extractor)
         chunks = pipeline.ingest_text("Lease content here.", file_name="lease.txt")
 

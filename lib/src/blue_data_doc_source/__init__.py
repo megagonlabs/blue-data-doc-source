@@ -10,6 +10,7 @@ from .source.document.graph import GraphIndexer
 from .source.document.parsers import Parser, TextParser, PDFParser, DocxParser, PlumberPDFParser
 from .source.document.schema import (
     DocumentClassifier,
+    ExtractionValidationError,
     FieldExtractor,
     KeywordClassifier,
     LLMFieldExtractor,
@@ -43,6 +44,7 @@ __all__ = [
     "PlumberPDFParser",
     "NLQueryParser",
     "DocumentClassifier",
+    "ExtractionValidationError",
     "FieldExtractor",
     "KeywordClassifier",
     "LLMFieldExtractor",
