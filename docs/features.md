@@ -650,6 +650,8 @@ pipeline = DocumentPipeline(
 # Now every document produces the same field names — filters are reliable
 ```
 
+The LLM output is validated against the schema — Pydantic models, JSON Schema dicts, and TypedDicts alike. By default (`strict=True`) output that fails to parse or violate the schema raises `ExtractionValidationError` rather than silently storing an unvalidated dict (#64). Pass `strict=False` to instead keep the best-effort fields and surface the outcome under a reserved `"_validation"` key (`{"status": "invalid", "errors": [...]}`).
+
 
 ---
 
