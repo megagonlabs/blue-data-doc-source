@@ -351,7 +351,8 @@ source = DocumentDataSource(
 source = DocumentDataSource(
     name="docs",
     embedding_model=OpenAIEmbeddingModel(),
-    vector_source=RedisVectorSource(name="redis", properties={"connection": {"host": "localhost", "port": 6379}}),
+    # scan_prefix namespaces this source's Redis keys and index; it is required.
+    vector_source=RedisVectorSource(name="redis", properties={"connection": {"host": "localhost", "port": 6379, "scan_prefix": "reports:"}}),
     default_collection="reports",
 )
 
