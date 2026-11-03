@@ -1,7 +1,9 @@
 """MCP server exposing blue-data-doc-source as AI-callable tools.
 
-Run:
-    python platform/doc-mcp/src/server.py
+Run (after ``pip install`` of this package):
+    blue-data-doc-mcp
+or, from a source checkout:
+    python -m blue_data_doc_mcp.server
 
 Configure via environment variables:
 
@@ -339,5 +341,10 @@ def graph_query(
         return json.dumps({"error": f"Graph query failed: {exc}"})
 
 
-if __name__ == "__main__":
+def main():
+    """Console-script entry point (``blue-data-doc-mcp``). Starts the server."""
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

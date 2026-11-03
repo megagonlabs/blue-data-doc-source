@@ -52,9 +52,9 @@ blue-docdb --help
 
 ```bash
 pip install -e lib/
-pip install -e "lib/.[mcp]"
+pip install -e platform/doc-mcp/
 
-python platform/doc-mcp/src/server.py
+blue-data-doc-mcp          # console script installed by the package
 ```
 
 ---

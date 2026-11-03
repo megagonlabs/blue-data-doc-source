@@ -50,14 +50,15 @@ All configuration is via environment variables:
 
 ## Running with Claude Desktop
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Install the package first (`pip install -e platform/doc-mcp/`, or a built
+wheel) so the `blue-data-doc-mcp` console script is on `PATH`, then add to
+`~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "blue-data-doc-source": {
-      "command": "python3",
-      "args": ["/path/to/blue-data-doc-source/platform/doc-mcp/src/server.py"],
+      "command": "blue-data-doc-mcp",
       "env": {
         "BLUE_DOC_EMBEDDING": "openai",
         "OPENAI_API_KEY": "sk-...",
@@ -80,8 +81,7 @@ Add to your project's `.mcp.json` or `~/.claude.json`:
 {
   "mcpServers": {
     "blue-data-doc-source": {
-      "command": "python3",
-      "args": ["platform/doc-mcp/src/server.py"],
+      "command": "blue-data-doc-mcp",
       "env": {
         "BLUE_DOC_EMBEDDING": "openai",
         "OPENAI_API_KEY": "sk-...",
@@ -97,13 +97,13 @@ Add to your project's `.mcp.json` or `~/.claude.json`:
 For development or debugging, run the server directly:
 
 ```bash
-BLUE_DOC_EMBEDDING=dummy python3 platform/doc-mcp/src/server.py
+BLUE_DOC_EMBEDDING=dummy blue-data-doc-mcp
 ```
 
 The server listens on stdio (MCP standard transport). Use the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) to call tools interactively:
 
 ```bash
-npx @modelcontextprotocol/inspector python3 platform/doc-mcp/src/server.py
+npx @modelcontextprotocol/inspector blue-data-doc-mcp
 ```
 
 ## Redis setup

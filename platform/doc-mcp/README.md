@@ -8,8 +8,10 @@ Full documentation — configuration, tool list, and Claude Desktop integration 
 
 ```bash
 pip install -e lib/ -e platform/doc-mcp/
-python platform/doc-mcp/src/server.py
+blue-data-doc-mcp          # console script installed by the wheel
 ```
+
+(From a source checkout you can also run `python -m blue_data_doc_mcp.server`.)
 
 ## Testing
 
