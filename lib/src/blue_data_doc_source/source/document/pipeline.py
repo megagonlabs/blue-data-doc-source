@@ -44,8 +44,12 @@ class ColdChunkIndexWarning(UserWarning):
     """
 
 
-# Chars that need escaping inside Redis Search TAG filter values.
-_TAG_SPECIAL_RE = re.compile(r'([,.<>{}\[\]"\'`:;!@#$%^&*\-+=~|/ ])')
+# Escape *every* non-alphanumeric character inside a Redis Search TAG filter
+# value — the approach the RediSearch docs recommend. The old hand-picked set
+# missed ``(``, ``)``, ``?`` and ``\``, so a filter value like ``report (1).txt``
+# was a RediSearch syntax error and ``x?y.txt`` / ``a\b.txt`` matched nothing (#149).
+# ``\W`` covers all of them (and leaves ``_`` and alphanumerics untouched).
+_TAG_SPECIAL_RE = re.compile(r'(\W)')
 
 # Fields indexed as TAG in the vector index — used for pre-filtering.
 _FILTER_TAG_FIELDS = ("document_id", "document_type", "file_name", "section_title", "mime_type", "content_type")

@@ -40,6 +40,17 @@ class TestBuildFilterExpr:
         expr = _build_filter_expr({"mime_type": "application/pdf"})
         assert r"\/" in expr
 
+    def test_parens_question_backslash_brace_escaped(self):
+        # These were missed by the old hand-picked set: a value like
+        # "report (1).txt" was a RediSearch syntax error and "x?y"/"a\b" matched
+        # nothing. Every non-alphanumeric char must now be backslash-escaped (#149).
+        expr = _build_filter_expr({"file_name": "report (1).txt"})
+        assert r"report\ \(1\)\.txt" in expr
+
+        assert r"x\?y" in _build_filter_expr({"file_name": "x?y.txt"})
+        assert r"a\\b" in _build_filter_expr({"file_name": "a\\b.txt"})
+        assert r"brace\}x" in _build_filter_expr({"file_name": "brace}x.txt"})
+
     def test_section_title_space_escaped(self):
         expr = _build_filter_expr({"section_title": "Eligibility Requirements"})
         assert r"\ " in expr or r"\  " in expr or "Eligibility" in expr
