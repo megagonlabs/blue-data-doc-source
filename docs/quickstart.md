@@ -36,7 +36,8 @@ from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
 source = DocumentDataSource(
     name="contracts",
     embedding_model=OpenAIEmbeddingModel(model="text-embedding-3-small"),
-    vector_source=RedisVectorSource(name="my_redis", properties={"connection": {"host": "localhost", "port": 6379}}),
+    # scan_prefix namespaces this source's Redis keys and index; it is required.
+    vector_source=RedisVectorSource(name="my_redis", properties={"connection": {"host": "localhost", "port": 6379, "scan_prefix": "contracts:"}}),
     enricher=BasicEnricher(),
     chunk_size=1000,
     overlap=150,

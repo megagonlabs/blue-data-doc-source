@@ -335,8 +335,9 @@ from blue_data.source.vector.memory_vector_source import MemoryVectorSource
 vs = MemoryVectorSource()
 
 # Redis Stack — production (requires redis-stack-server)
+# scan_prefix namespaces this source's Redis keys and index; it is required.
 from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
-vs = RedisVectorSource(name="docs", properties={"connection": {"host": "localhost", "port": 6379}})
+vs = RedisVectorSource(name="docs", properties={"connection": {"host": "localhost", "port": 6379, "scan_prefix": "documents:"}})
 ```
 
 Always call `ensure_index` (or `DOCUMENT.ENSURE_INDEX`) before the first ingest. The pipeline does not auto-create the index.
