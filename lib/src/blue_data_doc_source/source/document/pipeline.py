@@ -1008,16 +1008,34 @@ class DocumentPipeline:
 
         if path is not None:
             key = str(Path(path))
-            if key not in self._doc_registry:
-                raise ValueError(
-                    f"No registry entry for {path!r}. "
-                    "Pass document_id and chunk_count to delete cross-process."
-                )
-            # A path delete uses the collection the document was ingested into (from
-            # the registry) — a caller-supplied ``collection`` must not redirect it to
-            # a collection the document was never stored in (#78).
-            doc_id, count, reg_collection = self._doc_registry[key]
-            target = reg_collection
+            if key in self._doc_registry:
+                # A path delete uses the collection the document was ingested into
+                # (from the registry) — a caller-supplied ``collection`` must not
+                # redirect it to a collection the document was never stored in (#78).
+                doc_id, count, reg_collection = self._doc_registry[key]
+                target = reg_collection
+            else:
+                # The in-process registry is empty in a fresh process (every CLI
+                # invocation is a new process), so re-derive the document_id by
+                # hashing the file — exactly as ingest does — and read chunk_count
+                # from the persisted record. Requires a persistent record_store and
+                # the file still on disk (#86).
+                p = Path(path)
+                if not p.exists():
+                    raise ValueError(
+                        f"No registry entry for {path!r} and the file is not present "
+                        "to re-derive its id. Pass document_id and chunk_count to "
+                        "delete cross-process."
+                    )
+                doc_id = self._file_document_id(p)
+                record = self.record_store.get(doc_id)
+                if not record or record.get("chunk_count") is None:
+                    raise ValueError(
+                        f"No stored record for {path!r} (document {doc_id}). Configure "
+                        "a persistent record_store, or pass document_id and chunk_count."
+                    )
+                count = int(record["chunk_count"])
+                target = collection or self.collection
         elif document_id is not None and chunk_count is not None:
             _validate_bounded_int("chunk_count", chunk_count, 1, _MAX_DELETE_CHUNK_COUNT)
             doc_id = document_id

@@ -25,3 +25,14 @@ def test_build_pipeline_without_redis_has_no_vector_source(monkeypatch):
     monkeypatch.delenv("BLUE_DOC_REDIS_HOST", raising=False)
     pipeline = _build_pipeline()
     assert pipeline.vector_source is None
+
+
+def test_build_pipeline_configures_classifier(monkeypatch):
+    # Without a classifier no DocumentRecord is written, so FIND / FIND_THEN_SEARCH /
+    # GET_RECORD always return empty. The factory must configure one (#86).
+    from doc_api.config import _build_pipeline
+
+    monkeypatch.delenv("BLUE_DOC_REDIS_HOST", raising=False)
+    pipeline = _build_pipeline()
+    assert pipeline.classifier is not None
+    assert pipeline.record_store is not None

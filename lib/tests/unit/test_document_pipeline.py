@@ -503,6 +503,54 @@ def test_delete_never_ingested_document_reports_zero(tmp_path):
     assert pipeline.delete(document_id="doc_doesnotexist", chunk_count=500) == 0
 
 
+# --- #86: cross-process delete(path=...) via a persistent record store ---
+
+def test_delete_by_path_cross_process(tmp_path):
+    # A fresh pipeline (new process) has an empty in-process registry, so delete
+    # by path must re-derive the document_id from the file and read chunk_count
+    # from the persisted record store.
+    from blue_data.source.vector.memory_vector_source import MemoryVectorSource
+    from blue_data_doc_source import FileRecordStore, KeywordClassifier
+
+    f = tmp_path / "contract.txt"
+    f.write_text("MASTER SERVICES AGREEMENT. Termination with sixty days notice.", encoding="utf-8")
+    store_path = str(tmp_path / "records.json")
+    shared = MemoryVectorSource(name="shared")
+
+    def _pipeline():
+        p = DocumentPipeline(
+            chunk_size=5, overlap=1,
+            embedding_model=DummyEmbeddingModel(dim=8),
+            vector_source=shared,
+            classifier=KeywordClassifier(),
+            record_store=FileRecordStore(store_path),
+        )
+        p.ensure_index()
+        return p
+
+    ingested = _pipeline().ingest(str(f))
+    doc_id = ingested[0]["document_id"]
+
+    fresh = _pipeline()  # new process: empty _doc_registry
+    assert str(f) not in fresh._doc_registry
+    deleted = fresh.delete(path=str(f))
+    assert deleted == len(ingested)
+    assert fresh.get_record(doc_id) is None
+
+
+def test_delete_by_path_cross_process_without_record_raises(tmp_path):
+    # No persisted record for the file → can't derive chunk_count; must tell the
+    # caller to pass document_id + chunk_count instead of silently doing nothing.
+    pipeline = _memory_pipeline()  # no classifier → no record written
+    f = tmp_path / "doc.txt"
+    f.write_text("some words here", encoding="utf-8")
+    pipeline.ingest(str(f))
+    fresh = _memory_pipeline()
+    fresh._doc_registry.clear()
+    with pytest.raises(ValueError, match="No stored record"):
+        fresh.delete(path=str(f))
+
+
 def test_delete_by_path_uses_ingested_collection_not_caller(tmp_path):
     # A caller-supplied collection must not redirect a path delete away from the
     # collection the document was ingested into (#78).
