@@ -18,6 +18,8 @@ openai = ["openai>=1.0.0"]
 redis  = ["redis[hiredis]>=4.5.0"]
 dev    = ["pytest"]
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-py-modules = ["server"]
+[project.scripts]
+blue-data-doc-mcp = "blue_data_doc_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -87,9 +87,9 @@ docker run -d -p 6379:6379 redis/redis-stack-server:latest
 The MCP server communicates over **stdio** — it is launched by the MCP host (e.g. Claude Desktop) rather than run as a daemon.
 
 ```bash
-# Direct invocation (for testing)
+# Direct invocation (for testing) — console script from `pip install platform/doc-mcp/`
 BLUE_DOC_REDIS_HOST=localhost BLUE_DOC_EMBEDDING=openai OPENAI_API_KEY=sk-... \
-  python platform/doc-mcp/src/server.py
+  blue-data-doc-mcp
 ```
 
 MCP host config entry (e.g. `claude_desktop_config.json`):
@@ -98,8 +98,7 @@ MCP host config entry (e.g. `claude_desktop_config.json`):
 {
     "mcpServers": {
         "blue-data-doc": {
-            "command": "python",
-            "args": ["/path/to/blue-data-doc-source/platform/doc-mcp/src/server.py"],
+            "command": "blue-data-doc-mcp",
             "env": {
                 "BLUE_DOC_REDIS_HOST": "localhost",
                 "BLUE_DOC_EMBEDDING": "openai",

@@ -317,7 +317,7 @@ Provide `path` **or** (`document_id` + `chunk_count`):
 
 ## 3. MCP Server
 
-Entry point: `platform/doc-mcp/src/server.py`. Transport: **stdio** (fastmcp).
+Entry point: the `blue-data-doc-mcp` console script (`blue_data_doc_mcp.server:main`). Transport: **stdio** (fastmcp).
 
 All tools return a JSON-encoded string. The pipeline singleton is constructed once from the same env vars as the REST API.
 

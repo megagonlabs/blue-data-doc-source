@@ -1006,25 +1006,27 @@ The pipeline is accessible through four interfaces. All share the same environme
 
 `platform/doc-mcp` exposes `DocumentDataSource` as tools for Claude and other MCP clients. Each tool maps to a `DOCUMENT.*` op and returns structured JSON.
 
+Install the package (`pip install -e platform/doc-mcp/`, or a built wheel) — it
+provides the `blue-data-doc-mcp` console script:
+
 ```bash
-cd platform/doc-mcp
-BLUE_DOC_EMBEDDING=dummy python src/server.py
+BLUE_DOC_EMBEDDING=dummy blue-data-doc-mcp
 
 # Production: OpenAI embeddings + Redis
 BLUE_DOC_EMBEDDING=openai \
 OPENAI_API_KEY=sk-... \
 BLUE_DOC_REDIS_HOST=localhost \
-python src/server.py
+blue-data-doc-mcp
 ```
 
-**Claude Desktop config:**
+**Claude Desktop config:** point `command` at the installed console script — no
+checkout path required:
 
 ```json
 {
   "mcpServers": {
     "blue-data-doc": {
-      "command": "python",
-      "args": ["/path/to/platform/doc-mcp/src/server.py"],
+      "command": "blue-data-doc-mcp",
       "env": {
         "BLUE_DOC_EMBEDDING": "openai",
         "OPENAI_API_KEY": "sk-...",

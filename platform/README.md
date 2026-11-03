@@ -189,15 +189,18 @@ Same environment variables as the CLI (see table above).
 
 ### Running
 
+Install the package (`pip install -e platform/doc-mcp/`) to get the
+`blue-data-doc-mcp` console script, then:
+
 ```bash
 # In-memory, dummy embeddings (no deps beyond lib)
-BLUE_DOC_EMBEDDING=dummy python platform/doc-mcp/src/server.py
+BLUE_DOC_EMBEDDING=dummy blue-data-doc-mcp
 
 # With Redis and OpenAI embeddings
 BLUE_DOC_EMBEDDING=openai \
 OPENAI_API_KEY=sk-... \
 BLUE_DOC_REDIS_HOST=localhost \
-python platform/doc-mcp/src/server.py
+blue-data-doc-mcp
 ```
 
 ### Claude Desktop / Claude Code integration
@@ -208,8 +211,7 @@ Add to your MCP config:
 {
   "mcpServers": {
     "blue-doc-source": {
-      "command": "python",
-      "args": ["platform/doc-mcp/src/server.py"],
+      "command": "blue-data-doc-mcp",
       "env": {
         "BLUE_DOC_EMBEDDING": "openai",
         "OPENAI_API_KEY": "sk-...",

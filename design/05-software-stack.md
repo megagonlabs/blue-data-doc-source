@@ -50,7 +50,7 @@
 
 | Package | Purpose |
 |---------|---------|
-| `mcp` ≥1.0.0 | fastmcp server runtime for `platform/doc-mcp/src/server.py` |
+| `mcp` ≥1.0.0 | fastmcp server runtime for `platform/doc-mcp` (`blue_data_doc_mcp.server`) |
 
 ---
 
