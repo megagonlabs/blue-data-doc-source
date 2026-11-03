@@ -18,6 +18,13 @@ def _reset():
     reset_pipeline()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_record_store(tmp_path, monkeypatch):
+    # The factory persists records to ~/.blue-doc/records.json by default (#86);
+    # keep every test on a throwaway path so none touches the real home.
+    monkeypatch.setenv("BLUE_DOC_RECORD_STORE", str(tmp_path / "records.json"))
+
+
 @pytest.fixture()
 def runner(tmp_path):
     """CliRunner with an isolated profile home so tests never touch ~/.blue-docdb."""
@@ -530,3 +537,17 @@ def test_build_pipeline_with_redis_constructs_vector_source(monkeypatch):
     monkeypatch.setenv("BLUE_DOC_REDIS_PORT", "6379")
     pipeline = _build_pipeline()
     assert type(pipeline.vector_source).__name__ == "RedisVectorSource"
+
+
+def test_build_pipeline_configures_classifier_and_persistent_record_store(tmp_path, monkeypatch):
+    # A fresh CLI process must still see records from a prior `ingest`, so the
+    # factory configures a KeywordClassifier (writes a record per document) and a
+    # persistent FileRecordStore (survives across invocations) (#86).
+    from blue_data_doc_cli.config import _build_pipeline
+    from blue_data_doc_source import FileRecordStore
+
+    monkeypatch.delenv("BLUE_DOC_REDIS_HOST", raising=False)
+    monkeypatch.setenv("BLUE_DOC_RECORD_STORE", str(tmp_path / "records.json"))
+    pipeline = _build_pipeline()
+    assert pipeline.classifier is not None
+    assert isinstance(pipeline.record_store, FileRecordStore)

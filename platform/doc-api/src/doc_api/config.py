@@ -16,6 +16,7 @@ def _build_pipeline():
         BasicEnricher,
         DocumentPipeline,
         DummyEmbeddingModel,
+        KeywordClassifier,
         OpenAIEmbeddingModel,
     )
 
@@ -50,6 +51,11 @@ def _build_pipeline():
         embedding_model=embedding_model,
         vector_source=vector_source,
         enricher=BasicEnricher(),
+        # Zero-API-cost classification so a DocumentRecord is written per document;
+        # without it FIND / FIND_THEN_SEARCH / GET_RECORD always return empty (#86).
+        # The API is a long-running process, so the auto-created MemoryRecordStore
+        # persists records for the server's lifetime (same as the MCP server).
+        classifier=KeywordClassifier(),
         collection=os.getenv("BLUE_DOC_COLLECTION", "documents"),
         ocr_fallback=ocr_fallback,
     )

@@ -17,7 +17,14 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from blue_data_doc_source import BasicEnricher, DocumentPipeline, DummyEmbeddingModel, OpenAIEmbeddingModel
+from blue_data_doc_source import (
+    BasicEnricher,
+    DocumentPipeline,
+    DummyEmbeddingModel,
+    FileRecordStore,
+    KeywordClassifier,
+    OpenAIEmbeddingModel,
+)
 
 _pipeline: Optional[DocumentPipeline] = None
 
@@ -60,12 +67,24 @@ def _build_pipeline() -> DocumentPipeline:
 
     ocr_fallback = os.getenv("BLUE_DOC_OCR_FALLBACK", "").lower() in ("1", "true", "yes")
 
+    # Each CLI invocation is a fresh process, so the per-document records (written
+    # at ingest when a classifier is set) must live in a *persistent* store or
+    # `find`, `find-then-search`, `get-record` and cross-process `delete --path`
+    # see nothing (#86). A KeywordClassifier writes a record per document at zero
+    # API cost; FileRecordStore persists them across invocations.
+    record_store_path = os.getenv(
+        "BLUE_DOC_RECORD_STORE", os.path.expanduser("~/.blue-doc/records.json")
+    )
+    os.makedirs(os.path.dirname(record_store_path) or ".", exist_ok=True)
+
     return DocumentPipeline(
         chunk_size=int(os.getenv("BLUE_DOC_CHUNK_SIZE", "1000")),
         overlap=int(os.getenv("BLUE_DOC_OVERLAP", "150")),
         embedding_model=embedding_model,
         vector_source=vector_source,
         enricher=BasicEnricher(),
+        classifier=KeywordClassifier(),
+        record_store=FileRecordStore(record_store_path),
         collection=os.getenv("BLUE_DOC_COLLECTION", "documents"),
         ocr_fallback=ocr_fallback,
     )
