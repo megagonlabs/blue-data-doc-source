@@ -65,6 +65,7 @@ docker run -p 6379:6379 redis/redis-stack-server:latest
 export BLUE_DOC_EMBEDDING=openai
 export OPENAI_API_KEY=sk-...
 export BLUE_DOC_REDIS_HOST=localhost
+export BLUE_DOC_API_KEY=choose-a-secret   # every data route requires this
 
 blue-data-doc-api
 # → http://localhost:8001/docs
@@ -72,33 +73,44 @@ blue-data-doc-api
 
 ### Example requests
 
+Every data route requires the API key (`X-API-Key: <key>` or
+`Authorization: Bearer <key>`); only `/documents/health` and the docs routes
+are open. State-changing routes must use an `application/json` body (otherwise
+**415**). A request without the key returns **401**.
+
 ```bash
 # Ensure index
 curl -X POST http://localhost:8001/documents/ensure-index \
+     -H "X-API-Key: $BLUE_DOC_API_KEY" \
      -H "Content-Type: application/json" -d '{}'
 
-# Ingest
+# Ingest (just the filename when BLUE_DOC_ROOT is set; else an absolute path)
 curl -X POST http://localhost:8001/documents/ingest \
+     -H "X-API-Key: $BLUE_DOC_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{"path": "/data/contract.pdf"}'
 
 # Search
 curl -X POST http://localhost:8001/documents/search \
+     -H "X-API-Key: $BLUE_DOC_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{"query": "governing law", "k": 5}'
 
 # Rich search with provenance
 curl -X POST http://localhost:8001/documents/search \
+     -H "X-API-Key: $BLUE_DOC_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{"query": "termination clause", "rich": true}'
 
 # Find by extracted field
 curl -X POST http://localhost:8001/documents/find \
+     -H "X-API-Key: $BLUE_DOC_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{"filter": {"document_type": "contract", "fields.total_due": {"gt": 30000}}}'
 
 # Delete by document_id
 curl -X DELETE http://localhost:8001/documents/document \
+     -H "X-API-Key: $BLUE_DOC_API_KEY" \
      -H "Content-Type: application/json" \
      -d '{"document_id": "doc_3a7f1c2e", "chunk_count": 12}'
 ```

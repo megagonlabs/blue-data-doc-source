@@ -6,6 +6,28 @@ See [api.md](api.md) for setup and example requests.
 
 ---
 
+## Authentication
+
+Every endpoint below **except** `GET /documents/health` and the docs routes
+(`/docs`, `/redoc`, `/openapi.json`) requires an API key when `BLUE_DOC_API_KEY`
+is configured on the server (the default policy — see
+[api.md § Configuration](api.md#configuration)). Send it on every request as
+either header:
+
+```
+X-API-Key: <key>
+Authorization: Bearer <key>
+```
+
+- A missing or wrong key — or no key configured on the server — returns **`401`**.
+- State-changing routes (`POST`/`DELETE`) require an `application/json` body;
+  form, multipart, or text bodies are refused with **`415`** (CSRF protection).
+
+Request bodies are shown below without the auth header for brevity; send it on
+every call.
+
+---
+
 ## `GET /documents/health`
 
 No request body.
