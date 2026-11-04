@@ -96,7 +96,7 @@ def _get_pipeline():
 # ── Tools ─────────────────────────────────────────────────────────────────────
 
 @mcp.tool()
-def ingest_document(path: str, collection: str = "documents") -> str:
+def ingest_document(path: str, collection: Optional[str] = None) -> str:
     """Ingest a document into the vector store.
 
     Parses the file, splits it into section-aware chunks, extracts entities and
@@ -106,6 +106,9 @@ def ingest_document(path: str, collection: str = "documents") -> str:
     than duplicates.
 
     Supported file types: .txt, .pdf, .docx
+
+    When ``collection`` is omitted it defaults to the server's configured
+    collection (``BLUE_DOC_COLLECTION``), not a hard-coded ``"documents"`` (#151).
 
     Returns document_id and chunk_count. Store these values if you need to
     delete the document later in a different session.
@@ -119,7 +122,7 @@ def ingest_document(path: str, collection: str = "documents") -> str:
             "document_id": records[0]["document_id"],
             "chunk_count": len(records),
             "file_name": records[0]["file_name"],
-            "collection": collection,
+            "collection": collection or pipeline.collection,
         })
     except FileNotFoundError:
         return json.dumps({"error": f"File not found: {path}"})
@@ -132,7 +135,7 @@ def ingest_document(path: str, collection: str = "documents") -> str:
 @mcp.tool()
 def search_documents(
     query: str,
-    collection: str = "documents",
+    collection: Optional[str] = None,
     k: int = 5,
 ) -> str:
     """Search documents by semantic similarity.
@@ -141,6 +144,9 @@ def search_documents(
     store. Results include the chunk text, source file, section title, and page
     number (for PDFs). Use this to answer questions that require reading
     document content.
+
+    When ``collection`` is omitted it defaults to the server's configured
+    collection (``BLUE_DOC_COLLECTION``), not a hard-coded ``"documents"`` (#151).
 
     Requires BLUE_DOC_REDIS_HOST to be set and the collection to have been
     indexed via ensure_index before ingestion.
@@ -168,17 +174,20 @@ def search_documents(
 
 
 @mcp.tool()
-def ensure_index(collection: str = "documents") -> str:
+def ensure_index(collection: Optional[str] = None) -> str:
     """Create the vector index for a collection.
 
     Must be called once before the first ingest when using a vector store.
     Safe to call multiple times — skips creation if the index already exists.
     Call this at the start of a session before ingesting any documents.
+
+    When ``collection`` is omitted it defaults to the server's configured
+    collection (``BLUE_DOC_COLLECTION``), not a hard-coded ``"documents"`` (#151).
     """
     try:
         pipeline = _get_pipeline()
         pipeline.ensure_index(collection=collection)
-        return json.dumps({"status": "ok", "collection": collection})
+        return json.dumps({"status": "ok", "collection": collection or pipeline.collection})
     except Exception as exc:
         return json.dumps({"error": str(exc)})
 
@@ -251,7 +260,7 @@ def find_documents(
 def find_then_search(
     query: str,
     find_filter: Optional[dict] = None,
-    collection: str = "documents",
+    collection: Optional[str] = None,
     k: int = 5,
 ) -> str:
     """Filter documents by fields, then semantic-search text within the matches.
@@ -260,6 +269,9 @@ def find_then_search(
     (DOCUMENT.SEARCH): narrows the corpus to documents matching `find_filter`,
     searches `query` within each, and returns a merged ranked list of chunks.
     Use for "find <text> in documents where <field condition>".
+
+    When ``collection`` is omitted it defaults to the server's configured
+    collection (``BLUE_DOC_COLLECTION``), not a hard-coded ``"documents"`` (#151).
     """
     try:
         pipeline = _get_pipeline()
