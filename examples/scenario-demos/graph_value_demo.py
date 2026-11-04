@@ -582,11 +582,9 @@ def run() -> None:
     print("Ingesting corpus …")
     _hr()
     fname_map = ingest_corpus(pipeline)
-    for doc_id, fname in fname_map.items():
-        chunks = [r for r in pipeline.search("", mode="bm25", k=999, collection=COLLECTION)
-                  if r.get("document_id") == doc_id]
-    # simpler: just count via search
-    all_chunks = pipeline.search("the", mode="bm25", k=999, collection=COLLECTION)
+    # Count chunks via a broad bm25 search. k is capped at 100 (#80); this demo
+    # corpus is well under that, so the count is exact.
+    all_chunks = pipeline.search("the", mode="bm25", k=100, collection=COLLECTION)
     print(f"  ✓  {len(DOCS)} documents  |  {len(all_chunks)} chunks total")
 
     q1_entity_lookup(pipeline, fname_map)

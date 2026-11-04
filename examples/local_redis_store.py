@@ -34,8 +34,15 @@ class LocalRedisVectorStore:
         **kwargs: Any,
     ) -> Any:
         _field_type_map = {"TAG": TagField, "NUMERIC": NumericField, "TEXT": TextField}
+        # Fields the base schema below already declares — skip any extra_field with
+        # the same name, or Redis rejects the schema with "Duplicate field". The
+        # pipeline's _INDEX_EXTRA_FIELDS now includes chunk_id (#71), which this
+        # helper also hard-codes (#152).
+        _base_names = {"text", "chunk_id", "embedding"}
         extra_schema = []
         for f in (extra_fields or []):
+            if f["name"] in _base_names:
+                continue
             cls = _field_type_map.get(f.get("field_type", "TEXT"), TextField)
             extra_schema.append(cls(f["path"], as_name=f["name"]))
 
