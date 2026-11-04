@@ -161,7 +161,7 @@ results = source.execute_query({
 from blue_data.registry.data_registry import DataRegistry
 from blue_data.source.json.memory_json_source import MemoryJSONSource
 from blue_data.source.vector.memory_vector_source import MemoryVectorSource
-from blue_data_doc_source import DocumentDataSource, OpenAIEmbeddingModel, NLQueryParser
+from blue_data_doc_source import DocumentDataSource, OpenAIEmbeddingModel, NLQueryParser, KeywordClassifier
 
 registry = DataRegistry(
     store=MemoryJSONSource(),           # registry metadata store
@@ -242,11 +242,11 @@ chunks = registry.execute_query(
 # Natural language — dispatched through NLQueryParser
 result = registry.execute_query_nl(
     source="legal_corpus",
-    text="find the indemnification clause in Acme Corp contracts",
+    query="find the indemnification clause in Acme Corp contracts",
 )
 ```
 
-`execute_query_nl` requires `nl_parser=NLQueryParser()` on the `DocumentDataSource`. Without it, the method raises `ValueError`.
+When `nl_parser` is omitted from the `DocumentDataSource`, a default `NLQueryParser()` (OpenAI — needs `OPENAI_API_KEY`) is built lazily on first use. Pass `nl_parser=NLQueryParser(parse_fn=...)` to use a different backend (or a stub in tests).
 
 See `examples/integration-demos/data_registry_demo.py` for a fully runnable demo (no API key required).
 
