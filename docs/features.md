@@ -651,6 +651,13 @@ pipeline = DocumentPipeline(
 # Now every document produces the same field names — filters are reliable
 ```
 
+The schema makes field *names* and *types* reliable — the output is validated against
+the schema (invalid output raises in strict mode, the default). The field *values*,
+however, are produced by the model from untrusted document text: treat them as
+extracted model output, not verified facts. The extractor marks the document as
+untrusted data and wraps it in delimiters to blunt prompt injection (#154), but that is
+a mitigation, not a guarantee.
+
 The LLM output is validated against the schema — Pydantic models, JSON Schema dicts, and TypedDicts alike. By default (`strict=True`) output that fails to parse or violate the schema raises `ExtractionValidationError` rather than silently storing an unvalidated dict (#64). Pass `strict=False` to instead keep the best-effort fields and surface the outcome under a reserved `"_validation"` key (`{"status": "invalid", "errors": [...]}`).
 
 
