@@ -71,6 +71,9 @@ def _make_chunk(doc_id="doc_abc123", idx=0, section=None, page=None):
 
 def _mock_pipeline(**kwargs):
     m = MagicMock()
+    # The server's configured collection (from BLUE_DOC_COLLECTION); tools resolve
+    # an omitted collection against this rather than a hard-coded "documents" (#151).
+    m.collection = "documents"
     for k, v in kwargs.items():
         setattr(m, k, v)
     return m
@@ -175,11 +178,16 @@ def test_ensure_index_calls_pipeline_and_returns_ok():
 
 
 def test_ensure_index_default_collection():
+    # With no collection argument the tool forwards None, so the pipeline falls back
+    # to its configured collection (BLUE_DOC_COLLECTION) — not a hard-coded
+    # "documents" — and the response reports the resolved name (#151).
     pipeline = _mock_pipeline(ensure_index=MagicMock())
+    pipeline.collection = "my_docs"
     with patch.object(_server, "_pipeline", pipeline):
         result = json.loads(_server.ensure_index())
-    pipeline.ensure_index.assert_called_once_with(collection="documents")
+    pipeline.ensure_index.assert_called_once_with(collection=None)
     assert result["status"] == "ok"
+    assert result["collection"] == "my_docs"
 
 
 def test_ensure_index_error_returns_error():
@@ -439,3 +447,40 @@ def test_graph_neighbors_without_graph_returns_error():
     with patch.object(_server, "_pipeline", pipeline):
         result = json.loads(_server.graph_neighbors("Acme"))
     assert "error" in result
+
+
+# ── #151: tools honour BLUE_DOC_COLLECTION (no hard-coded "documents") ──────────
+
+def test_collection_defaults_are_none_in_schema():
+    # The four tools must declare collection=None so an omitted argument falls back
+    # to the server's configured collection — not a hard-coded "documents" (#151).
+    import inspect
+    for tool in (_server.ingest_document, _server.search_documents,
+                 _server.ensure_index, _server.find_then_search):
+        assert inspect.signature(tool).parameters["collection"].default is None
+
+
+def test_ingest_omitted_collection_uses_configured():
+    pipeline = _mock_pipeline(ingest=MagicMock(return_value=[_make_chunk()]))
+    pipeline.collection = "my_docs"
+    with patch.object(_server, "_pipeline", pipeline):
+        result = json.loads(_server.ingest_document("report.pdf"))
+    pipeline.ingest.assert_called_once_with("report.pdf", collection=None)
+    assert result["collection"] == "my_docs"
+
+
+def test_search_omitted_collection_forwards_none():
+    pipeline = _mock_pipeline(search=MagicMock(return_value=[]))
+    pipeline.collection = "my_docs"
+    with patch.object(_server, "_pipeline", pipeline):
+        _server.search_documents("query")
+    pipeline.search.assert_called_once_with("query", k=5, collection=None)
+
+
+def test_find_then_search_omitted_collection_forwards_none():
+    pipeline = _mock_pipeline(find_then_search=MagicMock(return_value=[]))
+    pipeline.collection = "my_docs"
+    with patch.object(_server, "_pipeline", pipeline):
+        _server.find_then_search("query")
+    _, kwargs = pipeline.find_then_search.call_args
+    assert kwargs["collection"] is None
