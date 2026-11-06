@@ -165,7 +165,9 @@ def test_ocr_page_raises_import_error_when_deps_missing(tmp_path):
         return real_import(name, *args, **kwargs)
 
     with patch("builtins.__import__", side_effect=mock_import):
-        with pytest.raises(ImportError, match="pip install blue-data-doc-source\\[ocr\\]"):
+        # The hint points at the working editable install (#161): the package is on no
+        # index, so `pip install blue-data-doc-source[ocr]` fails in a clean env.
+        with pytest.raises(ImportError, match=r'pip install -e "lib/\.\[ocr\]"'):
             parser._ocr_page(str(pdf_path), 1)
 
 

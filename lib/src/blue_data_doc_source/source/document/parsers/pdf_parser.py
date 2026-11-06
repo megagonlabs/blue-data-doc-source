@@ -18,7 +18,7 @@ class PDFParser:
 
     For scanned PDFs (pages with no text layer), pass ``ocr_fallback=True``
     to run Tesseract OCR on blank pages. Requires the ``[ocr]`` extras:
-    ``pip install blue-data-doc-source[ocr]``.
+    ``pip install -e "lib/.[ocr]"`` (from the repo root; see docs/installation.md).
     """
 
     def __init__(self, ocr_fallback: bool = False):
@@ -94,7 +94,7 @@ class PDFParser:
         except ImportError as exc:
             raise ImportError(
                 "OCR dependencies not installed. "
-                "Run: pip install blue-data-doc-source[ocr]"
+                'Run (from the repo root): pip install -e "lib/.[ocr]"'
             ) from exc
 
         images = convert_from_path(path, first_page=page_num, last_page=page_num)

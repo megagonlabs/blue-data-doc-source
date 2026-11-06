@@ -153,7 +153,7 @@ def run() -> None:
         print("    - ocr_confidence propagates to ChunkRecord.metadata['ocr_confidence']")
     except ImportError:
         print("  With OCR fallback: (skipped — install OCR deps to see this)")
-        print("    pip install blue-data-doc-source[ocr]")
+        print('    pip install -e "lib/.[ocr]"   # from the repo root')
         print("    brew install tesseract poppler")
 
     # ── Step 5: DocxParser ────────────────────────────────────────────────
