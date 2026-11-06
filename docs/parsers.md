@@ -66,7 +66,7 @@ OCR pages include additional fields:
 **Install OCR dependencies:**
 
 ```bash
-pip install blue-data-doc-source[ocr]   # pytesseract + pdf2image
+pip install -e "lib/.[ocr]"             # pytesseract + pdf2image
 brew install tesseract                   # macOS — Tesseract must be on PATH
 brew install poppler                     # macOS — required by pdf2image
 ```

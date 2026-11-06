@@ -10,7 +10,7 @@ Shows how the pipeline handles five different PDF types:
 Run:
     python3 examples/feature-demos/pdf_formats_demo.py
 
-No API key needed. OCR requires: pip install blue-data-doc-source[ocr]
+No API key needed. OCR requires (from the repo root): pip install -e "lib/.[ocr]"
 and system Tesseract: brew install tesseract poppler
 """
 from __future__ import annotations
@@ -216,7 +216,7 @@ def step6_scanned_ocr():
 
     except ImportError as e:
         print(f"  OCR deps not installed: {e}")
-        print("  Run: pip install blue-data-doc-source[ocr]")
+        print('  Run (from the repo root): pip install -e "lib/.[ocr]"')
         print("       brew install tesseract poppler")
 
 
