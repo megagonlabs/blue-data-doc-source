@@ -48,7 +48,7 @@ source.execute_query({"op": "DOCUMENT.ENSURE_INDEX", "collection": "contracts"})
 
 records = source.execute_query({
     "op": "DOCUMENT.INGEST",
-    "path": "contract.pdf",
+    "path": "data/sample_contract.pdf",  # a sample shipped in this repo — or your own PDF
     "collection": "contracts",
 })
 print(f"Ingested {len(records)} chunks")
