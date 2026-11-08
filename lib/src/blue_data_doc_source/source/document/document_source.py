@@ -205,12 +205,15 @@ class DocumentDataSource(DataSource):
             return MemoryVectorSource(name="memory")
         if backend == "redis":
             from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
+            # Forward the WHOLE connection (minus the registry protocol tag), so a
+            # password-protected or TLS Redis works: RedisVectorSource reads url,
+            # username, password and ssl — forwarding only host/port/scan_prefix dropped
+            # them, and injecting host/port defaults even overrode a connection.url (#195).
             conn = {k: v for k, v in props.get("connection", {}).items() if k != "protocol"}
-            return RedisVectorSource(name="redis", properties={"connection": {
-                "host": conn.get("host", "localhost"),
-                "port": int(conn.get("port", 6379)),
-                "scan_prefix": conn.get("scan_prefix", "documents:"),
-            }})
+            conn.setdefault("scan_prefix", "documents:")
+            if conn.get("port") is not None:
+                conn["port"] = int(conn["port"])
+            return RedisVectorSource(name="redis", properties={"connection": conn})
         raise ValueError(f"Unknown vector backend {backend!r} (expected 'memory' or 'redis')")
 
     @staticmethod
