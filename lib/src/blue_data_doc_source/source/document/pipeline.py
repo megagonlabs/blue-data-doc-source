@@ -518,7 +518,48 @@ class DocumentPipeline:
             except Exception:
                 pass
 
+    def _trim_shrunk_tail(self, doc_id: str, new_chunk_count: int, collection: str) -> None:
+        """Remove chunks of *doc_id* beyond *new_chunk_count* left in the store by a
+        previous ingest that produced MORE chunks — e.g. the same file re-ingested with
+        a larger chunk size.
+
+        Re-ingest upserts chunks ``[0, new)`` in place but leaves the old tail
+        ``[new, old)`` behind: it stays searchable and, because the registry now records
+        the smaller count, ``delete(path)`` no longer reaches it (#199). The previous
+        count may be unknown here — a different pipeline instance or process keeps its
+        own (empty) registry and record store, and the only shared state is the vector
+        store — so ask the store which chunks of this document it actually holds (one
+        ``list_ids`` call) and delete exactly those at index ``>= new_chunk_count``. When
+        nothing shrank, there is no surplus and no delete is issued.
+        """
+        if self.vector_source is None:
+            return
+        try:
+            existing = list(self.vector_source.list_ids(collection, prefix=f"{doc_id}_chunk_"))
+        except Exception:
+            return  # backend does not support listing — nothing safe to trim
+        for chunk_id in existing:
+            parts = chunk_id.rsplit("_chunk_", 1)
+            if len(parts) != 2 or parts[0] != doc_id:
+                continue
+            try:
+                idx = int(parts[1])
+            except ValueError:
+                continue
+            if idx < new_chunk_count:
+                continue
+            with self._index_lock:
+                self._forget_chunk(chunk_id, collection)
+            try:
+                self.vector_source.delete(collection=collection, doc_id=chunk_id)
+            except Exception:
+                pass
+
     def _register_doc(self, file_path: Path, doc_id: str, chunk_count: int, collection: str) -> None:
+        # Drop any stale tail from a previous, larger-chunk ingest before recording the
+        # new (smaller) count — otherwise those chunks outlive the upsert and escape
+        # delete(path) (#199).
+        self._trim_shrunk_tail(doc_id, chunk_count, collection)
         self._doc_registry[(collection, str(file_path))] = (doc_id, chunk_count, collection)
 
     def ingest_text(
