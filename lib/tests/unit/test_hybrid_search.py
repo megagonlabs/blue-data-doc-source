@@ -223,7 +223,9 @@ class TestHybridMode:
         pipeline = pipeline_with_two_docs
         for cid in pipeline._chunk_index:
             assert cid in pipeline._chunk_collection
-            assert pipeline._chunk_collection[cid] == "docs"
+            # _chunk_collection maps a chunk id to the SET of collections it's in (#201),
+            # since the same file's chunk id can live in more than one collection.
+            assert "docs" in pipeline._chunk_collection[cid]
 
     def test_chunk_collection_cleared_on_delete(self):
         vs = MemoryVectorSource()

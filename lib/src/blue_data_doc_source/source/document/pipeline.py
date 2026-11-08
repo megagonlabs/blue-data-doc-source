@@ -278,8 +278,11 @@ class DocumentPipeline:
         self.collection = collection
         self.chunk_size = chunk_size
         self.overlap = overlap
-        # path → (document_id, chunk_count, collection) — used to delete stale chunks
-        self._doc_registry: Dict[str, Tuple[str, int, str]] = {}
+        # (collection, path) → (document_id, chunk_count, collection) — used to delete
+        # stale chunks. Keyed by (collection, path) because chunk ids come from the
+        # file's bytes, so the same file in two collections shares ids; keying by path
+        # alone kept only the last collection and left the other's copy undeletable (#201).
+        self._doc_registry: Dict[Tuple[str, str], Tuple[str, int, str]] = {}
         # collections for which create_index has already succeeded this session
         self._index_created: Set[str] = set()
         # Guards the in-process chunk indexes below so a concurrent BM25/hybrid/rerank
@@ -288,8 +291,11 @@ class DocumentPipeline:
         self._index_lock = threading.Lock()
         # chunk_id → chunk dict — populated during ingest; used for neighbor context and BM25
         self._chunk_index: Dict[str, Dict[str, Any]] = {}
-        # chunk_id → collection name — needed to scope BM25 to the correct collection
-        self._chunk_collection: Dict[str, str] = {}
+        # chunk_id → set of collections it was ingested into — needed to scope BM25 to
+        # the right collection. A set (not one name) because the same file's chunk id
+        # can live in several collections, and keeping only the last hid the others from
+        # BM25/rerank search in every collection but the one ingested last (#201).
+        self._chunk_collection: Dict[str, Set[str]] = {}
         # chunk_id → embedding vector — used by rerank mode to avoid re-embedding candidates
         self._chunk_embeddings: Dict[str, List[float]] = {}
         # optional graph indexer — None when graph_source is not configured
@@ -324,7 +330,7 @@ class DocumentPipeline:
             blocks = self.parser.parse_blocks(path)
             mime_type = "application/pdf" if suffix == ".pdf" else "text/plain"
             document_id = self._file_document_id(file_path)
-            self._cleanup_stale_chunks(file_path, document_id)
+            self._cleanup_stale_chunks(file_path, document_id, effective_collection)
             records = self._ingest_from_blocks(
                 blocks=blocks,
                 file_name=file_path.name,
@@ -463,8 +469,23 @@ class DocumentPipeline:
                 raise
         self._index_created.add(target)
 
-    def _cleanup_stale_chunks(self, file_path: Path, new_doc_id: str) -> None:
-        """Delete chunks from the previous version of a file when content has changed.
+    def _forget_chunk(self, chunk_id: str, collection: str) -> None:
+        """Drop *collection* from a chunk's membership and remove the chunk's in-process
+        index / embedding entry only once it belongs to no collection — the same file's
+        chunk id in another collection shares the id and must survive (#201). The caller
+        must hold ``self._index_lock``."""
+        cols = self._chunk_collection.get(chunk_id)
+        if cols is not None:
+            cols.discard(collection)
+            if cols:
+                return  # still indexed under another collection
+            self._chunk_collection.pop(chunk_id, None)
+        self._chunk_index.pop(chunk_id, None)
+        self._chunk_embeddings.pop(chunk_id, None)
+
+    def _cleanup_stale_chunks(self, file_path: Path, new_doc_id: str, collection: str) -> None:
+        """Delete chunks from the previous version of a file *in this collection* when its
+        content has changed.
 
         Best-effort: individual delete failures are silently ignored so a partially
         cleaned-up state does not block the new ingest.
@@ -472,31 +493,33 @@ class DocumentPipeline:
         Note: the registry is in-process only. Stale chunks from previous process
         runs are not cleaned up automatically; use DOCUMENT.DELETE for that.
         """
-        key = str(file_path)
+        key = (collection, str(file_path))
         if key not in self._doc_registry:
             return
         old_doc_id, old_count, old_collection = self._doc_registry[key]
         if old_doc_id == new_doc_id:
             return  # same content — upsert will overwrite in place
-        # Drop the stale structured record for the previous content-hash ID (#62),
-        # before the vector_source guard so it happens even with no vector store.
-        self.record_store.delete(old_doc_id)
-        if self._graph_indexer is not None:
-            self._graph_indexer.delete_document(old_doc_id)
+        # Drop the stale structured record for the previous content-hash ID (#62), but
+        # only if no other collection still holds that content (the record is shared by
+        # document id, not scoped to a collection) (#201). Before the vector_source
+        # guard so it happens even with no vector store.
+        if not any(v[0] == old_doc_id for k, v in self._doc_registry.items() if k != key):
+            self.record_store.delete(old_doc_id)
+            if self._graph_indexer is not None:
+                self._graph_indexer.delete_document(old_doc_id)
         if self.vector_source is None:
             return
         for idx in range(old_count):
             chunk_id = f"{old_doc_id}_chunk_{idx:06d}"
             with self._index_lock:
-                self._chunk_index.pop(chunk_id, None)
-                self._chunk_embeddings.pop(chunk_id, None)
+                self._forget_chunk(chunk_id, old_collection)
             try:
                 self.vector_source.delete(collection=old_collection, doc_id=chunk_id)
             except Exception:
                 pass
 
     def _register_doc(self, file_path: Path, doc_id: str, chunk_count: int, collection: str) -> None:
-        self._doc_registry[str(file_path)] = (doc_id, chunk_count, collection)
+        self._doc_registry[(collection, str(file_path))] = (doc_id, chunk_count, collection)
 
     def ingest_text(
         self,
@@ -649,7 +672,7 @@ class DocumentPipeline:
                 records.append(record_dict)
                 with self._index_lock:
                     self._chunk_index[chunk_id] = record_dict
-                    self._chunk_collection[chunk_id] = collection
+                    self._chunk_collection.setdefault(chunk_id, set()).add(collection)
                     if record.embedding is not None:
                         self._chunk_embeddings[chunk_id] = record.embedding
                 self._upsert(chunk_id, record_dict, collection)
@@ -732,7 +755,7 @@ class DocumentPipeline:
                 records.append(record_dict)
                 with self._index_lock:
                     self._chunk_index[chunk_id] = record_dict
-                    self._chunk_collection[chunk_id] = collection
+                    self._chunk_collection.setdefault(chunk_id, set()).add(collection)
                     if record.embedding is not None:
                         self._chunk_embeddings[chunk_id] = record.embedding
                 self._upsert(chunk_id, record_dict, collection)
@@ -760,7 +783,7 @@ class DocumentPipeline:
                     records.append(record_dict)
                     with self._index_lock:
                         self._chunk_index[chunk_id] = record_dict
-                        self._chunk_collection[chunk_id] = collection
+                        self._chunk_collection.setdefault(chunk_id, set()).add(collection)
                         if record.embedding is not None:
                             self._chunk_embeddings[chunk_id] = record.embedding
                     self._upsert(chunk_id, record_dict, collection)
@@ -923,7 +946,7 @@ class DocumentPipeline:
     def _ingest_txt(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
         text = self.text_parser.parse(str(file_path))
         document_id = self._file_document_id(file_path)
-        self._cleanup_stale_chunks(file_path, document_id)
+        self._cleanup_stale_chunks(file_path, document_id, collection)
         records = self._ingest_from_pages(
             pages=[{"text": text}],
             file_name=file_path.name,
@@ -938,7 +961,7 @@ class DocumentPipeline:
     def _ingest_pdf(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
         pages = self.pdf_parser.parse_pages(str(file_path))
         document_id = self._file_document_id(file_path)
-        self._cleanup_stale_chunks(file_path, document_id)
+        self._cleanup_stale_chunks(file_path, document_id, collection)
         records = self._ingest_from_pages(
             pages=pages,
             file_name=file_path.name,
@@ -953,7 +976,7 @@ class DocumentPipeline:
     def _ingest_docx(self, file_path: Path, collection: str) -> List[Dict[str, Any]]:
         text = self.docx_parser.parse(str(file_path))
         document_id = self._file_document_id(file_path)
-        self._cleanup_stale_chunks(file_path, document_id)
+        self._cleanup_stale_chunks(file_path, document_id, collection)
         records = self._ingest_from_pages(
             pages=[{"text": text}],
             file_name=file_path.name,
@@ -1006,18 +1029,29 @@ class DocumentPipeline:
         if self.vector_source is None:
             raise ValueError("A vector_source is required for delete")
 
-        doc_id: str
-        count: int
-        target: str
+        # (collection, doc_id, chunk_count) to delete, and the registry keys to drop.
+        targets: List[Tuple[str, str, int]] = []
+        registry_keys_to_pop: List[Tuple[str, str]] = []
 
         if path is not None:
-            key = str(Path(path))
-            if key in self._doc_registry:
-                # A path delete uses the collection the document was ingested into
-                # (from the registry) — a caller-supplied ``collection`` must not
-                # redirect it to a collection the document was never stored in (#78).
-                doc_id, count, reg_collection = self._doc_registry[key]
-                target = reg_collection
+            key_path = str(Path(path))
+            # A path delete reaches every collection this file was ingested into —
+            # previously only the last, leaving the other copies undeletable because
+            # chunk ids are shared by content (#201). A caller-supplied collection
+            # narrows it to that one, but only when the document actually lives there:
+            # a collection it was never stored in must not redirect the delete (#78).
+            all_registered = [
+                (coll, val[0], val[1])
+                for (coll, p), val in self._doc_registry.items()
+                if p == key_path
+            ]
+            if all_registered:
+                registered_colls = {coll for coll, _, _ in all_registered}
+                if collection is not None and collection in registered_colls:
+                    targets = [t for t in all_registered if t[0] == collection]
+                else:
+                    targets = all_registered
+                registry_keys_to_pop = [(coll, key_path) for coll, _, _ in targets]
             else:
                 # The in-process registry is empty in a fresh process (every CLI
                 # invocation is a new process), so re-derive the document_id by
@@ -1038,52 +1072,58 @@ class DocumentPipeline:
                         f"No stored record for {path!r} (document {doc_id}). Configure "
                         "a persistent record_store, or pass document_id and chunk_count."
                     )
-                count = int(record["chunk_count"])
-                target = collection or self.collection
+                targets = [(collection or self.collection, doc_id, int(record["chunk_count"]))]
         elif document_id is not None and chunk_count is not None:
             _validate_bounded_int("chunk_count", chunk_count, 1, _MAX_DELETE_CHUNK_COUNT)
-            doc_id = document_id
             target = collection or self.collection
             # Derive the real chunk count from the in-process registry when this
             # document was ingested here — a caller must not claim more chunks
             # than were stored and drive extra backend delete calls (#80).
             stored = next(
-                (c for (d, c, _) in self._doc_registry.values() if d == doc_id),
+                (c for (d, c, _) in self._doc_registry.values() if d == document_id),
                 None,
             )
             if stored is not None and chunk_count > stored:
                 raise ValueError(
                     f"chunk_count {chunk_count} exceeds the {stored} chunk(s) "
-                    f"stored for document {doc_id!r}"
+                    f"stored for document {document_id!r}"
                 )
-            count = chunk_count
+            targets = [(target, document_id, chunk_count)]
+            registry_keys_to_pop = [
+                (coll, p) for (coll, p), val in self._doc_registry.items()
+                if val[0] == document_id and coll == target
+            ]
         else:
             raise ValueError(
                 "Provide either 'path' or both 'document_id' and 'chunk_count'"
             )
 
         deleted = 0
-        for idx in range(count):
-            chunk_id = f"{doc_id}_chunk_{idx:06d}"
-            with self._index_lock:
-                self._chunk_index.pop(chunk_id, None)
-                self._chunk_collection.pop(chunk_id, None)
-                self._chunk_embeddings.pop(chunk_id, None)
-            try:
-                # Count what the backend actually removed (0 or 1), not the call.
-                deleted += self.vector_source.delete(collection=target, doc_id=chunk_id)
-            except Exception:
-                pass
+        deleted_doc_ids: Set[str] = set()
+        for target, doc_id, count in targets:
+            for idx in range(count):
+                chunk_id = f"{doc_id}_chunk_{idx:06d}"
+                with self._index_lock:
+                    self._forget_chunk(chunk_id, target)
+                try:
+                    # Count what the backend actually removed (0 or 1), not the call.
+                    deleted += self.vector_source.delete(collection=target, doc_id=chunk_id)
+                except Exception:
+                    pass
+            deleted_doc_ids.add(doc_id)
 
-        # Remove the structured record too, so DOCUMENT.FIND can't return a
-        # document that has been deleted (#62).
-        self.record_store.delete(doc_id)
+        for coll, kp in registry_keys_to_pop:
+            self._doc_registry.pop((coll, kp), None)
 
-        if path is not None:
-            self._doc_registry.pop(str(Path(path)), None)
-
-        if self._graph_indexer is not None:
-            self._graph_indexer.delete_document(doc_id)
+        # Remove the structured record / graph for a document only once no collection
+        # still holds it — the record is keyed by document id, not scoped to a
+        # collection, so deleting one collection's copy must not drop a record another
+        # collection still needs (#62/#201).
+        for doc_id in deleted_doc_ids:
+            if not any(val[0] == doc_id for val in self._doc_registry.values()):
+                self.record_store.delete(doc_id)
+                if self._graph_indexer is not None:
+                    self._graph_indexer.delete_document(doc_id)
 
         return deleted
 
@@ -1124,7 +1164,7 @@ class DocumentPipeline:
         to warn that bm25/rerank/neighbor-context will degrade (#50).
         """
         with self._index_lock:
-            return any(c == collection for c in self._chunk_collection.values())
+            return any(collection in cols for cols in self._chunk_collection.values())
 
     def _warn_cold_index(self, mode: str, collection: str) -> None:
         """Emit a :class:`ColdChunkIndexWarning` describing the degraded feature."""
@@ -1169,7 +1209,7 @@ class DocumentPipeline:
         candidates = {
             cid: rec
             for cid, rec in index_items
-            if self._chunk_collection.get(cid) == collection
+            if collection in self._chunk_collection.get(cid, ())
             and self._chunk_matches_filters(rec, filters)
         }
         if not candidates:
