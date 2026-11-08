@@ -28,20 +28,10 @@ def _build_pipeline():
     else:
         embedding_model = DummyEmbeddingModel()
 
-    vector_source = None
-    redis_host = os.getenv("BLUE_DOC_REDIS_HOST")
-    if redis_host:
-        from blue_data.source.vector.redis.redis_vector_source import RedisVectorSource
-        vector_source = RedisVectorSource(
-            name="redis",
-            properties={"connection": {
-                "host": redis_host,
-                "port": int(os.getenv("BLUE_DOC_REDIS_PORT", "6379")),
-                # Required by blue-data's create_index; also namespaces keys
-                # (without it, keys are prefixed with the literal "None"). See #70.
-                "scan_prefix": os.getenv("BLUE_DOC_REDIS_PREFIX", "bluedoc"),
-            }},
-        )
+    # Forward the whole Redis connection — URL, host/port, username, password, TLS — so a
+    # password-protected or TLS Redis works, not just host/port (#195).
+    from blue_data_doc_source import redis_vector_source_from_env
+    vector_source = redis_vector_source_from_env("BLUE_DOC")
 
     ocr_fallback = os.getenv("BLUE_DOC_OCR_FALLBACK", "").lower() in ("1", "true", "yes")
 
