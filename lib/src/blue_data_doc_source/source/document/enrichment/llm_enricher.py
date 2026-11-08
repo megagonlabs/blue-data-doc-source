@@ -5,11 +5,16 @@ import re
 from typing import Any, Callable, Dict, List, Optional
 
 from .base import Enricher
+from ..prompt_safety import UNTRUSTED_DOCUMENT_WARNING, wrap_document
 
 _SENTENCE_RE = re.compile(r"[.!?]+")
 
+# The chunk is untrusted document text. LLMEnricher calls a (prompt) -> str function with
+# no system role, so the data warning and delimiters go in the prompt text itself — a
+# planted "ignore all previous instructions" line then sets no entities/fields (#197).
 _PROMPT = """\
-Analyze the following document chunk and return a JSON object with these exact fields:
+Analyze the document chunk between the <document> and </document> markers and return a \
+JSON object with these exact fields:
 
 - "entities": array of {{"text": string, "type": string}} — named entities with types \
 PERSON, ORG, LOCATION, DATE, MONEY, PERCENT, PRODUCT, LEGAL_TERM, REGULATION
@@ -23,8 +28,9 @@ is_technical, is_medical, has_obligations, has_deadlines, has_monetary_values
 
 Return ONLY valid JSON. No markdown, no explanation.
 
-CHUNK:
-{text}"""
+{warning}
+
+{document}"""
 
 
 class LLMEnricher(Enricher):
@@ -68,7 +74,10 @@ class LLMEnricher(Enricher):
     def enrich(self, text: str) -> Dict[str, Any]:
         truncated = text[: self._max_chunk_chars]
         try:
-            raw = self._llm_fn(_PROMPT.format(text=truncated))
+            raw = self._llm_fn(_PROMPT.format(
+                warning=UNTRUSTED_DOCUMENT_WARNING,
+                document=wrap_document(truncated),
+            ))
             parsed = _parse_json(raw)
         except Exception:
             return self._fallback.enrich(text) if self._fallback else _minimal(text)
