@@ -44,12 +44,15 @@ class ColdChunkIndexWarning(UserWarning):
     """
 
 
-# Escape *every* non-alphanumeric character inside a Redis Search TAG filter
-# value — the approach the RediSearch docs recommend. The old hand-picked set
-# missed ``(``, ``)``, ``?`` and ``\``, so a filter value like ``report (1).txt``
-# was a RediSearch syntax error and ``x?y.txt`` / ``a\b.txt`` matched nothing (#149).
-# ``\W`` covers all of them (and leaves ``_`` and alphanumerics untouched).
-_TAG_SPECIAL_RE = re.compile(r'(\W)')
+# Escape every ASCII non-alphanumeric inside a Redis Search TAG filter value — the
+# RediSearch-recommended approach — so ``(``, ``)``, ``?``, ``\``, space, etc. are taken
+# literally (#149). But escape ONLY ASCII: Python's ``\W`` also matched non-ASCII
+# punctuation like ``–`` ``’`` ``×`` and the no-break space, and RediSearch does NOT read
+# an escaped non-ASCII char as that char, so a file name with an en dash or a typographic
+# apostrophe (inserted automatically by macOS/Word) matched nothing (#189). Keeping
+# ``A-Za-z0-9_`` and everything from U+0080 up unescaped leaves alphanumerics and all
+# non-ASCII characters literal, while still escaping ASCII punctuation.
+_TAG_SPECIAL_RE = re.compile(r'([^A-Za-z0-9_\u0080-\U0010FFFF])')
 
 # Fields indexed as TAG in the vector index — used for pre-filtering.
 _FILTER_TAG_FIELDS = ("document_id", "document_type", "file_name", "section_title", "mime_type", "content_type")

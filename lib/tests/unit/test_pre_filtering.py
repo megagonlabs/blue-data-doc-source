@@ -55,6 +55,28 @@ class TestBuildFilterExpr:
         expr = _build_filter_expr({"section_title": "Eligibility Requirements"})
         assert r"\ " in expr or r"\  " in expr or "Eligibility" in expr
 
+    # #189: non-ASCII punctuation must NOT be backslash-escaped — RediSearch does not
+    # read an escaped non-ASCII char as that char, so the filter matched nothing.
+    @pytest.mark.parametrize("ch", [
+        "–",  # – en dash
+        "—",  # — em dash
+        "’",  # ’ typographic apostrophe
+        "“",  # “ left double quote
+        "×",  # × multiplication sign
+        "\xa0",  # no-break space
+        "é",  # é accented letter
+        "日",  # 日 CJK
+    ])
+    def test_non_ascii_char_is_not_escaped(self, ch):
+        expr = _build_filter_expr({"file_name": f"a{ch}b.txt"})
+        assert f"\\{ch}" not in expr   # no backslash before the non-ASCII char
+        assert ch in expr              # the char itself is kept, literal
+
+    def test_ascii_punctuation_still_escaped(self):
+        # #149 behaviour must not regress: ASCII space / parens / dot stay escaped.
+        expr = _build_filter_expr({"file_name": "Q3 (final).pdf"})
+        assert r"Q3\ \(final\)\.pdf" in expr
+
     def test_page_start_exact(self):
         expr = _build_filter_expr({"page_start": 3})
         assert expr == "@page_start:[3 3]"
