@@ -18,6 +18,8 @@ The MCP server exposes blue-data-doc-source as AI-callable tools over the Model 
 
 `find_documents` / `get_document_record` work without a vector store (they read the per-document record store); `find_then_search` and `search_documents` require one. The graph tools require `BLUE_DOC_GRAPH=1`.
 
+The record store is **persistent** — the same Redis as the chunks when `BLUE_DOC_REDIS_*` is set, otherwise a file at `BLUE_DOC_RECORD_STORE` — so `find_documents`, `get_document_record` and delete-by-path keep working across MCP sessions (each client launch is a new server process). Records used to live only in memory, so they vanished between sessions while the chunks remained in Redis (#188).
+
 ## Installation
 
 ```bash
@@ -40,8 +42,13 @@ All configuration is via environment variables:
 | `BLUE_DOC_EMBEDDING` | `dummy` | `openai` or `dummy` |
 | `OPENAI_API_KEY` | — | Required when `BLUE_DOC_EMBEDDING=openai` |
 | `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | OpenAI model name |
-| `BLUE_DOC_REDIS_HOST` | — | Redis host; omit to run without a vector store |
+| `BLUE_DOC_REDIS_URL` | — | Full `redis://`/`rediss://` URL (host, auth, TLS, db); or use `_HOST`/`_PORT` |
+| `BLUE_DOC_REDIS_HOST` | — | Redis host; omit (and no URL) to run without a vector store |
 | `BLUE_DOC_REDIS_PORT` | `6379` | Redis port |
+| `BLUE_DOC_REDIS_USERNAME` / `_PASSWORD` | — | Redis auth (optional) |
+| `BLUE_DOC_REDIS_SSL` | — | `1`/`true` to connect over TLS |
+| `BLUE_DOC_RECORD_STORE` | `~/.blue-doc/records.json` | File record store path, used when no Redis is configured |
+| `BLUE_DOC_RECORD_NAMESPACE` | `bluedoc:records` | Redis key namespace for records when Redis is configured |
 | `BLUE_DOC_COLLECTION` | `documents` | Default collection name |
 | `BLUE_DOC_CHUNK_SIZE` | `1000` | Max words per chunk |
 | `BLUE_DOC_OVERLAP` | `150` | Word overlap between chunks |

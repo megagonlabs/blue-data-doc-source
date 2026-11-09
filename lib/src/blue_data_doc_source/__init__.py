@@ -8,7 +8,7 @@ from .source.document.embeddings import EmbeddingModel, DummyEmbeddingModel, Ope
 from .source.document.enrichment import Enricher, BasicEnricher, LLMEnricher
 from .source.document.graph import GraphIndexer
 from .source.document.parsers import Parser, TextParser, PDFParser, DocxParser, PlumberPDFParser
-from .source.document.redis_env import redis_vector_source_from_env
+from .source.document.redis_env import record_store_from_env, redis_vector_source_from_env
 from .source.document.schema import (
     DocumentClassifier,
     ExtractionValidationError,
@@ -57,4 +57,5 @@ __all__ = [
     "CoverageReport",
     "FindResult",
     "redis_vector_source_from_env",
+    "record_store_from_env",
 ]
