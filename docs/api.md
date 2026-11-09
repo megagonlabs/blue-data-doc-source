@@ -33,6 +33,17 @@ policy (loopback bind + mandatory API key):
 | `BLUE_DOC_API_AUTH_DISABLED` | _(unset)_ | Set truthy (`1`/`true`/`yes`) to run with no API key (local/dev only) |
 | `BLUE_DOC_ROOT` | _(unset)_ | When set, `/documents/ingest` and `/documents/delete` accept only a **filename resolved inside this directory** (no separators, absolute paths, or `..`); anything else returns **400** |
 
+### Record persistence
+
+`/documents/find`, `/documents/find-then-search`, `/documents/record/{id}` and
+delete-by-path read the per-document records written at ingest. These are stored
+**persistently** so they survive a restart alongside the chunks: in the **same Redis**
+as the chunks when `BLUE_DOC_REDIS_*` is configured (namespaced by
+`BLUE_DOC_RECORD_NAMESPACE`, default `bluedoc:records`), otherwise in a file at
+`BLUE_DOC_RECORD_STORE` (default `~/.blue-doc/records.json`). Previously these records
+lived only in memory, so a restart lost FIND / record / path-delete while the chunks
+remained searchable (#188).
+
 ## Authentication
 
 Every route except `GET /documents/health` and the docs routes (`/docs`,

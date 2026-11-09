@@ -55,7 +55,7 @@ def _build_pipeline():
 
     # Forward the whole Redis connection — URL, host/port, username, password, TLS — so a
     # password-protected or TLS Redis works, not just host/port (#195).
-    from blue_data_doc_source import redis_vector_source_from_env
+    from blue_data_doc_source import record_store_from_env, redis_vector_source_from_env
     vector_source = redis_vector_source_from_env("BLUE_DOC")
 
     # Optional entity/structure graph for the graph tools (in-process; opt-in).
@@ -75,6 +75,9 @@ def _build_pipeline():
         # Zero-API-cost classification so document_type + records exist, which the
         # find_documents / get_document_record tools query (#66).
         classifier=KeywordClassifier(),
+        # Persist records (Redis when configured, else a file) so find / record / path-
+        # delete survive the next MCP session instead of being lost with the process (#188).
+        record_store=record_store_from_env("BLUE_DOC"),
         collection=os.getenv("BLUE_DOC_COLLECTION", "documents"),
         ocr_fallback=ocr_fallback,
         graph_source=graph_source,

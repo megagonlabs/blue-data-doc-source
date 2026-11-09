@@ -29,8 +29,10 @@ def _build_pipeline():
         embedding_model = DummyEmbeddingModel()
 
     # Forward the whole Redis connection — URL, host/port, username, password, TLS — so a
-    # password-protected or TLS Redis works, not just host/port (#195).
-    from blue_data_doc_source import redis_vector_source_from_env
+    # password-protected or TLS Redis works, not just host/port (#195). Back the record
+    # store with the SAME Redis (or a file when no Redis), so FIND / record / path-delete
+    # survive a restart instead of living only in memory while the chunks persist (#188).
+    from blue_data_doc_source import record_store_from_env, redis_vector_source_from_env
     vector_source = redis_vector_source_from_env("BLUE_DOC")
 
     ocr_fallback = os.getenv("BLUE_DOC_OCR_FALLBACK", "").lower() in ("1", "true", "yes")
@@ -43,9 +45,8 @@ def _build_pipeline():
         enricher=BasicEnricher(),
         # Zero-API-cost classification so a DocumentRecord is written per document;
         # without it FIND / FIND_THEN_SEARCH / GET_RECORD always return empty (#86).
-        # The API is a long-running process, so the auto-created MemoryRecordStore
-        # persists records for the server's lifetime (same as the MCP server).
         classifier=KeywordClassifier(),
+        record_store=record_store_from_env("BLUE_DOC"),
         collection=os.getenv("BLUE_DOC_COLLECTION", "documents"),
         ocr_fallback=ocr_fallback,
     )
